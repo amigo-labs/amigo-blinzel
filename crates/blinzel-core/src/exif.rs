@@ -149,7 +149,7 @@ pub fn mpf_images(mpf: &[u8], file_len_after_mpf: usize) -> Vec<MpImage> {
         return out;
     };
     let Some(r) = t.payload(e) else { return out };
-    for chunk in mpf[r].chunks_exact(16) {
+    for chunk in mpf[r].as_chunks::<16>().0.iter() {
         let rd = |o: usize| {
             let b: [u8; 4] = chunk[o..o + 4].try_into().unwrap();
             if t.le {

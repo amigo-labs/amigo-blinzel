@@ -162,7 +162,7 @@ pub fn decode(data: &[u8], req: Request) -> Result<Image> {
             }
         }
     }
-    let alpha = if plane.data.chunks_exact(4).any(|p| p[3] != 255) {
+    let alpha = if plane.data.as_chunks::<4>().0.iter().any(|p| p[3] != 255) {
         Alpha::Straight
     } else {
         Alpha::Opaque

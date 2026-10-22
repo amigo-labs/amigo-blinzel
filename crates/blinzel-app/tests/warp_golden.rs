@@ -78,7 +78,9 @@ fn dump(name: &str, size: (u32, u32), got: &[u8], want: &[u8]) {
     let _ = std::fs::create_dir_all(&dir);
     for (suffix, bgra) in [("gpu", got), ("cpu", want)] {
         let rgba: Vec<u8> = bgra
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| [p[2], p[1], p[0], 255])
             .collect();
         let file = std::fs::File::create(dir.join(format!("{name}-{suffix}.png"))).unwrap();
@@ -323,7 +325,7 @@ fn overlay_shapes_and_text_render() {
     );
     let px = target.read_bgra(&gfx.context).unwrap();
     assert!(
-        px.chunks_exact(4).any(|p| p[0] > 200),
+        px.as_chunks::<4>().0.iter().any(|p| p[0] > 200),
         "text produced no pixels"
     );
 }

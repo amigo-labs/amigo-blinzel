@@ -456,7 +456,7 @@ fn decode_region(
 fn cmyk_to_bgra_in_place(p: &mut Plane, inverted: bool) {
     for y in 0..p.height {
         let w = p.width as usize;
-        for px in p.row_mut(y)[..w * 4].chunks_exact_mut(4) {
+        for px in p.row_mut(y)[..w * 4].as_chunks_mut::<4>().0.iter_mut() {
             let (mut c, mut m, mut ye, mut k) =
                 (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
             if !inverted {

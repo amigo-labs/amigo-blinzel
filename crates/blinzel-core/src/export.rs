@@ -135,18 +135,22 @@ fn encode_jpeg(
 }
 
 fn encode_png(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>, String> {
-    let opaque = bgra.chunks_exact(4).all(|p| p[3] == 255);
+    let opaque = bgra.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
     let (color, data): (png::ColorType, Vec<u8>) = if opaque {
         (
             png::ColorType::Rgb,
-            bgra.chunks_exact(4)
+            bgra.as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|p| [p[2], p[1], p[0]])
                 .collect(),
         )
     } else {
         (
             png::ColorType::Rgba,
-            bgra.chunks_exact(4)
+            bgra.as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|p| [p[2], p[1], p[0], p[3]])
                 .collect(),
         )

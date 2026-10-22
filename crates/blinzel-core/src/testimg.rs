@@ -60,7 +60,9 @@ pub fn rgb(w: u32, h: u32) -> Vec<u8> {
 /// One byte per pixel.
 pub fn gray(w: u32, h: u32) -> Vec<u8> {
     rgb(w, h)
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8)
         .collect()
 }
@@ -69,7 +71,7 @@ pub fn gray(w: u32, h: u32) -> Vec<u8> {
 pub fn rgba(w: u32, h: u32) -> Vec<u8> {
     let rgb = rgb(w, h);
     let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
-    for (i, p) in rgb.chunks_exact(3).enumerate() {
+    for (i, p) in rgb.as_chunks::<3>().0.iter().enumerate() {
         let x = i % w.max(1) as usize;
         let a = (x * 255 / w.max(1) as usize) as u8;
         out.extend_from_slice(&[p[0], p[1], p[2], a]);

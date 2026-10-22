@@ -52,7 +52,7 @@ pub fn decode(data: &[u8]) -> Result<Image> {
         let cols = fw.min(w.saturating_sub(fx));
         let dst = &mut plane.row_mut(y)[fx as usize * 4..(fx + cols) as usize * 4];
         dst.copy_from_slice(&src[..cols as usize * 4]);
-        transparent |= src.chunks_exact(4).any(|p| p[3] != 255);
+        transparent |= src.as_chunks::<4>().0.iter().any(|p| p[3] != 255);
     }
     Ok(Image {
         pixels: Pixels::Packed {

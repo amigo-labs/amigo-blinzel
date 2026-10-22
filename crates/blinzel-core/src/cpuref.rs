@@ -168,7 +168,7 @@ mod tests {
 
     fn solid(w: u32, h: u32, bgra: [u8; 4], alpha: Alpha) -> Image {
         let mut plane = Plane::new(w, h, 4);
-        for px in plane.data.chunks_exact_mut(4) {
+        for px in plane.data.as_chunks_mut::<4>().0.iter_mut() {
             px.copy_from_slice(&bgra);
         }
         Image {

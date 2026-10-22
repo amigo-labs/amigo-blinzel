@@ -163,7 +163,7 @@ fn corpus(args: &[String]) -> Result<(), String> {
         // Flat UI-like content compresses very differently from photos.
         let (w, h) = (3840u32, 2160u32);
         let mut px = vec![0u8; (w * h * 3) as usize];
-        for (i, p) in px.chunks_exact_mut(3).enumerate() {
+        for (i, p) in px.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             let (x, y) = (i as u32 % w, i as u32 / w);
             let band = (y / 40 + x / 300) % 5;
             p.copy_from_slice(

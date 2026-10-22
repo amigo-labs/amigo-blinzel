@@ -95,11 +95,21 @@ pub fn decode(data: &[u8]) -> Result<Image> {
 #[inline]
 fn expand(src: &[u8], dst: &mut [u8], src_bpp: usize) {
     if src_bpp == 3 {
-        for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(3)) {
+        for (d, s) in dst
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(src.as_chunks::<3>().0.iter())
+        {
             d.copy_from_slice(&[s[0], s[1], s[2], 255]);
         }
     } else {
-        for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(2)) {
+        for (d, s) in dst
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(src.as_chunks::<2>().0.iter())
+        {
             d.copy_from_slice(&[s[0], s[0], s[0], s[1]]);
         }
     }

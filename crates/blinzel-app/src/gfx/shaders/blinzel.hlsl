@@ -51,20 +51,26 @@ float3 ycc_to_rgb(float y, float cb, float cr)
     return saturate(float3(y + 1.402 * cr, y - 0.344136 * cb - 0.714136 * cr, y + 1.772 * cb));
 }
 
+// Single exit: fxc rejects early returns from a function inlined into a
+// dynamic loop ("potentially uninitialized variable").
 float4 fetch(float2 l)
 {
-    float mode = params.z;
-    float2 uv = (l - tex0.xy) * tex0.zw;
-    if (mode > 1.5)
+    float4 c = t0.SampleLevel(lin, (l - tex0.xy) * tex0.zw, 0);
+    float4 result;
+    if (params.z > 1.5)
     {
-        float y = t0.SampleLevel(lin, uv, 0).r;
         float2 cuv = (l / params.xy - tex1.xy) * tex1.zw;
-        return float4(ycc_to_rgb(y, t1.SampleLevel(lin, cuv, 0).r, t2.SampleLevel(lin, cuv, 0).r), 1.0);
+        result = float4(ycc_to_rgb(c.r, t1.SampleLevel(lin, cuv, 0).r, t2.SampleLevel(lin, cuv, 0).r), 1.0);
     }
-    float4 c = t0.SampleLevel(lin, uv, 0);
-    if (mode > 0.5)
-        return float4(c.rrr, 1.0);
-    return float4(c.rgb, params.w > 0.5 ? 1.0 : c.a);
+    else if (params.z > 0.5)
+    {
+        result = float4(c.rrr, 1.0);
+    }
+    else
+    {
+        result = float4(c.rgb, params.w > 0.5 ? 1.0 : c.a);
+    }
+    return result;
 }
 
 float4 ps_image(VSOut i) : SV_Target
@@ -97,10 +103,9 @@ float4 ps_overlay(VSOut i) : SV_Target
     float cov;
     if (shape > 2.5)
     {
-        float a = t0.SampleLevel(lin, (p - tex0.xy) * tex0.zw, 0).a * color.a;
-        return float4(color.rgb * a, a);
+        cov = t0.SampleLevel(lin, (p - tex0.xy) * tex0.zw, 0).a;
     }
-    if (shape > 0.5 && shape < 1.5)
+    else if (shape > 0.5 && shape < 1.5)
     {
         float2 pa = p - tex1.xy;
         float2 ba = tex1.zw - tex1.xy;

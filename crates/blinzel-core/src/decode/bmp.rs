@@ -177,7 +177,12 @@ pub fn decode(d: &[u8]) -> Result<Image> {
                     .get(r * stride..r * stride + w * 3)
                     .ok_or_else(|| corrupt("truncated pixels"))?;
                 let dst = plane.row_mut(dst_row(r) as u32);
-                for (o, i) in dst.chunks_exact_mut(4).zip(src.chunks_exact(3)) {
+                for (o, i) in dst
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(src.as_chunks::<3>().0.iter())
+                {
                     o.copy_from_slice(&[i[0], i[1], i[2], 255]);
                 }
             }
@@ -198,13 +203,18 @@ pub fn decode(d: &[u8]) -> Result<Image> {
                     // Memory layout already is B, G, R, X/A.
                     dst.copy_from_slice(src);
                     if !has_alpha_mask {
-                        for px in dst.chunks_exact_mut(4) {
+                        for px in dst.as_chunks_mut::<4>().0.iter_mut() {
                             px[3] = 255;
                         }
                     }
                     continue;
                 }
-                for (o, i) in dst.chunks_exact_mut(4).zip(src.chunks_exact(bytes)) {
+                for (o, i) in dst
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(src.chunks_exact(bytes))
+                {
                     let v = if bytes == 2 {
                         u16::from_le_bytes([i[0], i[1]]) as u32
                     } else {

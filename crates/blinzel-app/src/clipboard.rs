@@ -153,7 +153,9 @@ fn dibv5(bgra: &[u8], w: u32, h: u32) -> Vec<u8> {
 
 fn png(bgra: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
     let rgba: Vec<u8> = bgra
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| [p[2], p[1], p[0], p[3]])
         .collect();
     let mut out = Vec::new();
