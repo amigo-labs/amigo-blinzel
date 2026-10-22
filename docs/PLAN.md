@@ -1,0 +1,321 @@
+# amigo-blinzel: Plan
+
+Dieses Dokument ist die verbindliche Planung. Am Ende wird jeder Punkt gegen die Umsetzung geprüft.
+
+**Status-Legende:**
+- ✅ umgesetzt und verifiziert
+- 🟡 umgesetzt, Verifikation (CI oder manuell unter Windows) steht aus
+- ⬜ offen
+
+Stand: 2026-10-22.
+
+---
+
+## 1. Ziel
+
+IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, beim **Durchblättern** und bei **Thumbnails** messbar schneller sein als jede Alternative, und das auf einer Website mit nachvollziehbaren Benchmarks belegen.
+
+**Leitlinie: das Maximum rausholen.** Keine Library wird ungeprüft übernommen. Jeder heiße Pfad wird gemessen, und wo ein Eigenbau schneller ist, bauen wir selbst.
+
+## 2. Entscheidungen
+
+| Thema | Entscheidung |
+|---|---|
+| Sprache | Rust |
+| Plattform | **Nur Windows 11 ab 24H2** (Build 26100+), x64 und ARM64. Nur Versionen mit Microsoft-Support. |
+| Formate | alle inkl. RAW; native Decoder per Benchmark-Gate, sonst WIC |
+| Thumbnails | Filmstreifen + Raster-Browser, beide standardmäßig aus |
+| Resident-Modus | optional (Tray, warm gehalten) |
+| UI | rahmenlos, keine Leisten; links oben ☰, rechts oben Min/Max/Schließen, alles andere im Menü |
+| Ansichtsmodi | Fenster an Bild anpassen (Originalgröße), Bild an Fenster anpassen, 100 % |
+| Sprachen | mehrsprachig, Start mit Deutsch + Englisch |
+| Auswahl | Rechteck; Strg+C kopiert; Strg+X = kopieren + Ansicht zuschneiden |
+| Speichern | Bilddateien werden nie verändert; **Ausschnitt optional speichern** (Strg+S, „Speichern unter“) |
+| Maus | kontextabhängig: Bild passt → Links-Ziehen wählt aus; Bild größer → Links-Ziehen verschiebt, Umschalt+Ziehen wählt aus |
+| Installer | kein Installer-Framework; die Exe installiert sich selbst |
+| Signatur | **SignPath Foundation** (kostenlos für Open Source) |
+| Updates | **still im Hintergrund**: höchstens 1× täglich prüfen, signiertes Update laden, verifizieren, beim nächsten Start aktiv |
+| Website | **Cloudflare Workers** (statische Assets), mit Wettbewerbsvergleich und Benchmarks |
+
+## 3. Methodik: Benchmark-Gate „Library vs. Eigenbau“
+
+`crates/blinzel-bench` erzeugt einen deterministischen Korpus und misst jeden Kandidaten. Eingebaut wird der Gewinner; die Library bleibt Messlatte und Pixel-Referenz.
+
+| Heißer Pfad | Messlatte | Eigenbau-Hebel | Stand |
+|---|---|---|---|
+| JPEG-Decode | libjpeg-turbo, zune-jpeg | eigener paralleler Decoder (M3) | turbojpeg aktiv; zune-jpeg überall langsamer |
+| Weg zur GPU | RGBA vom Decoder | YCbCr-Planes, Farbkonvertierung im Shader | ✅ gemessen: 24 MP 118 statt 147 ms, 45 MP 190 statt 410 ms |
+| PNG | zune-png, png | `png` + eigene fusionierte RGBA-Expansion | ✅ 1,9× (Foto) bzw. 3,2× (Screenshot) schneller als zune-png |
+| Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
+| Thumbnail-Skalierung | fast_image_resize | DCT 1/8 + SIMD-Reducer / GPU | ⬜ M4 |
+| Thumbnail-Speicher | SQLite | eigene Pack-Datei | ⬜ M4 |
+| Verzeichnis | FindFirstFileExW | NtQueryDirectoryFileEx | ⬜ messen (10k-Ordner im App-Bench) |
+
+**Erkenntnis aus den Messungen:** DCT-Skalierung bringt weniger als erwartet (24 MP: 1/8 = 74 ms, voll = 118 ms). Das Huffman-Decoding dominiert. Der **parallele Huffman-Decoder (M3)** ist deshalb der größte verbleibende Hebel; progressive JPEGs (ca. 320 ms) brauchen ihn besonders.
+
+### Eigener JPEG-Decoder `blinzel-jpeg` (M3)
+
+1. **Parallelität innerhalb eines Bildes:**
+   - Restart-Segmente parallel.
+   - Spekulatives paralleles Huffman-Decoding über Selbstsynchronisation (Weißenberger & Schmidt), DC-Korrektur per Prefix-Summe.
+   - Pipeline aus Entropie-Decode und IDCT.
+2. **Weniger Arbeit:**
+   - DCT-Skalierung.
+   - DC-only-Modus für 1/8 und Thumbnails (AC nur überspringen).
+   - YCbCr-Ausgabe.
+   - AVX2/NEON-IDCT.
+3. **Direkt in den Zielspeicher** schreiben.
+
+Reihenfolge der Stufen:
+- sequentielle Baseline
+- Restart-parallel
+- paralleles Huffman
+- DC-only
+- progressive
+
+## 4. Architektur
+
+| Crate | Inhalt | Stand |
+|---|---|---|
+| `blinzel-core` | Pixelpuffer, Pufferpool, Formaterkennung, Decoder (JPEG/turbojpeg, PNG, GIF, eigener BMP), EXIF/MPF, Layout, Auswahl, natsort, Dateiliste, Scheduler, LRU, CPU-Referenz-Renderer, Timing, Settings, Export | 🟡 (auf Linux getestet) |
+| `blinzel-jpeg` | strenger Marker-Parser; Basis für M3 | 🟡 |
+| `blinzel-i18n` | `i18n/*.toml` → statische Tabellen (DE/EN) | 🟡 |
+| `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |
+| `blinzel-app` | `blinzel.exe`: Fenster, Chrome, Menü, D3D11-Renderer, Loader, WIC, Zwischenablage, Dialoge, `--bench` | 🟡 |
+| `blinzel-race` | Wettbewerbs-Benchmark (M8) | ⬜ |
+| `website/` | Website für Cloudflare Workers (M8) | ⬜ |
+
+## 5. Kernprinzipien Start und Blättern
+
+- 🟡 **Kaltstart parallel:**
+  - Der Einzelinstanz-Handoff (`WM_COPYDATA` + `AllowSetForegroundWindow`) kommt zuerst.
+  - Dann wird der Decode-Job eingereiht, und `d3d11.dll` wird per `LoadLibrary` auf einem Worker geladen.
+  - Das Fenster entsteht gecloakt, mit `DWMWA_TRANSITIONS_FORCEDISABLED` und `WS_EX_NOREDIRECTIONBITMAP`.
+  - Die Ordnerliste entsteht im Hintergrund.
+  - Das Fenster wird mit dem ersten Bild entcloakt, spätestens nach 400 ms.
+  - *Abweichung vom ursprünglichen Plan:* Statt den Header vor `CreateWindow` zu lesen, wird das noch unsichtbare Fenster vor dem Entcloaken auf Bildgröße gebracht. Das Ergebnis ist gleich, es blockiert nur nicht.
+- 🟡 **Shader:** vorkompiliert mit fxc. COM, WIC, Direct2D und DirectWrite starten erst bei Bedarf; DirectWrite wird nach dem ersten Present vorgewärmt.
+- 🟡 **Eingebettete Kamera-Vorschau** zuerst, wenn sie mindestens halb so groß wie der Bildschirm ist.
+- 🟡 **Prefetch-Scheduler:**
+  - Zwei Stufen (I/O, CPU), Prioritäten, Generation-Cancel.
+  - Richtungsabhängig: 4 voraus, 2 zurück.
+  - Jede Datei wird nur einmal gelesen; ein Job liefert Vorschau und Stufe.
+- 🟡 **GPU:**
+  - Kachel-Texturen (4096, mit Rand), Upload direkt von Workern.
+  - VRAM-Budget über `QueryVideoMemoryInfo`.
+  - EXIF-Orientierung als Transform, nie Pixel drehen.
+- 🟡 **I/O:**
+  - `ReadFile` mit Pufferpool, kein mmap.
+  - Cloud-Platzhalter werden beim Prefetch übersprungen.
+  - HDD-Erkennung (Seek-Penalty) → 1 I/O-Thread.
+- 🟡 **Hybrid-CPUs:** Worker nur auf P-Kernen (EfficiencyClass), ABOVE_NORMAL, ohne Power-Throttling.
+- 🟡 **Robust:** kein `panic=abort`, jeder Decode läuft in `catch_unwind`.
+- ⬜ **Delay-Load** für shell32/ole32: erst Startzeit messen (`--exit-after-first-frame`), dann entscheiden.
+
+## 6. UI und Fensterverhalten
+
+- 🟡 **Rahmenloses Fenster:**
+  - `WM_NCCALCSIZE` entfernt die Caption; Ränder und Schatten bleiben.
+  - Oberer Resize-Rand und Drag-Streifen per `WM_NCHITTEST`.
+  - Snap-Layouts über `HTMAXBUTTON`.
+- 🟡 **Bedienelemente:** ☰ + Min/Max/Schließen als SDF-Formen über dem Bild, mit Halo und Hover-Flächen (Schließen in Rot).
+- 🟡 **Hamburger-Menü:** natives `TrackPopupMenuEx` im Dark-Mode (uxtheme 135/133/136), lokalisiert.
+- 🟡 **Ansichtsmodi** (1/2/3), Zoom um den Cursor (Rad, +/−, 0), Pan (Maus, Pfeile bei Überlauf), Vollbild (F11, Eingabe, Doppelklick), Drehen nur in der Ansicht (R/L).
+- 🟡 Modus 1 („Originalgröße“): Das Fenster folgt jedem Bild, begrenzt auf den Arbeitsbereich und um die Mitte zentriert.
+- 🟡 Leerer Start zeigt einen Hinweis; Drag & Drop, Strg+O, Entf (Papierkorb), Maus-Zurück/Vor.
+- ⬜ Filmstreifen und Raster (M4).
+- ⬜ Fensterposition und -größe merken.
+
+## 7. Auswahl, Kopieren, Ausschneiden, Speichern
+
+Grundsatz: Bilddateien werden nie überschrieben. Gespeichert wird nur über „Speichern unter“, mit der Überschreib-Rückfrage von Windows.
+
+- 🟡 **Auswahlrechteck** in Vollauflösungs-Koordinaten:
+  - Anfasser, Verschieben, Größenanzeige `B × H` per DirectWrite.
+  - Abgedunkelte Umgebung.
+  - Strg+A, Esc.
+- 🟡 **Strg+C** mit verzögertem Clipboard-Rendering (`CF_DIBV5` + `PNG`): Nur die Region wird decodiert, in voller Auflösung und erst beim Einfügen.
+- 🟡 **Strg+X:** kopieren und die Ansicht auf die Auswahl zuschneiden (reiner Ansichtszustand). Esc bzw. „Original anzeigen“ stellt das Bild wieder her.
+- 🟡 **Strg+S „Ausschnitt speichern unter…“** (Auswahl, sonst Zuschnitt):
+  - **JPEG verlustfrei**, wenn die Quelle ein JPEG ist, der Ausschnitt an MCU-Grenzen beginnt und keine Ansichtsdrehung aktiv ist.
+    - Umsetzung über `tj3Transform`-Crop, ohne Neukodierung, sehr schnell.
+    - Die EXIF-Daten bleiben erhalten, auch die Orientierung.
+    - Das veraltete EXIF-Vorschaubild wird abgehängt, das MPF-Segment entfernt.
+  - **Sonst:**
+    - Region in voller Auflösung decodieren und orientieren.
+    - Als JPEG (Qualität 95, Subsampling der Quelle, ICC-Profil übernommen) oder als PNG speichern.
+  - Läuft im Hintergrund-Thread; Fehler erscheinen als Meldung.
+
+## 8. Mehrsprachigkeit
+
+- 🟡 `i18n/<sprache>.toml`; `build.rs` erzeugt `enum Msg` und statische Tabellen. Zur Laufzeit ist eine Übersetzung nur ein Array-Index.
+- 🟡 Fehlende Keys fallen auf Englisch zurück (Build-Warnung). Platzhalterfehler brechen den Build ab.
+- 🟡 Sprachwahl über `GetUserPreferredUILanguages`; im Menü überschreibbar, ohne Neustart.
+- 🟡 Plural-Regeln (CLDR-Familien).
+- ⬜ RTL-Sprachen.
+
+## 9. Plattform: Windows 11 ab 24H2
+
+Nur Versionen mit Microsoft-Support. Stand Oktober 2026:
+
+| Version | Support |
+|---|---|
+| Windows 11 25H2 | Home/Pro bis Okt. 2027, Enterprise bis Okt. 2028 |
+| Windows 11 24H2 | Enterprise/Education bis Okt. 2027 |
+
+Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur Commercial ESU und LTSC laufen noch.
+
+**Konsequenzen:**
+- 🟡 Minimum Direct3D Feature Level 11_0 und Shader Model 5. Jedes Windows-11-Gerät hat eine DX12/WDDM-2-GPU. Keine FL-10-Fallbacks.
+- 🟡 Versionsprüfung: Build < 26100 → lokalisierte Meldung beim Start bzw. im Installer.
+- 🟡 Anwendungsmanifest: supportedOS, PerMonitorV2, longPathAware, UTF-8-Codepage.
+- 🟡 ARM64-Build im CI (cross von x64); Tests laufen auf x64.
+- Ohne Fallbacks nutzbar: EcoQoS, CPU-Sets, Snap-Layouts, Dark-Mode-Attribute, WIC-Codecs für HEIF, AVIF und WebP (soweit die Store-Erweiterungen installiert sind).
+
+## 10. Installation, Updates, Signierung (M7)
+
+### Setup-Exe
+
+- ⬜ **Release-Assets** pro Release auf GitHub:
+  - `amigo-blinzel-setup-x64.exe` und `amigo-blinzel-setup-arm64.exe`, das ist dieselbe Exe wie der Viewer.
+  - `SHA256SUMS` und `SHA256SUMS.sig`.
+- ⬜ **Installationsdialog:** Als Setup gestartet (Dateiname enthält `setup` oder `--install`), erscheint ein Dialog in Viewer-Optik, rahmenlos und mehrsprachig.
+- ⬜ **Installation pro Benutzer, ohne Admin**, nach `%LOCALAPPDATA%\Programs\amigo-blinzel\`:
+  - Startmenü-Verknüpfung (`IShellLinkW`, AppUserModelID).
+  - Eintrag unter `HKCU\…\Uninstall`.
+  - ProgIDs, Capabilities und RegisteredApplications anlegen.
+  - Danach die Standard-Apps-Seite öffnen (programmatisch setzen erlaubt Windows nicht).
+  - `SHChangeNotify`.
+- ⬜ **Deinstallation:** über die Systemeinstellungen. Die Exe kopiert sich nach `%TEMP%` und räumt von dort auf.
+- ⬜ **Silent-Modus:** `--install --silent` und `--uninstall --silent` (für winget).
+- ⬜ **Versionsprüfung im Setup:** Build < 26100 → abbrechen mit Meldung.
+- ⬜ **winget-Manifest**; ein PR an winget-pkgs nach jedem Release, optional automatisiert.
+
+### Signierung über SignPath Foundation
+
+Voraussetzungen, die bei dir liegen:
+1. ⬜ OSI-Lizenz wählen (z. B. MIT oder Apache-2.0) und als `LICENSE` ins Repo legen. Das Repo ist bereits öffentlich ✅.
+2. ⬜ Antrag bei der SignPath Foundation stellen (Projekt, Code-Signing-Policy, Datenschutz-Seite auf der Website).
+3. ⬜ In SignPath Projekt, Artefakt-Konfiguration und Signing-Policy anlegen; Secret `SIGNPATH_API_TOKEN` und die Org-ID ins Repo.
+
+Umsetzung:
+- ⬜ Release-Workflow bei Tag `v*` auf GitHub-gehosteten Runnern (SignPath prüft die Build-Herkunft):
+  1. x64 und ARM64 bauen.
+  2. Signieren über `signpath/github-action-submit-signing-request` (mit manueller Freigabe in SignPath).
+  3. `SHA256SUMS` erzeugen und mit Ed25519 signieren.
+  4. Release als Entwurf anlegen und veröffentlichen.
+- ⬜ **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest. Grund: Das SignPath-Foundation-Zertifikat signiert viele Open-Source-Projekte. Authenticode allein beweist also nicht, dass es *unsere* Exe ist.
+
+### Self-Updater (still im Hintergrund)
+
+- ⬜ **Prüfen:**
+  - Höchstens 1× pro Tag, frühestens 10 s nach dem Start, auf einem Hintergrund-Thread (nie auf dem kritischen Pfad).
+  - Quelle: `GET https://api.github.com/repos/amigo-labs/amigo-blinzel/releases/latest` über WinHTTP, das per `LoadLibrary` geladen wird und den Proxy des Systems nutzt.
+- ⬜ **Laden** des passenden Assets (x64/ARM64) plus `SHA256SUMS(.sig)` nach `%LOCALAPPDATA%\amigo-blinzel\updates\`.
+- ⬜ **Prüfen in drei Schritten:**
+  1. Ed25519-Signatur der Prüfsummen.
+  2. SHA-256 der Exe.
+  3. Authenticode über `WinVerifyTrust`.
+
+  Erst dann wird getauscht.
+- ⬜ **Tauschen:**
+  - Die laufende Exe in `.old` umbenennen (unter NTFS erlaubt) und die neue an ihren Platz legen.
+  - Der nächste Start nutzt die neue Version ohne Zusatzkosten.
+  - `.old` wird beim nächsten Start gelöscht.
+- ⬜ **Rollback:** Startet die neue Version dreimal nicht bis zum ersten Frame, wird `.old` zurückgeholt.
+- ⬜ **Menü:** „Nach Updates suchen“ und „Über amigo-blinzel (Version)“. Einstellung `auto_update = true`.
+
+## 11. Website und Wettbewerbsvergleich (M8)
+
+### Website auf Cloudflare Workers
+
+- ⬜ `website/`: statisches HTML/CSS mit minimalem JS, extrem schnell (passend zum Produkt), Deutsch und Englisch.
+  - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz, Code-Signing-Policy (für SignPath).
+  - Charts werden beim Build als Inline-SVG aus den Benchmark-JSONs erzeugt; keine Chart-Library im Browser.
+  - Der Download-Link zeigt auf `releases/latest/download/amigo-blinzel-setup-x64.exe` (stabile URL).
+- ⬜ **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml`), per GitHub Action (`cloudflare/wrangler-action`) bei Änderungen an `website/` und bei jedem Release.
+  - Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (bei dir).
+  - Zunächst die `workers.dev`-Subdomain; eine eigene Domain kann jederzeit dazukommen.
+
+### Wettbewerbs-Benchmark `blinzel-race`
+
+Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
+
+- ⬜ **Kandidaten:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Fotos; optional JPEGView und qimgv. Jeweils mit Standardeinstellungen; Versionen werden protokolliert.
+- ⬜ **Messgrößen:**
+  1. **Öffnen:** Zeit vom Prozessstart bis das Bild sichtbar ist, warm und kalt (Standby-Liste geleert).
+     - Erkannt über die Desktop Duplication API (Frame-Zeitstempel `LastPresentTime`).
+     - Die Testbilder tragen eine eindeutige Farbsignatur.
+  2. **Weiterblättern:** `SendInput` (Pfeil rechts), Zeit bis die Farbsignatur wechselt; einzeln nach Leerlauf (Prefetch-Fall) und als Dauerfeuer mit 30 Hz (wie viele Bilder werden wirklich gezeigt).
+  3. **Thumbnails** (ab M4): Zeit bis das Raster eines 1000er-Ordners gefüllt ist, für Viewer mit Raster-Modus.
+- ⬜ **Fairness und Recht:**
+  - Gleiche Maschine, gleiche Dateien, 10 Wiederholungen, Median und p95.
+  - Rohdaten, Versionen und Methodik werden veröffentlicht.
+  - Damit sachlich, nachprüfbar und relevant, wie es vergleichende Werbung (UWG §6) verlangt.
+- ⬜ **Zahlen:** Referenzwerte von einer definierten Referenzmaschine (Hardware wird angegeben). CI-Werte nur als Trend.
+- ⬜ **Vergleichstabelle der Funktionen:** Formate, Startzeit, Speicherbedarf, Größe der Installation, Lizenz, Werbung/Telemetrie, ARM64-nativ.
+
+## 12. Meilensteine
+
+| | Inhalt | Ziel | Status |
+|---|---|---|---|
+| **M0** | Workspace, CI (Linux + Windows), Korpus, Bench-Harness | Baseline-JSON im CI | 🟡 |
+| **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
+| **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
+| **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | ⬜ |
+| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
+| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
+| **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | ⬜ |
+| **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | ⬜ |
+| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | ⬜ |
+
+**Reihenfolge:**
+1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
+2. M3.
+3. M7, damit Releases früh signiert verteilt werden können.
+4. M8 (Website mit ersten Vergleichszahlen für Öffnen und Blättern).
+5. M4, M5, M6. Die Website-Zahlen werden mit jedem Meilenstein ergänzt.
+
+## 13. Verifikation
+
+- **Linux (Container/CI):**
+  - `cargo test --workspace`: core, jpeg, i18n, Scheduler, Layout, Auswahl, Export.
+  - `cargo clippy -D warnings`, `cargo fmt --check`.
+  - `cargo xwin clippy --target x86_64-pc-windows-msvc`.
+- **Windows-CI:**
+  - Build, Tests, WARP-Golden-Tests (Shader gegen CPU-Referenz: Orientierungen, Kachelnähte, Zoom, Zuschnitt, Grau, Alpha, Text).
+  - `blinzel-bench`, `blinzel.exe --bench`, Startup-Smoke-Test.
+  - ARM64-Build.
+- **Manuell unter Windows 11:**
+  - Doppelklick-Start und Blättern (auch Dauerfeuer).
+  - Ansichtsmodi, Snap-Layouts, Menü per Maus und Tastatur, Sprachwechsel.
+  - Auswahl → Einfügen in Paint/Word/GIMP; Strg+X/Esc; Strg+S mit beiden Pfaden (verlustfrei und neu kodiert).
+  - Papierkorb, Drag & Drop, Einzelinstanz.
+- **Release (M7):** Signatur prüfen (Eigenschaften → Digitale Signaturen); Update-Pfad von v0.x.y nach v0.x.y+1 auf einer sauberen VM.
+
+## 14. Offene Punkte, die bei dir liegen
+
+- ⬜ Lizenz wählen (Voraussetzung für die SignPath Foundation).
+- ⬜ SignPath-Foundation-Antrag sowie `SIGNPATH_API_TOKEN` und Org-ID als Repo-Secrets.
+- ⬜ Cloudflare-Konto: `CLOUDFLARE_API_TOKEN` (Workers bearbeiten) und `CLOUDFLARE_ACCOUNT_ID` als Repo-Secrets; optional eine Domain.
+- ⬜ Referenzmaschine für die Website-Benchmarks festlegen.
+- ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
+
+## 15. Messwerte (Stand)
+
+Linux-Container, 4 vCPU, ein Kern je Decode, Bench im Schnellmodus:
+
+| Fall | Ergebnis |
+|---|---|
+| JPEG 24 MP, voll | turbojpeg YCbCr 118 ms; BGRA 147 ms; zune-jpeg 202 ms |
+| JPEG 24 MP, Bildschirm (1440p) | 92 ms |
+| JPEG 24 MP, 1/8 | 74 ms |
+| JPEG 24 MP, progressiv | ca. 320 ms, unabhängig von der Skalierung |
+| JPEG 45 MP | YCbCr 190 ms; BGRA 410 ms |
+| PNG 12 MP RGB | eigener Pfad 117 ms; png 132 ms; zune-png 216 ms |
+| PNG 8 MP Screenshot | eigener Pfad 8,4 ms; beide Libraries mit RGBA-Expansion 24–27 ms |
+| natürliche Sortierung, 10k Namen | 2,5 ms |
+| Puffer 96 MB | Pool 0,6 ms; neu 40 ms |
+| `blinzel.exe` (x64, Release, statische CRT) | 1,49 MB |
+
+Windows-Werte folgen aus dem CI (Artefakt `windows-bench-and-exe`).

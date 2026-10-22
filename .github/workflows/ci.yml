@@ -28,7 +28,8 @@ jobs:
 
   windows:
     name: Windows (build, tests, WARP, bench)
-    runs-on: windows-latest
+    # Windows Server 2025 = build 26100, the same base as Windows 11 24H2.
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -72,3 +73,25 @@ jobs:
             target/release/blinzel.exe
             target/release/blinzel.pdb
             target/warp-golden/
+
+  windows-arm64:
+    name: Windows ARM64 (cross build)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: arm64
+      - run: cargo build --release --target aarch64-pc-windows-msvc -p blinzel-app
+      - name: Exe size
+        shell: pwsh
+        run: |
+          $size = (Get-Item target/aarch64-pc-windows-msvc/release/blinzel.exe).Length
+          "blinzel.exe (ARM64): {0:N0} bytes" -f $size | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-exe
+          path: target/aarch64-pc-windows-msvc/release/blinzel.exe

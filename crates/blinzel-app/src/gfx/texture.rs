@@ -1,8 +1,8 @@
 //! Uploading decoded images as immutable textures, tiled.
 //!
 //! Every image is cut into tiles of at most `tile` texels per edge (4096 by
-//! default): upload spikes stay bounded, feature-level-10 GPUs (8192 max)
-//! work, and nothing ever exceeds the 16384 limit. Each tile texture carries
+//! default): upload spikes stay bounded, eviction is finer-grained, and
+//! nothing ever exceeds the 16384 limit. Each tile texture carries
 //! a small border of neighbouring texels so bilinear and box filtering are
 //! seamless across tiles. Sub-rectangles are uploaded straight from the
 //! decoder's planes via the row pitch, without copying.

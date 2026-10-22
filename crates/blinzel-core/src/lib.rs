@@ -8,6 +8,7 @@ pub mod cache;
 pub mod cpuref;
 pub mod decode;
 pub mod exif;
+pub mod export;
 pub mod filelist;
 pub mod format;
 pub mod geom;

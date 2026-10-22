@@ -10,7 +10,7 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL,
-    D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+    D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, ID3D11Device,
@@ -57,12 +57,8 @@ impl Gfx {
     /// usable GPU exists.
     pub fn create(warp: bool) -> windows::core::Result<Gfx> {
         let create = load_create_device()?;
-        let levels = [
-            D3D_FEATURE_LEVEL_11_1,
-            D3D_FEATURE_LEVEL_11_0,
-            D3D_FEATURE_LEVEL_10_1,
-            D3D_FEATURE_LEVEL_10_0,
-        ];
+        // Windows 11 requires a DX12/WDDM 2 GPU, so 11_0 is always there.
+        let levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0];
         let attempt = |driver: D3D_DRIVER_TYPE, levels: &[D3D_FEATURE_LEVEL]| {
             let mut device = std::ptr::null_mut();
             let mut context = std::ptr::null_mut();
@@ -97,9 +93,7 @@ impl Gfx {
         };
         let mut last_err = None;
         for &driver in drivers {
-            // Windows 7-era runtimes reject 11_1 in the list; retry without.
-            let result = attempt(driver, &levels).or_else(|_| attempt(driver, &levels[1..]));
-            match result {
+            match attempt(driver, &levels) {
                 Ok((device, context, feature_level)) => {
                     let dxgi: IDXGIDevice1 = device.cast()?;
                     // One queued frame: input-to-photon latency over throughput.
@@ -121,13 +115,9 @@ impl Gfx {
         Err(last_err.unwrap())
     }
 
-    /// Largest texture edge the device supports.
+    /// Largest texture edge (feature level 11_0 and up).
     pub fn max_texture_size(&self) -> u32 {
-        if self.feature_level.0 >= D3D_FEATURE_LEVEL_11_0.0 {
-            16384
-        } else {
-            8192
-        }
+        16384
     }
 
     /// Bytes of video memory we allow ourselves to keep in textures.

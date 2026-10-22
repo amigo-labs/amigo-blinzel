@@ -1,5 +1,5 @@
-// amigo-blinzel shaders (Shader Model 4.0: runs on every D3D11 GPU down to
-// feature level 10.0). Compiled to DXBC by fxc at build time; nothing is
+// amigo-blinzel shaders (Shader Model 5.0: every Windows 11 GPU has feature
+// level 11_0). Compiled to DXBC by fxc at build time; nothing is
 // compiled at runtime.
 //
 // One vertex shader expands a quad from the constant buffer (no vertex

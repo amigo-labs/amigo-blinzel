@@ -154,6 +154,9 @@ pub fn run() -> i32 {
         .and_then(blinzel_i18n::lang_from_code)
         .unwrap_or_else(system_language);
     set_lang(lang);
+    if !crate::platform::os::is_supported() {
+        return fatal(tr(Msg::ErrorOs));
+    }
 
     if let Some(file) = &args.file
         && settings.single_instance

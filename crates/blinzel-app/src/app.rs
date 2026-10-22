@@ -53,10 +53,21 @@ pub enum Action {
     Minimize,
     OpenDialog,
     Recycle(PathBuf),
+    /// Ask for a file name, then save the cutout in the background.
+    SaveCutout(SaveJob),
     Close,
     Activate,
     Uncloak,
     Quit,
+}
+
+/// A cutout to save (selection, otherwise the view crop).
+#[derive(Debug, Clone)]
+pub struct SaveJob {
+    pub source: PathBuf,
+    pub cut: blinzel_core::export::Cutout,
+    pub default_name: String,
+    pub prefer_png: bool,
 }
 
 pub struct Current {
@@ -116,6 +127,8 @@ pub struct App {
     first_image_shown: bool,
     sized_for: Option<u64>,
     pub exit_after_first_frame: Option<PathBuf>,
+    /// Short message shown at the bottom (saved, errors), cleared by timer.
+    pub notice: Option<String>,
 }
 
 impl App {
@@ -164,6 +177,7 @@ impl App {
             first_image_shown: false,
             sized_for: None,
             exit_after_first_frame: None,
+            notice: None,
         }
     }
 
@@ -599,6 +613,7 @@ impl App {
         if !showed_image {
             self.draw_message();
         }
+        self.draw_notice();
         if !self.fullscreen {
             let chrome = self
                 .chrome()
@@ -950,6 +965,7 @@ impl App {
             VK_X if ctrl => self.command(Cmd::Cut),
             VK_A if ctrl => self.command(Cmd::SelectAll),
             VK_O if ctrl => self.command(Cmd::Open),
+            VK_S if ctrl => self.command(Cmd::SaveCutout),
             VK_W if ctrl => vec![Action::Close],
             VK_DELETE => self.command(Cmd::Recycle),
             VK_ESCAPE => self.escape(),
@@ -1115,6 +1131,10 @@ impl App {
                 vec![]
             }
             Cmd::Exit => vec![Action::Close],
+            Cmd::SaveCutout => match self.save_job() {
+                Some(job) => vec![Action::SaveCutout(job)],
+                None => vec![],
+            },
         }
     }
 
@@ -1140,6 +1160,74 @@ impl App {
                 orientation: o,
             });
         }
+    }
+
+    /// The selection (or, without one, the view crop) as a save job.
+    fn save_job(&self) -> Option<SaveJob> {
+        let cur = self.current.as_ref()?;
+        let p = self.probes.get(&cur.cache_id)?;
+        let view = p.orientation.then(self.user_rotation);
+        let (ow, oh) = view.oriented_size(p.width, p.height);
+        let rect = self
+            .selection
+            .and_then(|s| s.to_pixels(ow, oh))
+            .or(self.view.crop)?;
+        let stored_rect = selection::to_stored(&rect, view, (p.width, p.height));
+        let prefer_png = p.format != blinzel_core::format::Format::Jpeg;
+        let stem = cur
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let ext = if prefer_png { "png" } else { "jpg" };
+        Some(SaveJob {
+            source: cur.path.clone(),
+            cut: blinzel_core::export::Cutout {
+                stored_rect,
+                file_orientation: p.orientation,
+                view_orientation: view,
+            },
+            default_name: format!("{stem}_{}.{ext}", tr(Msg::SaveSuffix)),
+            prefer_png,
+        })
+    }
+
+    pub fn show_notice(&mut self, text: String) {
+        self.notice = Some(text);
+        self.invalidate();
+    }
+
+    fn draw_notice(&mut self) {
+        let Some(text) = self.notice.clone() else {
+            return;
+        };
+        let s = self.scale();
+        let (cw, ch) = (self.client.0 as f64, self.client.1 as f64);
+        let ctx = self.gfx.context.clone();
+        let Some(t) = self.text() else { return };
+        let Ok(t) = t.get(&text, (13.0 * s) as f32, (cw * 0.8).max(100.0) as f32) else {
+            return;
+        };
+        let (srv, size) = (t.srv.clone(), t.size);
+        let pad = 8.0 * s;
+        let (w, h) = (size.0 as f64 + 2.0 * pad, size.1 as f64 + 2.0 * pad);
+        let x = ((cw - w) / 2.0).round();
+        let y = (ch - h - 24.0 * s).round();
+        self.renderer.draw_shapes(
+            &ctx,
+            &[Shape::Fill {
+                rect: Rect::new(x, y, w, h),
+                radius: (6.0 * s) as f32,
+                color: Rgba(0.0, 0.0, 0.0, 0.78),
+            }],
+        );
+        self.renderer.draw_text(
+            &ctx,
+            &srv,
+            ((x + pad) as f32, (y + pad) as f32),
+            size,
+            Rgba(1.0, 1.0, 1.0, 1.0),
+        );
     }
 
     /// After the file was moved to the recycle bin.

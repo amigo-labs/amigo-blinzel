@@ -37,8 +37,21 @@ mod ffi {
         pub h: c_int,
     }
 
+    /// tjtransform; `custom_filter` is unused (NULL).
+    #[repr(C)]
+    pub struct Transform {
+        pub r: Region,
+        pub op: c_int,
+        pub options: c_int,
+        pub data: *mut c_void,
+        pub custom_filter: *const c_void,
+    }
+
     pub const INIT_COMPRESS: c_int = 0;
     pub const INIT_DECOMPRESS: c_int = 1;
+    pub const INIT_TRANSFORM: c_int = 2;
+
+    pub const XOPT_CROP: c_int = 1 << 2;
 
     pub const P_QUALITY: c_int = 3;
     pub const P_SUBSAMP: c_int = 4;
@@ -98,6 +111,16 @@ mod ffi {
         ) -> c_int;
         pub fn tj3YUVPlaneWidth(component: c_int, width: c_int, subsamp: c_int) -> c_int;
         pub fn tj3YUVPlaneHeight(component: c_int, height: c_int, subsamp: c_int) -> c_int;
+        pub fn tj3SetICCProfile(handle: *mut c_void, icc: *mut c_uchar, size: usize) -> c_int;
+        pub fn tj3Transform(
+            handle: *mut c_void,
+            jpeg: *const c_uchar,
+            size: usize,
+            n: c_int,
+            dst: *mut *mut c_uchar,
+            dst_sizes: *mut usize,
+            transforms: *const Transform,
+        ) -> c_int;
         pub fn tj3Compress8(
             handle: *mut c_void,
             src: *const c_uchar,
@@ -506,6 +529,54 @@ pub fn encode_rgb(pixels: &[u8], width: u32, height: u32, opts: EncodeOptions) -
             &mut size,
         )
     };
+    take_output(&tj, rc, out, size)
+}
+
+/// Compresses tightly packed BGRA (alpha ignored) at `quality` with the
+/// given subsampling (444/422/420/440), embedding `icc` if given.
+pub fn encode_bgra(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    subsampling: u16,
+    icc: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    assert_eq!(pixels.len(), width as usize * height as usize * 4);
+    let tj = Tj::new(ffi::INIT_COMPRESS)?;
+    tj.set(ffi::P_QUALITY, quality as c_int)?;
+    let samp = match subsampling {
+        444 => ffi::SAMP_444,
+        422 => ffi::SAMP_422,
+        440 => ffi::SAMP_440,
+        _ => ffi::SAMP_420,
+    };
+    tj.set(ffi::P_SUBSAMP, samp)?;
+    if let Some(icc) = icc {
+        let mut copy = icc.to_vec();
+        if unsafe { ffi::tj3SetICCProfile(tj.0, copy.as_mut_ptr(), copy.len()) } != 0 {
+            return Err(tj.error());
+        }
+    }
+    let mut out: *mut c_uchar = std::ptr::null_mut();
+    let mut size: usize = 0;
+    let rc = unsafe {
+        ffi::tj3Compress8(
+            tj.0,
+            pixels.as_ptr(),
+            width as c_int,
+            (width * 4) as c_int,
+            height as c_int,
+            ffi::PF_BGRA,
+            &mut out,
+            &mut size,
+        )
+    };
+    take_output(&tj, rc, out, size)
+}
+
+/// Copies a TurboJPEG-allocated output buffer into a Vec and frees it.
+fn take_output(tj: &Tj, rc: c_int, out: *mut c_uchar, size: usize) -> Result<Vec<u8>> {
     if rc != 0 {
         if !out.is_null() {
             unsafe { ffi::tj3Free(out.cast()) };
@@ -515,6 +586,29 @@ pub fn encode_rgb(pixels: &[u8], width: u32, height: u32, opts: EncodeOptions) -
     let v = unsafe { std::slice::from_raw_parts(out, size) }.to_vec();
     unsafe { ffi::tj3Free(out.cast()) };
     Ok(v)
+}
+
+/// Lossless crop (no re-encoding): `r` must start on an iMCU boundary of
+/// the stored image. All markers (EXIF, ICC, …) are copied unchanged.
+pub fn lossless_crop(data: &[u8], r: PixelRect) -> Result<Vec<u8>> {
+    let tj = Tj::new(ffi::INIT_TRANSFORM)?;
+    let t = ffi::Transform {
+        r: ffi::Region {
+            x: r.x as c_int,
+            y: r.y as c_int,
+            w: r.w as c_int,
+            h: r.h as c_int,
+        },
+        op: 0,
+        options: ffi::XOPT_CROP,
+        data: std::ptr::null_mut(),
+        custom_filter: std::ptr::null(),
+    };
+    let mut out: *mut c_uchar = std::ptr::null_mut();
+    let mut size: usize = 0;
+    let rc =
+        unsafe { ffi::tj3Transform(tj.0, data.as_ptr(), data.len(), 1, &mut out, &mut size, &t) };
+    take_output(&tj, rc, out, size)
 }
 
 #[cfg(test)]

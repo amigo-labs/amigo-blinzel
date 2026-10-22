@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SHADERS: &[(&str, &str, &str)] = &[
-    ("vs_main", "vs_4_0", "vs.cso"),
-    ("ps_image", "ps_4_0", "ps_image.cso"),
-    ("ps_overlay", "ps_4_0", "ps_overlay.cso"),
+    ("vs_main", "vs_5_0", "vs.cso"),
+    ("ps_image", "ps_5_0", "ps_image.cso"),
+    ("ps_overlay", "ps_5_0", "ps_overlay.cso"),
 ];
 
 fn main() {
@@ -49,6 +49,22 @@ fn main() {
         }
     }
     println!("cargo:rustc-check-cfg=cfg(blinzel_no_shaders)");
+
+    // Application manifest (supported OS, PerMonitorV2, long paths, UTF-8).
+    // Embedded by MSVC's link.exe; lld-link without libxml2 (Linux cross
+    // checks) cannot merge manifests, so it is skipped there.
+    let manifest =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("res/blinzel.manifest");
+    println!("cargo:rerun-if-changed={}", manifest.display());
+    if target_windows && cfg!(windows) && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
+            manifest.display()
+        );
+        println!("cargo:rustc-link-arg-bins=/MANIFESTUAC:NO");
+    }
 }
 
 /// `FXC` env var, else the newest `Windows Kits\10\bin\<ver>\x64\fxc.exe`.

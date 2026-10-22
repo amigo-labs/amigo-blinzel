@@ -2,6 +2,7 @@
 
 pub mod enumerate;
 pub mod io;
+pub mod os;
 pub mod threads;
 
 use std::ffi::OsStr;

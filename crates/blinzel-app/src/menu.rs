@@ -30,6 +30,7 @@ pub enum Cmd {
     Cut,
     SelectAll,
     ShowOriginal,
+    SaveCutout,
     Next,
     Prev,
     First,
@@ -65,6 +66,7 @@ impl Cmd {
             Cmd::Last => 19,
             Cmd::Recycle => 20,
             Cmd::Exit => 21,
+            Cmd::SaveCutout => 22,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -85,7 +87,7 @@ impl Cmd {
     }
 }
 
-const ALL: [Cmd; 21] = [
+const ALL: [Cmd; 22] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -107,6 +109,7 @@ const ALL: [Cmd; 21] = [
     Cmd::Last,
     Cmd::Recycle,
     Cmd::Exit,
+    Cmd::SaveCutout,
 ];
 
 /// State the menu reflects.
@@ -293,6 +296,13 @@ fn build(s: &MenuState) -> Option<HMENU> {
         Some(tr(Msg::KeyEsc).into()),
         false,
         s.is_cropped,
+    );
+    m.item(
+        Cmd::SaveCutout,
+        tr(Msg::SaveCutout),
+        Some(accel(&[ctrl, "S"])),
+        false,
+        s.has_selection || s.is_cropped,
     );
     m.separator();
 

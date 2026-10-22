@@ -15,6 +15,7 @@ Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben
 | Links ziehen | Bild passt ins Fenster: Auswahl · Bild größer als das Fenster: verschieben (Umschalt+Ziehen = Auswahl) |
 | Mittlere Maustaste | verschieben |
 | Strg+C / Strg+X / Strg+A | Auswahl kopieren / ausschneiden (Ansicht wird zugeschnitten) / alles auswählen |
+| Strg+S | Ausschnitt speichern unter … (JPEG verlustfrei, wo möglich) |
 | Esc | Auswahl aufheben → Original anzeigen → Vollbild verlassen → schließen |
 | R / L | drehen (nur Ansicht) |
 | F11 / Eingabe / Doppelklick | Vollbild |
@@ -22,6 +23,12 @@ Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben
 | Strg+O, Drag & Drop | öffnen |
 
 Bilddateien werden nie verändert. Kopieren ist sofort fertig: Die Pixel werden erst beim Einfügen decodiert, und zwar nur der ausgewählte Bereich in voller Auflösung.
+
+Ein Ausschnitt lässt sich als neue Datei speichern. Bei JPEG-Quellen werden dabei, wenn möglich, die DCT-Koeffizienten verlustfrei übernommen statt neu kodiert.
+
+**Systemvoraussetzung:** Windows 11 ab Version 24H2, x64 oder ARM64.
+
+Der vollständige Plan mit allen Entscheidungen und Checklisten steht in [docs/PLAN.md](docs/PLAN.md).
 
 ## Woher die Geschwindigkeit kommt
 
