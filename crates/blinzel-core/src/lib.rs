@@ -1,0 +1,21 @@
+//! Platform-independent core of amigo-blinzel: decoding at the resolution
+//! the screen needs, view layout, selection, prefetch scheduling, caches.
+//! Everything here is unit-tested on Linux; the Windows app wires it to
+//! Win32 and Direct3D.
+
+pub mod bufpool;
+pub mod cache;
+pub mod cpuref;
+pub mod decode;
+pub mod exif;
+pub mod filelist;
+pub mod format;
+pub mod geom;
+pub mod layout;
+pub mod natsort;
+pub mod pixel;
+pub mod sched;
+pub mod selection;
+pub mod settings;
+pub mod testimg;
+pub mod timing;

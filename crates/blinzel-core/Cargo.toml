@@ -1,0 +1,18 @@
+[package]
+name = "blinzel-core"
+description = "Platform-independent viewer core: decoding, layout, selection, scheduling, caching"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = ["turbojpeg"]
+# libjpeg-turbo as the JPEG baseline until blinzel-jpeg beats it (M3).
+turbojpeg = ["dep:turbojpeg-sys"]
+
+[dependencies]
+blinzel-jpeg.workspace = true
+turbojpeg-sys = { workspace = true, optional = true }
+png.workspace = true
+gif.workspace = true

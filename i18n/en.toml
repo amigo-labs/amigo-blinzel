@@ -1,0 +1,68 @@
+# Reference language: every key must exist here. Other languages fall back to
+# these strings for keys they do not (yet) translate.
+
+[meta]
+name = "English"
+plural = "one-other"
+
+[messages]
+app_name = "amigo-blinzel"
+window_title = "{name} – amigo-blinzel"
+position = "{index} / {total}"
+
+menu_open = "Open…"
+menu_view = "View"
+view_fit_window_to_image = "Fit window to image (original size)"
+view_fit_image_to_window = "Fit image to window"
+view_actual_size = "100 % (actual pixels)"
+view_no_upscale = "Don't enlarge small images"
+menu_zoom = "Zoom"
+zoom_in = "Zoom in"
+zoom_out = "Zoom out"
+zoom_reset = "Reset zoom"
+menu_rotate = "Rotate (view only)"
+rotate_right = "Rotate right"
+rotate_left = "Rotate left"
+fullscreen = "Full screen"
+
+copy = "Copy"
+cut = "Cut (crop view to selection)"
+select_all = "Select all"
+show_original = "Show original"
+
+nav_next = "Next image"
+nav_prev = "Previous image"
+nav_first = "First image"
+nav_last = "Last image"
+recycle = "Move to Recycle Bin"
+
+menu_language = "Language"
+language_auto = "Automatic (system)"
+exit = "Exit"
+
+button_menu = "Menu"
+button_minimize = "Minimize"
+button_maximize = "Maximize"
+button_restore = "Restore down"
+button_close = "Close"
+
+key_ctrl = "Ctrl"
+key_shift = "Shift"
+key_del = "Del"
+key_home = "Home"
+key_end = "End"
+key_enter = "Enter"
+key_esc = "Esc"
+key_right = "Right"
+key_left = "Left"
+
+open_filter_images = "Images"
+open_filter_all = "All files"
+
+error_open = "Could not open “{name}”: {reason}"
+error_unsupported = "unsupported or damaged image format"
+error_empty_folder = "No images in this folder"
+
+[messages.images_count]
+one = "{n} image"
+other = "{n} images"

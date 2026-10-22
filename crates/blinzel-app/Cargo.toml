@@ -1,0 +1,5 @@
+[package]
+name = "blinzel-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
