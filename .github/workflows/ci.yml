@@ -48,8 +48,21 @@ jobs:
         run: cargo run --release -p blinzel-bench -- corpus testdata/generated
       - name: Library vs. own code benchmarks
         run: cargo run --release -p blinzel-bench -- run testdata/generated --json bench-libs-windows.json
-      - name: App benchmark (WARP, offscreen)
-        run: target/release/blinzel.exe --bench testdata/generated --warp --json bench-app-windows.json
+      # blinzel.exe is a GUI-subsystem program: PowerShell would not wait
+      # for it without Start-Process -Wait.
+      - name: App benchmark (offscreen, WARP)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target/release/blinzel.exe -ArgumentList '--bench','testdata/generated','--warp','--json','bench-app-windows.json' -Wait -PassThru -NoNewWindow
+          Get-Content bench-app-windows.json
+          exit $p.ExitCode
+      - name: Startup smoke test (window, first frame)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target/release/blinzel.exe -ArgumentList 'testdata/generated/jpeg-24mp-420.jpg','--exit-after-first-frame','--json','bench-startup-windows.json' -Wait -PassThru -NoNewWindow
+          if (Test-Path bench-startup-windows.json) { Get-Content bench-startup-windows.json }
+          exit $p.ExitCode
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -58,3 +71,4 @@ jobs:
             bench-*.json
             target/release/blinzel.exe
             target/release/blinzel.pdb
+            target/warp-golden/

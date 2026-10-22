@@ -78,6 +78,11 @@ impl Probe {
     }
 }
 
+/// Validates dimensions reported by an external decoder.
+pub fn probe_size_ok(w: u32, h: u32) -> Result<()> {
+    check_size(w as u64, h as u64)
+}
+
 pub(crate) fn check_size(w: u64, h: u64) -> Result<()> {
     if w == 0 || h == 0 {
         return Err(DecodeError::Corrupt("zero size".into()));

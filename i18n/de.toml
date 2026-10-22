@@ -58,6 +58,7 @@ open_filter_all = "Alle Dateien"
 
 error_open = "„{name}“ konnte nicht geöffnet werden: {reason}"
 error_unsupported = "nicht unterstütztes oder beschädigtes Bildformat"
+hint_open = "Bild hierher ziehen oder Strg+O drücken"
 error_empty_folder = "Keine Bilder in diesem Ordner"
 
 [messages.images_count]

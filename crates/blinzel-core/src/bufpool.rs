@@ -47,6 +47,11 @@ impl PoolBuf {
         self.len == 0
     }
 
+    /// Shortens the buffer (e.g. after a short read).
+    pub fn truncate(&mut self, len: usize) {
+        self.len = self.len.min(len);
+    }
+
     /// Bytes actually held (size class capacity).
     pub fn capacity(&self) -> usize {
         self.vec.len()

@@ -1,0 +1,717 @@
+//! Window class, window procedure and the frameless frame.
+//!
+//! The caption is removed in `WM_NCCALCSIZE` (left, right and bottom keep
+//! their invisible resize borders, so DWM still draws the shadow and Aero
+//! snap works). The top resize edge, the drag strip and the caption buttons
+//! come from `WM_NCHITTEST`; reporting `HTMAXBUTTON` gives Windows 11 snap
+//! layouts on hover.
+
+use std::cell::RefCell;
+use std::path::PathBuf;
+
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
+use windows::Win32::Graphics::Gdi::{ScreenToClient, ValidateRect};
+use windows::Win32::System::DataExchange::COPYDATASTRUCT;
+use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+use windows::Win32::UI::HiDpi::GetSystemMetricsForDpi;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
+    TrackMouseEvent, VK_CONTROL, VK_F10, VK_SHIFT,
+};
+use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+use crate::app::{Action, App, CursorKind, WM_DIR_CHANGED, WM_LIST, monitor_rect};
+use crate::chrome::Button;
+use crate::loader::WM_LOADED;
+use crate::{clipboard, instance, menu, platform};
+
+thread_local! {
+    pub static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+}
+
+const TIMER_UNCLOAK: usize = 1;
+
+/// Runs `f` on the app state unless it is already borrowed (re-entrant
+/// message); `None` then.
+pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
+    APP.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut g) => g.as_mut().map(f),
+        Err(_) => None,
+    })
+}
+
+fn lo_word(v: isize) -> i32 {
+    (v & 0xFFFF) as i16 as i32
+}
+
+fn hi_word(v: isize) -> i32 {
+    ((v >> 16) & 0xFFFF) as i16 as i32
+}
+
+fn point_from_lparam(lp: LPARAM) -> (f64, f64) {
+    (lo_word(lp.0) as f64, hi_word(lp.0) as f64)
+}
+
+fn key_down(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
+    unsafe { GetKeyState(vk.0 as i32) < 0 }
+}
+
+/// Invisible resize border thickness (x, y) at `dpi`.
+fn frame_borders(dpi: u32) -> (i32, i32) {
+    unsafe {
+        let pad = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+        (
+            GetSystemMetricsForDpi(SM_CXFRAME, dpi) + pad,
+            GetSystemMetricsForDpi(SM_CYFRAME, dpi) + pad,
+        )
+    }
+}
+
+fn has_thick_frame(hwnd: HWND) -> bool {
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;
+    style & WS_THICKFRAME.0 != 0
+}
+
+fn is_maximized(hwnd: HWND) -> bool {
+    unsafe { IsZoomed(hwnd).as_bool() }
+}
+
+/// Removes the caption, keeps the side and bottom resize borders.
+fn nc_calc_size(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if wp.0 == 0 || !has_thick_frame(hwnd) {
+        return LRESULT(0);
+    }
+    let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) }.max(96);
+    let (bx, by) = frame_borders(dpi);
+    let params = unsafe { &mut *(lp.0 as *mut NCCALCSIZE_PARAMS) };
+    let r = &mut params.rgrc[0];
+    r.left += bx;
+    r.right -= bx;
+    r.bottom -= by;
+    if is_maximized(hwnd) {
+        // Maximized windows hang over the monitor edge by the border.
+        r.top += by;
+    }
+    LRESULT(0)
+}
+
+fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
+    let def = unsafe { DefWindowProcW(hwnd, WM_NCHITTEST, WPARAM(0), lp) }.0 as u32;
+    if def != HTCLIENT || app.fullscreen {
+        return def;
+    }
+    let mut pt = POINT {
+        x: lo_word(lp.0),
+        y: hi_word(lp.0),
+    };
+    unsafe {
+        let _ = ScreenToClient(hwnd, &mut pt);
+    }
+    let p = (pt.x as f64, pt.y as f64);
+    let maximized = is_maximized(hwnd);
+    if !maximized {
+        let (bx, by) = frame_borders(app.dpi);
+        if pt.y < by {
+            return if pt.x < bx * 2 {
+                HTTOPLEFT
+            } else if pt.x >= app.client.0 as i32 - bx * 2 {
+                HTTOPRIGHT
+            } else {
+                HTTOP
+            };
+        }
+    }
+    let chrome = app.chrome();
+    if p.1 < chrome.caption_height() {
+        return match chrome.hit(p) {
+            Some(Button::Close) => HTCLOSE,
+            Some(Button::Maximize) => HTMAXBUTTON,
+            Some(Button::Minimize) => HTMINBUTTON,
+            Some(Button::Menu) => HTCLIENT,
+            // Free caption strip: drag the window, but not while a
+            // selection drag runs.
+            None if !app.is_dragging() => HTCAPTION,
+            None => HTCLIENT,
+        };
+    }
+    HTCLIENT
+}
+
+fn nc_button(hit: u32) -> Option<Button> {
+    match hit {
+        HTCLOSE => Some(Button::Close),
+        HTMAXBUTTON => Some(Button::Maximize),
+        HTMINBUTTON => Some(Button::Minimize),
+        _ => None,
+    }
+}
+
+enum Outcome {
+    Result(LRESULT),
+    Default,
+}
+
+pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    // Stateless handling that must work before the app exists.
+    match msg {
+        WM_NCCALCSIZE => return nc_calc_size(hwnd, wp, lp),
+        WM_ERASEBKGND => return LRESULT(1),
+        _ => {}
+    }
+    let handled = with_app(|app| {
+        let mut actions = Vec::new();
+        let outcome = handle(app, hwnd, msg, wp, lp, &mut actions);
+        (outcome, actions)
+    });
+    let result = match handled {
+        Some((Outcome::Result(r), actions)) => {
+            run_actions(hwnd, actions);
+            return r;
+        }
+        Some((Outcome::Default, actions)) => {
+            run_actions(hwnd, actions);
+            None
+        }
+        None => None,
+    };
+    result.unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, msg, wp, lp) })
+}
+
+fn handle(
+    app: &mut App,
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+    actions: &mut Vec<Action>,
+) -> Outcome {
+    let done = Outcome::Result(LRESULT(0));
+    match msg {
+        WM_PAINT => {
+            actions.extend(app.render());
+            unsafe {
+                let _ = ValidateRect(Some(hwnd), None);
+            }
+            done
+        }
+        WM_SIZE => {
+            if wp.0 as u32 != SIZE_MINIMIZED {
+                app.maximized = wp.0 as u32 == SIZE_MAXIMIZED;
+                app.resized(((lp.0 & 0xFFFF) as u32, ((lp.0 >> 16) & 0xFFFF) as u32));
+                // Draw right away: during a live resize WM_PAINT comes late.
+                actions.extend(app.render());
+            }
+            done
+        }
+        WM_EXITSIZEMOVE | WM_DISPLAYCHANGE => {
+            app.update_screen_box();
+            Outcome::Default
+        }
+        WM_DPICHANGED => {
+            app.dpi = (wp.0 & 0xFFFF) as u32;
+            let r = unsafe { &*(lp.0 as *const RECT) };
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    r.left,
+                    r.top,
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            // The WM_SIZE sent by SetWindowPos arrived re-entrantly and was
+            // not seen by us: pick the new size up here.
+            let mut cr = RECT::default();
+            unsafe {
+                let _ = GetClientRect(hwnd, &mut cr);
+            }
+            app.resized(((cr.right - cr.left) as u32, (cr.bottom - cr.top) as u32));
+            app.update_screen_box();
+            app.invalidate();
+            done
+        }
+        WM_GETMINMAXINFO => {
+            let mmi = unsafe { &mut *(lp.0 as *mut MINMAXINFO) };
+            let s = app.scale();
+            mmi.ptMinTrackSize = POINT {
+                x: (320.0 * s) as i32,
+                y: (220.0 * s) as i32,
+            };
+            done
+        }
+        WM_NCHITTEST => Outcome::Result(LRESULT(nc_hit_test(hwnd, app, lp) as isize)),
+        WM_NCMOUSEMOVE => {
+            let b = nc_button(wp.0 as u32);
+            if b != app.hover {
+                app.hover = b;
+                app.invalidate();
+            }
+            let mut tme = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE | TME_NONCLIENT,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            unsafe {
+                let _ = TrackMouseEvent(&mut tme);
+            }
+            // DefWindowProc still sees it: Windows 11 snap layouts hang off
+            // the HTMAXBUTTON hover.
+            Outcome::Default
+        }
+        WM_NCMOUSELEAVE | WM_MOUSELEAVE => {
+            if app.hover.is_some() || app.pressed.is_some() {
+                app.hover = None;
+                app.pressed = None;
+                app.invalidate();
+            }
+            Outcome::Default
+        }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK => match nc_button(wp.0 as u32) {
+            Some(b) => {
+                app.pressed = Some(b);
+                app.invalidate();
+                done
+            }
+            None => Outcome::Default,
+        },
+        WM_NCLBUTTONUP => match nc_button(wp.0 as u32) {
+            Some(b) => {
+                if app.pressed == Some(b) {
+                    actions.push(match b {
+                        Button::Close => Action::Close,
+                        Button::Maximize => Action::ToggleMaximize,
+                        Button::Minimize => Action::Minimize,
+                        Button::Menu => unreachable!(),
+                    });
+                }
+                app.pressed = None;
+                app.hover = None;
+                app.invalidate();
+                done
+            }
+            None => Outcome::Default,
+        },
+        WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
+            let shift = (wp.0 & 0x0004) != 0;
+            actions.extend(app.mouse_down(point_from_lparam(lp), shift, msg == WM_MBUTTONDOWN));
+            if app.is_dragging() {
+                unsafe { SetCapture(hwnd) };
+            }
+            done
+        }
+        WM_MOUSEMOVE => {
+            app.mouse_move(point_from_lparam(lp));
+            let mut tme = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            unsafe {
+                let _ = TrackMouseEvent(&mut tme);
+            }
+            done
+        }
+        WM_LBUTTONUP | WM_MBUTTONUP => {
+            app.mouse_up();
+            unsafe {
+                let _ = ReleaseCapture();
+            }
+            done
+        }
+        WM_LBUTTONDBLCLK => {
+            let p = point_from_lparam(lp);
+            if app.fullscreen || app.chrome().hit(p).is_none() {
+                actions.push(Action::ToggleFullscreen);
+            }
+            done
+        }
+        WM_RBUTTONUP | WM_CONTEXTMENU => {
+            let mut pt = POINT::default();
+            unsafe {
+                let _ = GetCursorPos(&mut pt);
+            }
+            actions.push(Action::ShowMenu { x: pt.x, y: pt.y });
+            done
+        }
+        WM_XBUTTONUP => {
+            let which = hi_word(wp.0 as isize);
+            actions.extend(app.command(if which == 1 {
+                menu::Cmd::Prev
+            } else {
+                menu::Cmd::Next
+            }));
+            Outcome::Result(LRESULT(1))
+        }
+        WM_MOUSEWHEEL => {
+            let mut pt = POINT {
+                x: lo_word(lp.0),
+                y: hi_word(lp.0),
+            };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut pt);
+            }
+            app.wheel((pt.x as f64, pt.y as f64), hi_word(wp.0 as isize) as i16);
+            done
+        }
+        WM_SETCURSOR => {
+            if (lp.0 & 0xFFFF) as u32 != HTCLIENT {
+                return Outcome::Default;
+            }
+            let mut pt = POINT::default();
+            unsafe {
+                let _ = GetCursorPos(&mut pt);
+                let _ = ScreenToClient(hwnd, &mut pt);
+            }
+            let kind = app.cursor_at((pt.x as f64, pt.y as f64), key_down(VK_SHIFT));
+            set_cursor(kind);
+            Outcome::Result(LRESULT(1))
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            let vk = wp.0 as u16;
+            if msg == WM_SYSKEYDOWN && vk != VK_F10.0 {
+                return Outcome::Default; // Alt+F4 and friends
+            }
+            match app.key(vk, key_down(VK_CONTROL), key_down(VK_SHIFT)) {
+                Some(a) => {
+                    actions.extend(a);
+                    done
+                }
+                None => Outcome::Default,
+            }
+        }
+        WM_TIMER if wp.0 == TIMER_UNCLOAK => {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER_UNCLOAK);
+            }
+            if app.cloaked {
+                actions.push(Action::Uncloak);
+            }
+            done
+        }
+        WM_LOADED => {
+            actions.extend(app.on_loaded());
+            done
+        }
+        WM_LIST => {
+            actions.extend(app.on_list());
+            done
+        }
+        WM_DIR_CHANGED => {
+            app.on_dir_changed();
+            done
+        }
+        WM_COPYDATA => {
+            let cds = unsafe { &*(lp.0 as *const COPYDATASTRUCT) };
+            match instance::received_path(cds) {
+                Some(path) => {
+                    actions.extend(app.open(path));
+                    actions.push(Action::Activate);
+                    Outcome::Result(LRESULT(1))
+                }
+                None => done,
+            }
+        }
+        WM_DROPFILES => {
+            let drop = HDROP(wp.0 as *mut _);
+            let mut buf = [0u16; 32768];
+            let n = unsafe { DragQueryFileW(drop, 0, Some(&mut buf)) } as usize;
+            unsafe { DragFinish(drop) };
+            if n > 0 {
+                actions.extend(app.open(PathBuf::from(String::from_utf16_lossy(&buf[..n]))));
+            }
+            done
+        }
+        WM_RENDERFORMAT => {
+            if let Some(src) = &app.clip {
+                clipboard::render(src, wp.0 as u32);
+            }
+            done
+        }
+        WM_RENDERALLFORMATS => {
+            if let Some(src) = app.clip.clone() {
+                clipboard::render_all(hwnd, &src);
+            }
+            done
+        }
+        WM_DESTROYCLIPBOARD => {
+            app.clip = None;
+            done
+        }
+        WM_CLOSE => {
+            actions.push(Action::Close);
+            done
+        }
+        WM_DESTROY => {
+            unsafe { PostQuitMessage(0) };
+            done
+        }
+        _ => Outcome::Default,
+    }
+}
+
+fn set_cursor(kind: CursorKind) {
+    let id = match kind {
+        CursorKind::Arrow => IDC_ARROW,
+        CursorKind::Cross => IDC_CROSS,
+        CursorKind::Hand => IDC_HAND,
+        CursorKind::Move => IDC_SIZEALL,
+        CursorKind::SizeNS => IDC_SIZENS,
+        CursorKind::SizeWE => IDC_SIZEWE,
+        CursorKind::SizeNWSE => IDC_SIZENWSE,
+        CursorKind::SizeNESW => IDC_SIZENESW,
+    };
+    unsafe {
+        if let Ok(c) = LoadCursorW(None, id) {
+            SetCursor(Some(c));
+        }
+    }
+}
+
+/// Executes deferred actions outside the state borrow; follow-up actions
+/// from the app are processed in the same loop.
+pub fn run_actions(hwnd: HWND, mut actions: Vec<Action>) {
+    actions.reverse();
+    while let Some(a) = actions.pop() {
+        let more = run_action(hwnd, a);
+        for m in more.into_iter().rev() {
+            actions.push(m);
+        }
+    }
+}
+
+fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
+    match action {
+        Action::ShowMenu { x, y } => {
+            let Some(state) = with_app(|a| a.menu_state()) else {
+                return vec![];
+            };
+            match menu::show(hwnd, x, y, &state) {
+                Some(cmd) => with_app(|a| a.command(cmd)).unwrap_or_default(),
+                None => vec![],
+            }
+        }
+        Action::FitWindow { client } => {
+            fit_window(hwnd, client);
+            vec![]
+        }
+        Action::ToggleFullscreen => {
+            toggle_fullscreen(hwnd);
+            vec![]
+        }
+        Action::ToggleMaximize => {
+            unsafe {
+                let _ = ShowWindow(
+                    hwnd,
+                    if is_maximized(hwnd) {
+                        SW_RESTORE
+                    } else {
+                        SW_MAXIMIZE
+                    },
+                );
+            }
+            vec![]
+        }
+        Action::Minimize => {
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            vec![]
+        }
+        Action::OpenDialog => match crate::dialogs::open_file(hwnd) {
+            Some(p) => with_app(|a| a.open(p)).unwrap_or_default(),
+            None => vec![],
+        },
+        Action::Recycle(path) => {
+            if crate::dialogs::recycle(hwnd, &path) {
+                with_app(|a| a.removed(&path)).unwrap_or_default()
+            } else {
+                vec![]
+            }
+        }
+        Action::Close => {
+            let clip = with_app(|a| {
+                crate::settings_store::save(&a.settings);
+                a.clip.take()
+            })
+            .flatten();
+            if let Some(src) = clip {
+                clipboard::render_all(hwnd, &src);
+            }
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            vec![]
+        }
+        Action::Activate => {
+            unsafe {
+                if IsIconic(hwnd).as_bool() {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                let _ = SetForegroundWindow(hwnd);
+            }
+            vec![]
+        }
+        Action::Uncloak => {
+            uncloak(hwnd);
+            with_app(|a| a.cloaked = false);
+            vec![]
+        }
+        Action::Quit => {
+            unsafe { PostQuitMessage(0) };
+            vec![]
+        }
+    }
+}
+
+pub fn set_cloak(hwnd: HWND, cloak: bool) {
+    let v: i32 = cloak as i32;
+    unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, std::ptr::from_ref(&v).cast(), 4);
+    }
+}
+
+fn uncloak(hwnd: HWND) {
+    set_cloak(hwnd, false);
+    platform::debug_log("window visible");
+    blinzel_core::timing::mark("uncloak");
+}
+
+pub fn start_uncloak_timer(hwnd: HWND, ms: u32) {
+    unsafe {
+        SetTimer(Some(hwnd), TIMER_UNCLOAK, ms, None);
+    }
+}
+
+/// Window rect for a client rect, given our frame (borders left, right,
+/// bottom only).
+fn window_rect_for_client(client: RECT, dpi: u32) -> RECT {
+    let (bx, by) = frame_borders(dpi);
+    RECT {
+        left: client.left - bx,
+        top: client.top,
+        right: client.right + bx,
+        bottom: client.bottom + by,
+    }
+}
+
+fn fit_window(hwnd: HWND, image: (u32, u32)) {
+    if is_maximized(hwnd) {
+        return;
+    }
+    let Some(work) = monitor_rect(hwnd, true) else {
+        return;
+    };
+    let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) }.max(96);
+    let s = dpi as f64 / 96.0;
+    let max = (
+        (work.right - work.left) as u32,
+        (work.bottom - work.top) as u32,
+    );
+    let min = ((320.0 * s) as u32, (220.0 * s) as u32);
+    let (cw, ch) = blinzel_core::layout::window_client_size(image, max, min);
+    // Keep the current centre, stay inside the work area.
+    let mut wr = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(hwnd, &mut wr);
+    }
+    let (cx, cy) = ((wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2);
+    let left = (cx - cw as i32 / 2).clamp(work.left, (work.right - cw as i32).max(work.left));
+    let top = (cy - ch as i32 / 2).clamp(work.top, (work.bottom - ch as i32).max(work.top));
+    let r = window_rect_for_client(
+        RECT {
+            left,
+            top,
+            right: left + cw as i32,
+            bottom: top + ch as i32,
+        },
+        dpi,
+    );
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            r.left,
+            r.top,
+            r.right - r.left,
+            r.bottom - r.top,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+thread_local! {
+    static SAVED_PLACEMENT: RefCell<Option<WINDOWPLACEMENT>> = const { RefCell::new(None) };
+}
+
+fn toggle_fullscreen(hwnd: HWND) {
+    let entering = SAVED_PLACEMENT.with(|p| p.borrow().is_none());
+    unsafe {
+        if entering {
+            let mut wp = WINDOWPLACEMENT {
+                length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+                ..Default::default()
+            };
+            let _ = GetWindowPlacement(hwnd, &mut wp);
+            SAVED_PLACEMENT.with(|p| *p.borrow_mut() = Some(wp));
+            let Some(m) = monitor_rect(hwnd, false) else {
+                return;
+            };
+            with_app(|a| a.fullscreen = true);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, (WS_POPUP | WS_VISIBLE).0 as isize);
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOP),
+                m.left,
+                m.top,
+                m.right - m.left,
+                m.bottom - m.top,
+                SWP_FRAMECHANGED | SWP_NOOWNERZORDER,
+            );
+        } else {
+            let wp = SAVED_PLACEMENT.with(|p| p.borrow_mut().take()).unwrap();
+            with_app(|a| a.fullscreen = false);
+            SetWindowLongPtrW(
+                hwnd,
+                GWL_STYLE,
+                (WS_OVERLAPPEDWINDOW | WS_VISIBLE).0 as isize,
+            );
+            let _ = SetWindowPlacement(hwnd, &wp);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER,
+            );
+        }
+    }
+    with_app(|a| a.invalidate());
+}
+
+/// Registers the window class (once).
+pub fn register_class(
+    instance: windows::Win32::Foundation::HINSTANCE,
+) -> windows::core::Result<()> {
+    let wc = WNDCLASSEXW {
+        cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+        style: CS_DBLCLKS,
+        lpfnWndProc: Some(wndproc),
+        hInstance: instance,
+        hCursor: unsafe { LoadCursorW(None, IDC_ARROW)? },
+        // No background brush: nothing is painted before our first frame.
+        lpszClassName: instance::WINDOW_CLASS,
+        ..Default::default()
+    };
+    if unsafe { RegisterClassExW(&wc) } == 0 {
+        return Err(windows::core::Error::from_thread());
+    }
+    Ok(())
+}

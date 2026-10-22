@@ -61,6 +61,7 @@ open_filter_all = "All files"
 
 error_open = "Could not open “{name}”: {reason}"
 error_unsupported = "unsupported or damaged image format"
+hint_open = "Drop an image here or press Ctrl+O"
 error_empty_folder = "No images in this folder"
 
 [messages.images_count]

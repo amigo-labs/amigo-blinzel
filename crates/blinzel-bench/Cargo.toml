@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-blinzel-core.workspace = true
+blinzel-core = { workspace = true, features = ["turbojpeg"] }
 blinzel-jpeg.workspace = true
 zune-jpeg.workspace = true
 zune-png.workspace = true
