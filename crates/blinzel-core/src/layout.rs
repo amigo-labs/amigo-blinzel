@@ -81,8 +81,13 @@ pub struct ViewState {
 pub struct Layout {
     /// Client pixels per image pixel.
     pub scale: f64,
-    /// Client position of the content's top-left corner.
+    /// Client position of the content's top-left corner, snapped to whole
+    /// pixels: at 100 % every texel lands on exactly one pixel (no
+    /// half-pixel blur), and pixel centres never fall on the content edge.
     pub origin: (f64, f64),
+    /// The origin before snapping. Pan and zoom work on it, so the rounding
+    /// never accumulates.
+    exact_origin: (f64, f64),
     /// Content (crop) size in image pixels.
     pub content: (f64, f64),
     /// Top-left of the content in oriented image coordinates.
@@ -180,13 +185,14 @@ pub fn compute(
             client / 2.0 - c * scale
         }
     };
-    let origin = (
+    let exact_origin = (
         axis(scaled.0, client.0, center.0, content.0),
         axis(scaled.1, client.1, center.1, content.1),
     );
     Layout {
         scale,
-        origin,
+        origin: (exact_origin.0.round(), exact_origin.1.round()),
+        exact_origin,
         content,
         crop_origin: (crop.x as f64, crop.y as f64),
         client,
@@ -197,8 +203,10 @@ pub fn compute(
 /// Zooms by `factor` keeping the image point under `cursor` fixed.
 pub fn zoom_at(state: &mut ViewState, layout: &Layout, cursor: (f64, f64), new_scale: f64) {
     let new_scale = new_scale.clamp(MIN_ZOOM, MAX_ZOOM);
-    let p = layout.client_to_image(cursor);
-    let p = (p.0 - layout.crop_origin.0, p.1 - layout.crop_origin.1);
+    let p = (
+        (cursor.0 - layout.exact_origin.0) / layout.scale,
+        (cursor.1 - layout.exact_origin.1) / layout.scale,
+    );
     // Content point that must sit at the client centre so `p` stays put.
     let cx = p.0 - (cursor.0 - layout.client.0 / 2.0) / new_scale;
     let cy = p.1 - (cursor.1 - layout.client.1 / 2.0) / new_scale;
@@ -227,8 +235,8 @@ pub fn zoom_step(current: f64, dir: i32) -> f64 {
 /// Moves the view by a client-pixel delta (content follows the mouse).
 pub fn pan(state: &mut ViewState, layout: &Layout, delta: (f64, f64)) {
     let current = (
-        (layout.client.0 / 2.0 - layout.origin.0) / layout.scale,
-        (layout.client.1 / 2.0 - layout.origin.1) / layout.scale,
+        (layout.client.0 / 2.0 - layout.exact_origin.0) / layout.scale,
+        (layout.client.1 / 2.0 - layout.exact_origin.1) / layout.scale,
     );
     state.zoom.get_or_insert(layout.scale);
     state.center = Some((
@@ -372,11 +380,33 @@ mod tests {
         zoom_at(&mut st, &l, cursor, l.scale * 4.0);
         let l2 = compute((4000, 3000), (800.0, 600.0), &opts, &st);
         let after = l2.client_to_image(cursor);
+        // Exact up to the snapping of the origin: half a client pixel.
+        let tol = 0.5 / l2.scale + 1e-9;
         assert!(
-            close(before.0, after.0) && close(before.1, after.1),
+            (before.0 - after.0).abs() <= tol && (before.1 - after.1).abs() <= tol,
             "{before:?} {after:?}"
         );
         assert!(close(l2.scale, 0.8));
+    }
+
+    #[test]
+    fn origin_snaps_to_whole_pixels_without_drift() {
+        let opts = ViewOptions {
+            mode: ViewMode::ActualSize,
+            no_upscale: true,
+        };
+        // Centring 133 × 77 in 140 × 90 would put it at (3.5, 6.5).
+        let l = compute((133, 77), (140.0, 90.0), &opts, &ViewState::default());
+        assert_eq!(l.origin, (4.0, 7.0));
+        // Sub-pixel pans add up instead of being rounded away.
+        let mut st = ViewState::default();
+        let l0 = compute((4000, 3000), (1000.0, 500.0), &opts, &st);
+        for _ in 0..4 {
+            let l = compute((4000, 3000), (1000.0, 500.0), &opts, &st);
+            pan(&mut st, &l, (0.25, 0.0));
+        }
+        let l1 = compute((4000, 3000), (1000.0, 500.0), &opts, &st);
+        assert_eq!(l1.origin.0 - l0.origin.0, 1.0);
     }
 
     #[test]
