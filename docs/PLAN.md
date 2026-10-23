@@ -47,8 +47,8 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Weg zur GPU | RGBA vom Decoder | YCbCr-Planes, Farbkonvertierung im Shader | ✅ gemessen: 24 MP 118 statt 147 ms, 45 MP 190 statt 410 ms |
 | PNG | zune-png, png | `png` + eigene fusionierte RGBA-Expansion | ✅ 1,9× (Foto) bzw. 3,2× (Screenshot) schneller als zune-png |
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
-| Thumbnail-Skalierung | fast_image_resize | DCT 1/8 + SIMD-Reducer / GPU | ⬜ M4 |
-| Thumbnail-Speicher | SQLite | eigene Pack-Datei | ⬜ M4 |
+| Thumbnail-Skalierung | Windows-Thumbnail-Provider (`IShellItemImageFactory`) | DCT 1/8 + Flächenmittelung je YCbCr-Ebene | ✅ 200 12-MP-JPEGs, 16 Threads: 287/s statt 18/s |
+| Thumbnail-Speicher | Windows-Thumbnail-Cache (`thumbcache_*.db`) | eigene Pack-Datei | ✅ 200 aus dem Cache: 23,6 ms statt 432 ms (CPU-Seite, ohne Atlas-Upload) |
 | Verzeichnis | FindFirstFileExW | NtQueryDirectoryFileEx | ⬜ messen (10k-Ordner im App-Bench) |
 | SIMD-Stufen | Basis x86-64-v2 | Laufzeit-Dispatch je Kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ gemessen: keine Stufe bringt ≥ 10 % auf einem Hot Path, daher kein Dispatch ([Abschnitt 15](#simd-stufen)) |
 
@@ -157,7 +157,26 @@ Reihenfolge der Stufen:
 - 🟡 **Ansichtsmodi** (1/2/3), Zoom um den Cursor (Rad, +/−, 0), Pan (Maus, Pfeile bei Überlauf), Vollbild (F11, Eingabe, Doppelklick), Drehen nur in der Ansicht (R/L).
 - 🟡 Modus 1 („Originalgröße“): Das Fenster folgt jedem Bild, begrenzt auf den Arbeitsbereich und um die Mitte zentriert.
 - 🟡 Leerer Start zeigt einen Hinweis; Drag & Drop, Strg+O, Entf (Papierkorb), Maus-Zurück/Vor.
-- ⬜ Filmstreifen und Raster (M4).
+- ⬜ Filmstreifen und Raster (M4), siehe unten.
+
+### Thumbnails (M4)
+
+- **Erzeugung** (`blinzel_core::thumb`): Kante 256 px (Explorer-Größe; bei 150 % Skalierung reicht das für 160-px-Kacheln).
+  - Quelle ist die kleinste, die die Kachel abdeckt: eingebettete Vorschau (EXIF/MPF), wenn sie groß genug ist und das Seitenverhältnis stimmt (EXIF-Thumbnails haben oft Balken), sonst das Bild selbst mit DCT-Skalierung (JPEG bis 1/8).
+  - Ein Thread je Bild, viele Bilder parallel auf dem Hintergrund-Pool; die Ansicht hat Vorrang.
+  - Verkleinern mit exakter Flächenmittelung (separabler Box-Filter mit Bruchteilgewichten), Ausgabe BGRA; die EXIF-Orientierung wird beim Zeichnen angewandt.
+- **Cache** (Benchmark-Gate gegen den Windows-Thumbnail-Cache `IShellItemImageFactory`): eigene Pack-Datei unter `%LOCALAPPDATA%migo-blinzel	humbs\`.
+  - `thumbs.pack`: angehängte Einträge (JPEG, Qualität 85, ca. 10–15 KB je Thumbnail).
+  - `thumbs.idx`: Log fester Datensätze (Pfad-Hash, Größe und Änderungszeit der Datei, Offset, Länge, Maße, Orientierung), beim ersten Zugriff in eine Hash-Tabelle geladen.
+  - Ein veralteter Eintrag (Größe oder Zeit geändert) wird neu erzeugt. Über 1 GB beginnt eine neue Generation (Pack und Index werden ersetzt).
+  - Mehrere Instanzen: Anhängen unter einem benannten Mutex; was eine andere Instanz geschrieben hat, sieht man erst beim nächsten Laden (Doppelte schaden nicht).
+- **GPU:** Atlas-Texturen 4096 × 4096 BGRA mit 256er-Slots (256 je Atlas), LRU; ein Raster mit 200 Kacheln sind 200 kleine Draws aus wenigen Atlanten.
+- **Oberfläche** (beide standardmäßig aus, im Menü und per Taste):
+  - Filmstreifen unten mit den Nachbarn des aktuellen Bildes.
+  - Raster über das ganze Fenster für den Ordner; Klick oder Eingabe öffnet ein Bild, Pfeiltasten bewegen die Auswahl, Rad scrollt.
+- **Messung** (`blinzel-bench thumbs <dir> [--count N] [--threads T]`): kalt (ohne Cache) Thumbnails pro Sekunde über einen Ordner mit 12-MP-JPEGs mit Sensorrauschen (ca. 4 MB je Datei), warm 200 Kacheln aus dem Cache. Ziele aus Abschnitt 12: kalt ≥ 150/s, 200 aus dem Cache ≤ 30 ms.
+- **Stand (Ryzen 7 PRO 6850H, 16 Threads):** kalt 287/s (1 Thread: 26/s), Speichern 1,1–1,3 ms je Thumbnail (12,6 KB), warm 200 in 23,6 ms (1 Thread: 0,9 ms je Thumbnail). Erst die Umrechnung je Ebene auf Zielgröße brachte das: `Image::to_bgra` (exakt, Float, bilineare Chroma) kostete 1,8 ms je 256er-Thumbnail und 15 ms je 1/8-Decode.
+- Zum Vergleich auf denselben Dateien der Windows-Thumbnail-Provider und -Cache: kalt 18/s, warm 432–446 ms für 200.
 - ⬜ Fensterposition und -größe merken.
 
 ## 7. Auswahl, Kopieren, Ausschneiden, Speichern
@@ -326,7 +345,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
-| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
+| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 Erzeugung und Cache fertig (287/s kalt, 23,6 ms warm); offen: Atlas, Filmstreifen, Raster |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |

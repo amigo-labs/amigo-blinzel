@@ -24,5 +24,7 @@ pub mod sched;
 pub mod selection;
 pub mod settings;
 pub mod testimg;
+pub mod thumb;
+pub mod thumbcache;
 pub mod timing;
 pub mod update;
