@@ -729,6 +729,56 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
     }
 }
 
+/// The window's normal rect (workspace coordinates; before full screen
+/// if it is there) and whether it is maximized.
+fn placement(hwnd: HWND) -> Option<([i32; 4], bool)> {
+    let wp = SAVED_PLACEMENT.with(|p| *p.borrow()).or_else(|| {
+        let mut wp = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        unsafe { GetWindowPlacement(hwnd, &mut wp) }
+            .ok()
+            .map(|_| wp)
+    })?;
+    let r = wp.rcNormalPosition;
+    let maximized = wp.showCmd == SW_SHOWMAXIMIZED.0 as u32 || is_maximized(hwnd);
+    Some(([r.left, r.top, r.right, r.bottom], maximized))
+}
+
+/// Puts the window where it was last time (if a monitor is still there);
+/// true if it was maximized. Call before it is first shown.
+pub fn restore_placement(hwnd: HWND, saved: Option<[i32; 4]>, maximized: bool) -> bool {
+    use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromRect};
+    let Some([left, top, right, bottom]) = saved else {
+        return false;
+    };
+    let rect = RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+    if unsafe { MonitorFromRect(&rect, MONITOR_DEFAULTTONULL) }.is_invalid() {
+        return false;
+    }
+    let wp = WINDOWPLACEMENT {
+        length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+        showCmd: SW_HIDE.0 as u32,
+        rcNormalPosition: rect,
+        ..Default::default()
+    };
+    unsafe { SetWindowPlacement(hwnd, &wp) }.is_ok() && maximized
+}
+
+/// Remembers where the window is, for the next start.
+fn remember_placement(hwnd: HWND, a: &mut App) {
+    if let Some((rect, maximized)) = placement(hwnd) {
+        a.settings.window = Some(rect);
+        a.settings.maximized = maximized;
+    }
+}
+
 /// Saves the settings, keeps a copied image on the clipboard, removes the
 /// tray icon and closes the window (which ends the message loop).
 fn exit(hwnd: HWND) {
@@ -736,6 +786,7 @@ fn exit(hwnd: HWND) {
         // A hidden instance's copy may be older than what another window
         // saved.
         if !a.hidden {
+            remember_placement(hwnd, a);
             crate::settings_store::save(&a.settings);
         }
         a.clip.take()
@@ -756,7 +807,10 @@ fn hide_window(hwnd: HWND) {
     if with_app(|a| a.fullscreen) == Some(true) {
         toggle_fullscreen(hwnd);
     }
-    with_app(|a| crate::settings_store::save(&a.settings));
+    with_app(|a| {
+        remember_placement(hwnd, a);
+        crate::settings_store::save(&a.settings);
+    });
     set_cloak(hwnd, true);
     unsafe {
         let _ = KillTimer(Some(hwnd), TIMER_UNCLOAK);

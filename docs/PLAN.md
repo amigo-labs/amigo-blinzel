@@ -179,7 +179,7 @@ Reihenfolge der Stufen:
 - **Stand (Ryzen 7 PRO 6850H, 16 Threads):** kalt 287/s (1 Thread: 26/s), Speichern 1,1–1,3 ms je Thumbnail (12,6 KB), warm 200 in 23,6 ms (1 Thread: 0,9 ms je Thumbnail). Erst die Umrechnung je Ebene auf Zielgröße brachte das: `Image::to_bgra` (exakt, Float, bilineare Chroma) kostete 1,8 ms je 256er-Thumbnail und 15 ms je 1/8-Decode.
 - Zum Vergleich auf denselben Dateien der Windows-Thumbnail-Provider und -Cache: kalt 18/s, warm 432–446 ms für 200.
 - **Ende zu Ende in der App** (`blinzel --bench`, `thumb_grid_200`: Cache öffnen, 200 lesen und decodieren, in den Atlas laden, Raster zeichnen, GPU fertig): **16 ms** im Median (Ziel ≤ 30 ms). Mit BGRA-Atlas waren es 37–69 ms; das Hochladen und die Umrechnung nach RGB machten den Unterschied.
-- ⬜ Fensterposition und -größe merken.
+- 🟡 Fensterposition und -größe merken: beim Schließen (und Verstecken) `GetWindowPlacement` in die Einstellungen, beim Start `SetWindowPlacement`, solange dort noch ein Monitor ist; ein maximiertes Fenster wird noch verhüllt maximiert, damit das erste Bild für die echte Größe gerechnet wird. Sichtprüfung offen.
 
 ## 7. Auswahl, Kopieren, Ausschneiden, Speichern
 
