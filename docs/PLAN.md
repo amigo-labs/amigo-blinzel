@@ -43,7 +43,7 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 
 | Heißer Pfad | Messlatte | Eigenbau-Hebel | Stand |
 |---|---|---|---|
-| JPEG-Decode | libjpeg-turbo, zune-jpeg | eigener paralleler Decoder (M3) | ✅ `blinzel-jpeg` für das sichtbare Bild: 3,5–4× turbo (16 Threads), byte-identisch; ein Thread, Regionen und progressive bleiben bei turbo |
+| JPEG-Decode | libjpeg-turbo, zune-jpeg | eigener paralleler Decoder (M3) | ✅ `blinzel-jpeg` für das sichtbare Bild: sequentiell 4,1×, progressive 1,7× turbo (16 Threads), byte-identisch; ein Thread und Regionen bleiben bei turbo |
 | Weg zur GPU | RGBA vom Decoder | YCbCr-Planes, Farbkonvertierung im Shader | ✅ gemessen: 24 MP 118 statt 147 ms, 45 MP 190 statt 410 ms |
 | PNG | zune-png, png | `png` + eigene fusionierte RGBA-Expansion | ✅ 1,9× (Foto) bzw. 3,2× (Screenshot) schneller als zune-png |
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
@@ -92,7 +92,7 @@ Reihenfolge der Stufen:
 | Crate | Inhalt | Stand |
 |---|---|---|
 | `blinzel-core` | Pixelpuffer, Pufferpool, Formaterkennung, Decoder (JPEG/turbojpeg, PNG, GIF, eigener BMP), EXIF/MPF, Layout, Auswahl, natsort, Dateiliste, Scheduler, LRU, CPU-Referenz-Renderer, Timing, Settings, Export | 🟡 (auf Linux getestet) |
-| `blinzel-jpeg` | strenger Marker-Parser; paralleler Decoder (sequentiell Huffman, 8 Bit) in YCbCr-Planes, byte-identisch mit libjpeg-turbo | 🟡 |
+| `blinzel-jpeg` | strenger Marker-Parser; paralleler Decoder (Huffman, 8 Bit, sequentiell und progressive) in YCbCr-Planes, byte-identisch mit libjpeg-turbo | 🟡 |
 | `blinzel-i18n` | `i18n/*.toml` → statische Tabellen (DE/EN) | 🟡 |
 | `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |
 | `blinzel-app` | `blinzel.exe`: Fenster, Chrome, Menü, D3D11-Renderer, Loader, WIC, Zwischenablage, Dialoge, `--bench` | 🟡 |
@@ -276,7 +276,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M0** | Workspace, CI (Linux + Windows), Korpus, Bench-Harness | Baseline-JSON im CI | 🟡 |
 | **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
-| **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (3,9× bzw. 3,6×); progressive offen |
+| **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | ⬜ |
@@ -425,7 +425,18 @@ Das bestätigt die lokale Messung. Bei 1/8 bringt SIMD libjpeg-turbo auf dem Run
 
 App-Benchmark mit echter GPU (Radeon 680M): 24-MP-JPEG öffnen 28,7 ms gesamt (Decode 19,9 ms auf 3000 × 2000).
 
+**Progressive** (seit diesem Stand): Alle Scans werden vorab gelesen; mit mehreren Threads läuft jeder Scan in einem eigenen Thread, zeilenweise hinter den Scans, von denen er abhängt (gleiche Komponente, überlappendes Band). Koeffizienten liegen in Blockzeilen hinter Mutexen, werden erst beim ersten Zugriff angelegt und während der parallelen IDCT freigegeben. Verfeinerungsscans führen je Block eine Maske der Nicht-Null-Koeffizienten.
+
+| 24 MP 4:2:0 progressive | turbo | blinzel-jpeg, 1 Thread | 16 Threads |
+|---|---|---|---|
+| voll | 244 ms | 330 ms | 142 ms (1,7×) |
+| 1/8 | 238 ms | 312 ms | 138 ms (1,7×) |
+
+Grenze: Der letzte Y-Verfeinerungsscan (3,7 MB) läuft allein ca. 100 ms. Ohne Kenntnis der Blocknummer lässt er sich nicht spekulativ teilen; schneller wird er nur durch einen schnelleren sequentiellen Decoder.
+
+Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichauf mit turbo (1,01×), mit 16 Threads 4,1×.
+
 **Als Nächstes, in dieser Reihenfolge:**
-1. **Progressive JPEGs** in `blinzel-jpeg` (ca. 250–300 ms bei turbo, langsamster Fall): Koeffizienten aller Scans puffern, AC-Refinement, EOB-Läufe. Parallel: DC-Scans und AC-Scans je Komponente sind unabhängig; danach IDCT in Bändern.
-2. Sequentiell schneller werden (heute 0,86–0,92× turbo bei voller Größe): IDCT/Ausgabe, Bitleser. Erst dann lohnt `blinzel-jpeg` auch für Prefetch.
-3. M7, M8, M4, M5, M6 wie in Abschnitt 12. M7/M8 brauchen die Punkte aus Abschnitt 14.
+1. CI-Ergebnis von PR #5 prüfen (`blinzel-bench run --check` auf dem Runner) und M3 auf ✅ setzen.
+2. M7 (Setup-Exe, Release-Workflow, Self-Updater). Teile ohne Secrets zuerst: Installation, Deinstallation, Updater mit Ed25519-Prüfung, Release-Workflow mit SignPath-Schritt hinter einer Bedingung.
+3. M8, M4, M5, M6 wie in Abschnitt 12. M7/M8 brauchen für den Abschluss die Punkte aus Abschnitt 14.
