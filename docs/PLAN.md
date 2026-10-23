@@ -124,7 +124,8 @@ Reihenfolge der Stufen:
   - HDD-Erkennung (Seek-Penalty) → 1 I/O-Thread.
 - 🟡 **Hybrid-CPUs:** Worker nur auf P-Kernen (EfficiencyClass), ABOVE_NORMAL, ohne Power-Throttling.
 - 🟡 **Robust:** kein `panic=abort`, jeder Decode läuft in `catch_unwind`.
-- ⬜ **Delay-Load** für shell32/ole32: erst Startzeit messen (`--exit-after-first-frame`), dann entscheiden.
+- ✅ **Delay-Load** für shell32/ole32/oleaut32/shlwapi gemessen: Der Start bis `main` bleibt bei 20–23 ms (das ist die Prozesserzeugung selbst). Kein Delay-Load.
+- 🟡 **Erstes Bild über GDI:** Die Device-Erzeugung dauert länger als Lesen und Decodieren. Der Loader rendert das erste decodierte Bild deshalb selbst auf der CPU (`blinzel_core::preview`, dieselbe Geometrie wie die GPU), der UI-Thread pumpt Nachrichten statt auf das Device zu warten und zeigt es mit `SetDIBitsToDevice`. Direct3D übernimmt, sobald das Device steht. Das Fenster wird ohne Aktivierung gezeigt (`SW_SHOWNA`, spart ca. 20 ms) und holt sich den Vordergrund nach dem ersten Bild.
 
 ## 6. UI und Fensterverhalten
 
@@ -469,22 +470,19 @@ Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichau
 
 **M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit drei Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Lizenz, SignPath, Release-Schlüssel) und der erste echte Release.
 
-**Befund Startzeit (echte GPU, 2026-10-23):** Öffnen eines 24-MP-JPEGs aus einem neu gestarteten Prozess dauert 230–330 ms bis zum ersten Bild. Das verfehlt das M1-Ziel (≤ 50 ms warm) klar. Die Startmarken (`--exit-after-first-frame --json`) zeigen, wo die Zeit liegt:
+**Startzeit (echte GPU, Radeon 680M, 24-MP-JPEG, Prozessstart → erstes Bild):**
 
-| Phase | GPU (Radeon 680M) | WARP |
+| Stand | Erstes Bild | Direct3D-Frame |
 |---|---|---|
-| vor `main` (Loader, Defender) | 42–60 ms | 43–52 ms |
-| `D3D11CreateDevice` allein | 115–150 ms | 65–85 ms |
-| Device fertig → erstes Bild | ca. 60 ms | ca. 50 ms |
+| vorher | 230–330 ms (wartete auf `D3D11CreateDevice`, 115–150 ms) | ebenso |
+| + Nachrichtenschleife statt Blockieren, erstes Bild über GDI | 65–71 ms | 128–136 ms |
+| + `SW_SHOWNA`, Rendern auf dem Loader-Thread | **54–61 ms** | 127–137 ms |
 
-Der Decode (44 ms bei 1/2) ist nicht der Engpass. Wege, nach Aufwand geordnet:
-1. Die Lücke zwischen fertigem Device und erstem Bild (ca. 60 ms) mit Startmarken aufklären und schließen (Renderer, Swapchain und Upload laufen heute nacheinander auf dem UI-Thread bzw. warten aufeinander).
-2. Erstes Bild ohne Direct3D: ein vorübergehendes Fenster per `UpdateLayeredWindow` mit dem fertig decodierten Bild, bis der Direct3D-Pfad übernimmt. Erwartet ca. 110 ms statt ca. 270 ms.
-3. Resident-Modus (M6): Der warme Prozess zeigt ein neues Bild ohne Prozess- und Device-Start. Nur so ist ≤ 50 ms erreichbar.
+Die Zeit bis `main` (20–25 ms) ist Prozesserzeugung, Delay-Load ändert daran nichts. Danach: Lesen und Decodieren ca. 25 ms, CPU-Frame ca. 5 ms, Zeichnen unter 1 ms. Nebeneffekt: Seit der UI-Thread Nachrichten verarbeitet, statt zu blockieren, dauert auch `D3D11CreateDevice` nur noch ca. 95 statt 150 ms.
 
-**M8 (Branch `m8-race`, PR auf `m7-install` gestapelt):** `blinzel-race` (siehe Abschnitt 11) und die Website: `crates/blinzel-site` baut `website/dist` aus `website/src` (Layout, eine HTML-Datei je Seite und Sprache), `CHANGELOG.md` und `website/data/race.json`; ohne Referenzmessung sagen die Seiten das, statt Zahlen zu zeigen. Strikte CSP ohne Inline-Skript, Handy-Layout geprüft. Deployment über `.github/workflows/website.yml`, sobald die Cloudflare-Secrets da sind.
+**Noch offen:** Messung von außen mit `blinzel-race` und Sichtprüfung des Übergangs GDI → Direct3D. Beides geht nur bei entsperrtem Bildschirm; der Rechner war während der Messung gesperrt. Unter 50 ms kommt nur der Resident-Modus (M6).
 
 **Als Nächstes, in dieser Reihenfolge:**
-1. Startzeit nach dem Befund oben: zuerst die Lücke zwischen fertigem Device und erstem Bild schließen, dann ein erstes Bild ohne Direct3D, dann M6 mit dem Resident-Modus.
+1. M6 mit dem Resident-Modus (≤ 25 ms Handoff) vorziehen, vorher die Sichtprüfung des GDI-Übergangs bei entsperrtem Bildschirm.
 2. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
 3. M4, M5 wie in Abschnitt 12.

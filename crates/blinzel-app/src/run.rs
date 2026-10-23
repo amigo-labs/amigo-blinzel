@@ -37,6 +37,10 @@ use crate::platform::{io, threads, wide};
 use crate::window::{self, APP, run_actions, set_cloak, start_uncloak_timer};
 use crate::{bench, instance, settings_store, setup, update};
 
+/// The main window for the device thread's wake-up message (0 until it
+/// exists).
+static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
 #[derive(Debug, Default)]
 pub struct Args {
     pub file: Option<PathBuf>,
@@ -229,7 +233,15 @@ pub fn run() -> i32 {
             let r = Gfx::create(warp);
             timing::mark("device_ready");
             let _ = dev_tx.send(r);
+            // Wake the UI thread's message loop (see below).
+            let hwnd = MAIN_HWND.load(std::sync::atomic::Ordering::SeqCst);
+            if hwnd != 0 {
+                unsafe {
+                    let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_NULL, WPARAM(0), LPARAM(0));
+                }
+            }
         });
+    crate::first_frame::configure(settings.view, settings.background);
 
     // Window, cloaked until the first image is on it.
     let instance = unsafe { GetModuleHandleW(None) }
@@ -249,7 +261,9 @@ pub fn run() -> i32 {
     let title = wide(tr(Msg::AppName));
     let hwnd = match unsafe {
         CreateWindowExW(
-            WS_EX_NOREDIRECTIONBITMAP,
+            // With a redirection surface: the first frame may come through
+            // GDI before Direct3D is ready.
+            WINDOW_EX_STYLE(0),
             instance::WINDOW_CLASS,
             PCWSTR(title.as_ptr()),
             WS_OVERLAPPEDWINDOW,
@@ -267,12 +281,48 @@ pub fn run() -> i32 {
         Err(e) => return fatal(&e.message()),
     };
     prepare_window(hwnd);
+    let mut cr = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut cr);
+    }
+    loader.set_first_frame_target(crate::first_frame::Target {
+        client: (
+            (cr.right - cr.left).max(1) as u32,
+            (cr.bottom - cr.top).max(1) as u32,
+        ),
+        view: settings.view,
+        background: settings.background,
+    });
+    // The loader may post the first decoded image from now on.
+    loader.set_hwnd(hwnd);
+    MAIN_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
+    unsafe {
+        // Still cloaked, so nothing shows yet; but a shown window gets
+        // painted. Not activated: activation costs ~20 ms and waits until
+        // an image is on screen.
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+    }
     timing::mark("window_created");
 
-    let gfx = match dev_rx.recv() {
-        Ok(Ok(g)) => g,
-        Ok(Err(e)) => return fatal(&format!("Direct3D 11: {}", e.message())),
-        Err(_) => return fatal("Direct3D 11 initialization failed"),
+    // Pump messages until the device exists: the first image may arrive
+    // first and is then shown through GDI (first_frame).
+    let gfx = loop {
+        match dev_rx.try_recv() {
+            Ok(Ok(g)) => break g,
+            Ok(Err(e)) => return fatal(&format!("Direct3D 11: {}", e.message())),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return fatal("Direct3D 11 initialization failed");
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        let mut msg = MSG::default();
+        unsafe {
+            if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                return 0;
+            }
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     };
     loader.set_device(gfx.device.clone(), gfx.max_texture_size());
     let renderer = match Renderer::new(&gfx.device) {
@@ -296,6 +346,8 @@ pub fn run() -> i32 {
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let auto_update = settings.auto_update;
     let mut app = App::new(hwnd, gfx, renderer, swap, settings, loader, dpi, client);
+    // The GDI first frame already made the window visible.
+    app.cloaked = !crate::first_frame::shown();
     if args.exit_after_first_frame {
         app.exit_after_first_frame = args
             .json
@@ -310,10 +362,12 @@ pub fn run() -> i32 {
     app.update_screen_box();
     app.loader.set_hwnd(hwnd);
     APP.with(|cell| *cell.borrow_mut() = Some(app));
+    crate::first_frame::release();
     update::schedule(auto_update);
 
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = SetForegroundWindow(hwnd);
         // Results that arrived before the window existed.
         let _ = PostMessageW(Some(hwnd), WM_LOADED, WPARAM(0), LPARAM(0));
     }

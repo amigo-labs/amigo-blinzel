@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
@@ -92,6 +92,9 @@ struct Shared {
     hwnd: AtomicIsize,
     /// Threads for decoding the image the user waits for (priority 0).
     decode_threads: usize,
+    /// The first decoded image went to the window for the GDI first frame.
+    first_frame_sent: AtomicBool,
+    first_frame_target: Mutex<Option<crate::first_frame::Target>>,
 }
 
 impl Shared {
@@ -146,6 +149,8 @@ impl Loader {
             results: Mutex::new(tx),
             hwnd: AtomicIsize::new(0),
             decode_threads: decode_threads.max(1),
+            first_frame_sent: AtomicBool::new(false),
+            first_frame_target: Mutex::new(None),
         });
         let (s_io, s_cpu) = (shared.clone(), shared.clone());
         let sched = Scheduler::new(
@@ -166,6 +171,11 @@ impl Loader {
             shared,
             results: rx,
         }
+    }
+
+    /// Lets the loader render the GDI first frame itself (see first_frame).
+    pub fn set_first_frame_target(&self, t: crate::first_frame::Target) {
+        *self.shared.first_frame_target.lock().unwrap() = Some(t);
     }
 
     pub fn set_hwnd(&self, hwnd: HWND) {
@@ -275,6 +285,50 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     let deliver = |stage: Stage, img: blinzel_core::pixel::Image, decode_ms: f64| -> bool {
         if cancel.is_cancelled() {
             return false;
+        }
+        let img = Arc::new(img);
+        // The device is still starting: the window shows this image through
+        // GDI meanwhile (see first_frame).
+        let hwnd = shared.hwnd.load(Ordering::Relaxed);
+        if job.priority == 0
+            && hwnd != 0
+            && shared.device.device.lock().unwrap().is_none()
+            && !shared.first_frame_sent.swap(true, Ordering::Relaxed)
+        {
+            // Rendered here, in parallel with the UI thread showing the
+            // window, when the layout does not depend on the image size.
+            let target = *shared.first_frame_target.lock().unwrap();
+            let rendered = target
+                .filter(|t| t.view.mode != blinzel_core::layout::ViewMode::FitWindowToImage)
+                .map(|t| {
+                    let bits = crate::first_frame::render(
+                        &img,
+                        probe.orientation,
+                        t.client,
+                        &t.view,
+                        t.background,
+                    );
+                    (bits, t.client)
+                });
+            let ff = Box::new(crate::first_frame::FirstFrame {
+                image: img.clone(),
+                orientation: probe.orientation,
+                rendered,
+            });
+            let ptr = Box::into_raw(ff);
+            blinzel_core::timing::mark("first_frame_posted");
+            unsafe {
+                if PostMessageW(
+                    Some(HWND(hwnd as *mut _)),
+                    crate::first_frame::WM_FIRST_FRAME,
+                    WPARAM(0),
+                    LPARAM(ptr as isize),
+                )
+                .is_err()
+                {
+                    drop(Box::from_raw(ptr));
+                }
+            }
         }
         let Some(device) = shared.wait_device(cancel) else {
             return false;

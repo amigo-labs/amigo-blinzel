@@ -12,6 +12,8 @@ pub mod clipboard;
 #[cfg(windows)]
 pub mod dialogs;
 #[cfg(windows)]
+pub mod first_frame;
+#[cfg(windows)]
 pub mod gfx;
 #[cfg(windows)]
 pub mod instance;
