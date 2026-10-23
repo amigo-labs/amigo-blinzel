@@ -16,3 +16,4 @@ blinzel-jpeg.workspace = true
 turbojpeg-sys = { workspace = true, optional = true }
 png.workspace = true
 gif.workspace = true
+ed25519-compact.workspace = true

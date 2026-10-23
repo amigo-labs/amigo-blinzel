@@ -37,6 +37,8 @@ pub enum Cmd {
     Last,
     Recycle,
     Language(Option<Lang>),
+    CheckUpdates,
+    About,
     Exit,
 }
 
@@ -67,6 +69,8 @@ impl Cmd {
             Cmd::Recycle => 20,
             Cmd::Exit => 21,
             Cmd::SaveCutout => 22,
+            Cmd::CheckUpdates => 23,
+            Cmd::About => 24,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -87,7 +91,7 @@ impl Cmd {
     }
 }
 
-const ALL: [Cmd; 22] = [
+const ALL: [Cmd; 24] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -110,6 +114,8 @@ const ALL: [Cmd; 22] = [
     Cmd::Recycle,
     Cmd::Exit,
     Cmd::SaveCutout,
+    Cmd::CheckUpdates,
+    Cmd::About,
 ];
 
 /// State the menu reflects.
@@ -361,6 +367,15 @@ fn build(s: &MenuState) -> Option<HMENU> {
         );
     }
     m.submenu(tr(Msg::MenuLanguage), lang);
+    m.separator();
+    m.item(
+        Cmd::CheckUpdates,
+        tr(Msg::MenuCheckUpdates),
+        None,
+        false,
+        true,
+    );
+    m.item(Cmd::About, tr(Msg::MenuAbout), None, false, true);
     m.separator();
     m.item(Cmd::Exit, tr(Msg::Exit), Some("Alt+F4".into()), false, true);
     Some(m.menu)

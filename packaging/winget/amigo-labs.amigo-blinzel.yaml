@@ -1,0 +1,7 @@
+# Version manifest. Fill {{VERSION}} and submit with the other two files
+# (see README.md).
+PackageIdentifier: amigo-labs.amigo-blinzel
+PackageVersion: "{{VERSION}}"
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.9.0

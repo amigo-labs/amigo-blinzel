@@ -21,6 +21,8 @@ zune-png = "0.5.2"
 zune-core = "0.5"
 png = "0.18"
 gif = "0.14"
+# Verifies our own signature of release checksums (self-updater).
+ed25519-compact = { version = "2.1", default-features = false }
 toml = "0.9"
 windows = "0.62"
 windows-sys = "0.61"

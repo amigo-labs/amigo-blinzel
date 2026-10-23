@@ -25,8 +25,8 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_METRICS, IDWriteFactory,
-    IDWriteTextFormat,
+    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    DWRITE_TEXT_METRICS, IDWriteFactory, IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
@@ -78,12 +78,20 @@ fn d2d_factory() -> windows::core::Result<ID2D1Factory1> {
 
 const FONT: &str = "Segoe UI";
 
-fn text_format(dw: &IDWriteFactory, px: f32) -> windows::core::Result<IDWriteTextFormat> {
+fn text_format(
+    dw: &IDWriteFactory,
+    px: f32,
+    bold: bool,
+) -> windows::core::Result<IDWriteTextFormat> {
     unsafe {
         dw.CreateTextFormat(
             &HSTRING::from(FONT),
             None,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            if bold {
+                DWRITE_FONT_WEIGHT_SEMI_BOLD
+            } else {
+                DWRITE_FONT_WEIGHT_NORMAL
+            },
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
             px,
@@ -98,7 +106,7 @@ pub fn prewarm() {
         .name("blinzel-text-prewarm".into())
         .spawn(|| {
             if let Ok(dw) = dwrite_factory() {
-                let _ = text_format(&dw, 14.0);
+                let _ = text_format(&dw, 14.0, true);
             }
             let _ = d2d_factory();
         });
@@ -114,8 +122,8 @@ pub struct Text {
     device: ID3D11Device,
     d2d: ID2D1DeviceContext,
     dwrite: IDWriteFactory,
-    formats: HashMap<u32, IDWriteTextFormat>,
-    cache: HashMap<(String, u32), TextTex>,
+    formats: HashMap<(u32, bool), IDWriteTextFormat>,
+    cache: HashMap<(String, u32, bool), TextTex>,
 }
 
 impl Text {
@@ -137,27 +145,46 @@ impl Text {
         })
     }
 
-    /// The texture for `text` at `px` pixels font size, wrapped at
-    /// `max_width` pixels.
+    /// The texture for `text` in semibold at `px` pixels font size, wrapped
+    /// at `max_width` pixels.
     pub fn get(&mut self, text: &str, px: f32, max_width: f32) -> windows::core::Result<&TextTex> {
+        self.get_weighted(text, px, max_width, true)
+    }
+
+    /// Like [`Text::get`], in semibold or regular weight.
+    pub fn get_weighted(
+        &mut self,
+        text: &str,
+        px: f32,
+        max_width: f32,
+        bold: bool,
+    ) -> windows::core::Result<&TextTex> {
         let key = (
             format!("{text}\u{0}{}", max_width as u32),
             (px * 10.0) as u32,
+            bold,
         );
         if !self.cache.contains_key(&key) {
             if self.cache.len() > 64 {
                 self.cache.clear();
             }
-            let tex = self.render(text, px, max_width)?;
+            let tex = self.render(text, px, max_width, bold)?;
             self.cache.insert(key.clone(), tex);
         }
         Ok(&self.cache[&key])
     }
 
-    fn render(&mut self, text: &str, px: f32, max_width: f32) -> windows::core::Result<TextTex> {
-        let fkey = (px * 10.0) as u32;
+    fn render(
+        &mut self,
+        text: &str,
+        px: f32,
+        max_width: f32,
+        bold: bool,
+    ) -> windows::core::Result<TextTex> {
+        let fkey = ((px * 10.0) as u32, bold);
         if !self.formats.contains_key(&fkey) {
-            self.formats.insert(fkey, text_format(&self.dwrite, px)?);
+            self.formats
+                .insert(fkey, text_format(&self.dwrite, px, bold)?);
         }
         let format = &self.formats[&fkey];
         let wide: Vec<u16> = text.encode_utf16().collect();

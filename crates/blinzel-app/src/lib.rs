@@ -26,6 +26,10 @@ pub mod run;
 #[cfg(windows)]
 pub mod settings_store;
 #[cfg(windows)]
+pub mod setup;
+#[cfg(windows)]
+pub mod update;
+#[cfg(windows)]
 pub mod wic;
 #[cfg(windows)]
 pub mod window;
