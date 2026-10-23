@@ -67,6 +67,9 @@ p, ul, ol, table, dl { margin: 0 0 16px; }
 table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
 th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 tr.ours td { font-weight: 600; }
+.features th, .features td { white-space: normal; min-width: 6em; vertical-align: top; font-size: 15px; }
+.features td a { color: inherit; text-decoration: underline dotted; }
+tr.ours th { font-weight: 700; }
 code { font: 14px/1.4 "Cascadia Code", Consolas, monospace; background: var(--card); padding: 1px 4px; border-radius: 3px; }
 .chart { width: 100%; max-width: 640px; height: auto; margin: 8px 0 24px; }
 .chart .label, .chart .value { fill: var(--fg); font-size: 15px; }

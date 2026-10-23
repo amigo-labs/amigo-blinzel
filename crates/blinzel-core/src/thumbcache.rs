@@ -45,6 +45,7 @@ impl Key {
 const RECORD: usize = 64;
 const BLOB_MAGIC: u32 = u32::from_le_bytes(*b"BLZT");
 const BLOB_HEADER: usize = 16;
+#[cfg_attr(not(feature = "turbojpeg"), allow(dead_code))]
 const FORMAT_JPEG: u8 = 0;
 const FORMAT_PNG: u8 = 1;
 
