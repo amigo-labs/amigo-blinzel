@@ -17,6 +17,7 @@ pub mod kernels;
 pub mod layout;
 pub mod natsort;
 pub mod pixel;
+pub mod preview;
 pub mod sched;
 pub mod selection;
 pub mod settings;

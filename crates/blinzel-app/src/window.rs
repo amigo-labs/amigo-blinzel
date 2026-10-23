@@ -163,6 +163,16 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_ERASEBKGND => return LRESULT(1),
         _ => {}
     }
+    // Before Direct3D is up, the first image comes through GDI.
+    let no_app = APP.with(|c| c.try_borrow().is_ok_and(|a| a.is_none()));
+    if no_app && let Some(r) = crate::first_frame::on_message(hwnd, msg, lp) {
+        return r;
+    }
+    if msg == crate::first_frame::WM_FIRST_FRAME {
+        // Too late: Direct3D shows the image. Free the message's payload.
+        drop(unsafe { Box::from_raw(lp.0 as *mut crate::first_frame::FirstFrame) });
+        return LRESULT(0);
+    }
     let handled = with_app(|app| {
         let mut actions = Vec::new();
         let outcome = handle(app, hwnd, msg, wp, lp, &mut actions);
@@ -646,7 +656,7 @@ pub fn set_cloak(hwnd: HWND, cloak: bool) {
     }
 }
 
-fn uncloak(hwnd: HWND) {
+pub(crate) fn uncloak(hwnd: HWND) {
     set_cloak(hwnd, false);
     platform::debug_log("window visible");
     blinzel_core::timing::mark("uncloak");
@@ -670,7 +680,7 @@ fn window_rect_for_client(client: RECT, dpi: u32) -> RECT {
     }
 }
 
-fn fit_window(hwnd: HWND, image: (u32, u32)) {
+pub(crate) fn fit_window(hwnd: HWND, image: (u32, u32)) {
     if is_maximized(hwnd) {
         return;
     }
