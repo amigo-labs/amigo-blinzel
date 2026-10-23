@@ -18,7 +18,7 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::{
     DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO, IDXGIAdapter, IDXGIAdapter3,
-    IDXGIDevice1, IDXGIFactory2,
+    IDXGIDevice1, IDXGIDevice3, IDXGIFactory2,
 };
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::core::HRESULT;
@@ -128,6 +128,19 @@ impl Gfx {
         unsafe { self.adapter.GetDesc() }
             .map(|d| crate::platform::from_wide(&d.Description))
             .unwrap_or_default()
+    }
+
+    /// Hands the driver's idle allocations back (resident mode, hidden).
+    /// The renderer sets all pipeline state per frame, so clearing it is
+    /// safe.
+    pub fn trim(&self) {
+        unsafe {
+            self.context.ClearState();
+            self.context.Flush();
+        }
+        if let Ok(d) = self.device.cast::<IDXGIDevice3>() {
+            unsafe { d.Trim() };
+        }
     }
 
     /// Bytes of video memory we allow ourselves to keep in textures.

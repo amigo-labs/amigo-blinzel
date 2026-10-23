@@ -91,6 +91,12 @@ update_current = "amigo-blinzel {version} is up to date."
 update_ready = "Version {version} is downloaded and active from the next start."
 update_failed = "Update failed: {reason}"
 
+menu_settings = "Settings"
+setting_resident = "Keep ready in the background (faster start)"
+setting_auto_update = "Install updates automatically"
+setting_single_instance = "Open images in the same window"
+tray_show = "Show amigo-blinzel"
+
 [messages.images_count]
 one = "{n} image"
 other = "{n} images"

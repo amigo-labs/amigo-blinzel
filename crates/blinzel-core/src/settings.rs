@@ -20,6 +20,9 @@ pub struct Settings {
     pub background: [u8; 3],
     /// Check for updates daily and install them silently.
     pub auto_update: bool,
+    /// Stay running in the background (tray) after closing, and start at
+    /// sign-in, so opening an image needs no process or GPU start.
+    pub resident: bool,
 }
 
 impl Default for Settings {
@@ -33,6 +36,7 @@ impl Default for Settings {
             prefetch_behind: 2,
             background: [0x1E, 0x1E, 0x1E],
             auto_update: true,
+            resident: false,
         }
     }
 }
@@ -83,6 +87,7 @@ impl Settings {
                     s.prefetch_behind = value.parse::<u32>().unwrap_or(s.prefetch_behind).min(32)
                 }
                 "auto_update" => s.auto_update = value.parse().unwrap_or(s.auto_update),
+                "resident" => s.resident = value.parse().unwrap_or(s.resident),
                 _ => {}
             }
         }
@@ -109,7 +114,8 @@ impl Settings {
              prefetch_ahead = {}\n\
              prefetch_behind = {}\n\
              background = \"#{r:02X}{g:02X}{b:02X}\"\n\
-             auto_update = {}\n",
+             auto_update = {}\n\
+             resident = {}\n",
             self.view.mode.key(),
             self.view.no_upscale,
             self.language.as_deref().unwrap_or("auto"),
@@ -118,6 +124,7 @@ impl Settings {
             self.prefetch_ahead,
             self.prefetch_behind,
             self.auto_update,
+            self.resident,
         )
     }
 }
@@ -140,6 +147,7 @@ mod tests {
             prefetch_behind: 1,
             background: [0x12, 0xAB, 0xFF],
             auto_update: false,
+            resident: true,
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
         assert_eq!(

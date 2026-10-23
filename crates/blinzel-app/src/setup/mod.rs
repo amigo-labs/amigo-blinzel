@@ -74,6 +74,7 @@ pub fn run(mode: Mode) -> i32 {
         Mode::Uninstall { silent } => uninstall(&layout, &exe, silent),
         Mode::UninstallFromTemp { silent, parent } => {
             wait_for_exit(parent);
+            stop_running_instance();
             let r = install::uninstall(&layout);
             if let Err(e) = &r
                 && !silent
@@ -98,6 +99,7 @@ pub fn install_now(layout: &Layout, exe: &Path) -> Result<(), String> {
 /// `%TEMP%`, let the copy finish the job after this process exits.
 fn uninstall(layout: &Layout, exe: &Path, silent: bool) -> i32 {
     if !layout.is_installed_exe(exe) {
+        stop_running_instance();
         return match install::uninstall(layout) {
             Ok(()) => 0,
             Err(_) => 1,
@@ -120,6 +122,13 @@ fn uninstall(layout: &Layout, exe: &Path, silent: bool) -> i32 {
     match cmd.spawn() {
         Ok(_) => 0,
         Err(_) => 1,
+    }
+}
+
+/// A resident instance keeps the executable open: ask it to exit first.
+fn stop_running_instance() {
+    for pid in crate::instance::quit_all() {
+        wait_for_exit(pid);
     }
 }
 

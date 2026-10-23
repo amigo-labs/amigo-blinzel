@@ -33,6 +33,8 @@ pub struct Layout {
     pub registered_apps: String,
     pub uninstall: String,
     pub app_paths: String,
+    /// Programs started at sign-in (resident mode).
+    pub run: String,
     /// Tell the shell about new associations (off in tests).
     pub notify_shell: bool,
 }
@@ -50,6 +52,7 @@ impl Layout {
             registered_apps: r"Software\RegisteredApplications".into(),
             uninstall: format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{PRODUCT}"),
             app_paths: format!(r"Software\Microsoft\Windows\CurrentVersion\App Paths\{EXE_NAME}"),
+            run: r"Software\Microsoft\Windows\CurrentVersion\Run".into(),
             notify_shell: true,
         })
     }
@@ -65,6 +68,7 @@ impl Layout {
             registered_apps: format!(r"{reg_root}\RegisteredApplications"),
             uninstall: format!(r"{reg_root}\Uninstall"),
             app_paths: format!(r"{reg_root}\AppPaths"),
+            run: format!(r"{reg_root}\Run"),
             notify_shell: false,
         }
     }
@@ -200,6 +204,7 @@ pub fn uninstall(layout: &Layout) -> Result<(), String> {
     note(registry::delete_tree(&layout.app_key));
     note(registry::delete_tree(&layout.app_paths));
     note(registry::delete_tree(&layout.uninstall));
+    note(registry::delete_value(&layout.run, PRODUCT));
     let _ = std::fs::remove_file(layout.shortcut());
     for dir in [&layout.dir, &layout.cache] {
         if dir.exists() {
@@ -214,6 +219,24 @@ pub fn uninstall(layout: &Layout) -> Result<(), String> {
     } else {
         Err(errors.join("; "))
     }
+}
+
+/// The sign-in command line of the resident instance.
+pub fn autostart_command(exe: &Path) -> String {
+    format!("\"{}\" --resident", exe.display())
+}
+
+/// Starts `exe` hidden at sign-in (resident mode), or with `None` no
+/// longer.
+pub fn set_autostart(layout: &Layout, exe: Option<&Path>) -> Result<(), String> {
+    match exe {
+        Some(exe) => registry::Key::create(&layout.run)?.set_str(PRODUCT, &autostart_command(exe)),
+        None => registry::delete_value(&layout.run, PRODUCT),
+    }
+}
+
+pub fn autostart(layout: &Layout) -> Option<String> {
+    registry::get_str(&layout.run, PRODUCT)
 }
 
 fn notify_associations_changed() {

@@ -57,7 +57,23 @@ pub enum Action {
     SaveCutout(SaveJob),
     CheckUpdates,
     About,
+    /// Turn resident mode on or off (tray icon, start at sign-in).
+    SetResident(bool),
+    /// The tray icon's menu at a screen position.
+    TrayMenu {
+        x: i32,
+        y: i32,
+    },
+    /// Show the window: a hidden resident one comes back (cloaked until
+    /// the first frame of the file just `opened`), a visible one is
+    /// activated.
+    Wake {
+        opened: bool,
+    },
+    /// The user closed the window: hides it in resident mode, else exits.
     Close,
+    /// Exit for good, also in resident mode.
+    Exit,
     Activate,
     Uncloak,
     Quit,
@@ -122,6 +138,13 @@ pub struct App {
     pub fullscreen: bool,
     pub maximized: bool,
     pub cloaked: bool,
+    /// Resident and closed: hidden, nothing loaded, device kept warm.
+    pub hidden: bool,
+    /// Take the foreground once the window is uncloaked (after a wake).
+    pub activate_on_uncloak: bool,
+    /// Benchmark of a resident instance (`--resident --json`): the timing
+    /// marks of each wake go here.
+    pub wake_report: Option<PathBuf>,
     pub dpi: u32,
     pub client: (u32, u32),
     direction: isize,
@@ -172,6 +195,9 @@ impl App {
             fullscreen: false,
             maximized: false,
             cloaked: true,
+            hidden: false,
+            activate_on_uncloak: false,
+            wake_report: None,
             dpi,
             client,
             direction: 1,
@@ -200,11 +226,101 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------- resident
+
+    /// Resident mode, window closed: forgets the session (image, folder,
+    /// textures) and gives memory back. Device, shaders and threads stay.
+    pub fn hide(&mut self) {
+        self.loader.set_wanted(Vec::new());
+        let evicted = self.textures.clear();
+        self.loader.forget(evicted.into_iter().map(|(k, _)| k));
+        self.current = None;
+        self.shown = None;
+        self.probes.clear();
+        self.failed.clear();
+        self.list = FileList::default();
+        self.list_rx = None;
+        self.watcher = None;
+        self.reset_view();
+        self.hover = None;
+        self.pressed = None;
+        self.sized_for = None;
+        self.notice = None;
+        self.direction = 1;
+        self.hidden = true;
+        self.cloaked = true;
+        self.activate_on_uncloak = false;
+        self.gfx.trim();
+        // Also what prefetch jobs still in flight give back later.
+        blinzel_core::bufpool::global().set_max_retained(0);
+    }
+
+    /// A hidden instance waking up: another window may have changed the
+    /// settings meanwhile.
+    pub fn reload_settings(&mut self) {
+        self.settings = settings_store::load();
+        let lang = self
+            .settings
+            .language
+            .as_deref()
+            .and_then(blinzel_i18n::lang_from_code);
+        blinzel_i18n::set_lang(lang.unwrap_or_else(crate::run::system_language));
+    }
+
+    /// Resident start: decodes, uploads and draws a generated JPEG once
+    /// while hidden, so the first hand-off does not pay first-use costs
+    /// (shader compilation in the driver, decoder threads, code paging).
+    #[cfg(feature = "turbojpeg")]
+    pub fn warm_up(&mut self, threads: usize) {
+        use blinzel_core::decode::{self, jpeg};
+        // About the size of a photo's screen stage: the driver's first
+        // allocation of textures that large is slow too.
+        let (w, h) = (3072, 2048);
+        let pixels = blinzel_core::testimg::rgb(w, h);
+        let Ok(data) = jpeg::encode_rgb(&pixels, w, h, jpeg::EncodeOptions::default()) else {
+            return;
+        };
+        let req = decode::Request::Full;
+        let Ok(img) = decode::decode_with(&data, req, threads) else {
+            return;
+        };
+        let tile = self
+            .gfx
+            .max_texture_size()
+            .min(crate::gfx::texture::DEFAULT_TILE);
+        let Ok(gpu) =
+            crate::gfx::texture::upload(&self.gfx.device, &img, Orientation::NORMAL, tile)
+        else {
+            return;
+        };
+        let Some(rtv) = self.swap.rtv().cloned() else {
+            return;
+        };
+        let bg = Rgba::from_u8(self.settings.background, 1.0);
+        let ctx = self.gfx.context.clone();
+        let full = (gpu.full_width, gpu.full_height);
+        let l = compute(
+            full,
+            (self.client.0 as f64, self.client.1 as f64),
+            &self.settings.view,
+            &ViewState::default(),
+        );
+        let stage = (gpu.width, gpu.height);
+        let xform = stage_to_client(&l, Orientation::NORMAL, full, stage);
+        let content = content_in_stage(&l, Orientation::NORMAL, full, stage);
+        self.renderer.begin(&ctx, &rtv, self.swap.size, bg);
+        self.renderer.draw_image(&ctx, &gpu, &xform, &content, bg);
+        let _ = self.swap.present();
+    }
+
     // ---------------------------------------------------------------- files
 
     /// Opens a file: shows it as soon as it is decoded, lists its folder in
     /// the background.
     pub fn open(&mut self, path: PathBuf) -> Vec<Action> {
+        if self.hidden {
+            self.reload_settings();
+        }
         let entry = match io::entry(&path) {
             Ok(e) => e,
             Err(e) => {
@@ -434,6 +550,13 @@ impl App {
 
     /// Drains finished loads into the texture cache.
     pub fn on_loaded(&mut self) -> Vec<Action> {
+        if self.hidden {
+            // Late results of the closed session: not kept.
+            while let Ok(l) = self.loader.results.try_recv() {
+                self.loader.forget([loader::key(l.cache_id, l.stage)]);
+            }
+            return vec![];
+        }
         let mut changed_current = false;
         let current_id = self.current.as_ref().map(|c| c.cache_id);
         while let Ok(l) = self.loader.results.try_recv() {
@@ -454,7 +577,8 @@ impl App {
                     let bytes = img.bytes;
                     self.textures
                         .insert(loader::key(cache_id, stage), img, bytes);
-                    if Some(cache_id) == current_id && !self.first_image_shown {
+                    // The image the user waits for (startup or wake).
+                    if Some(cache_id) == current_id && (self.cloaked || !self.first_image_shown) {
                         timing::record("first_read_us", read_ms * 1000.0);
                         timing::record("first_decode_us", decode_ms * 1000.0);
                         timing::record("first_upload_us", upload_ms * 1000.0);
@@ -625,13 +749,13 @@ impl App {
         let _ = self.swap.present();
 
         let mut actions = Vec::new();
+        if showed_image && self.cloaked {
+            actions.push(Action::Uncloak);
+        }
         if showed_image && !self.first_image_shown {
             self.first_image_shown = true;
             timing::mark("first_present");
             crate::update::on_first_frame();
-            if self.cloaked {
-                actions.push(Action::Uncloak);
-            }
             if let Some(out) = &self.exit_after_first_frame {
                 // The adapter tells a real GPU from WARP / Basic Render
                 // Driver, which costs hundreds of ms per frame.
@@ -1030,6 +1154,9 @@ impl App {
                 .language
                 .as_deref()
                 .and_then(blinzel_i18n::lang_from_code),
+            resident: self.settings.resident,
+            auto_update: self.settings.auto_update,
+            single_instance: self.settings.single_instance,
         }
     }
 
@@ -1143,6 +1270,23 @@ impl App {
             }
             Cmd::Exit => vec![Action::Close],
             Cmd::CheckUpdates => vec![Action::CheckUpdates],
+            Cmd::ShowWindow => vec![Action::Wake { opened: false }],
+            Cmd::Quit => vec![Action::Exit],
+            Cmd::ToggleResident => {
+                self.settings.resident = !self.settings.resident;
+                settings_store::save(&self.settings);
+                vec![Action::SetResident(self.settings.resident)]
+            }
+            Cmd::ToggleAutoUpdate => {
+                self.settings.auto_update = !self.settings.auto_update;
+                settings_store::save(&self.settings);
+                vec![]
+            }
+            Cmd::ToggleSingleInstance => {
+                self.settings.single_instance = !self.settings.single_instance;
+                settings_store::save(&self.settings);
+                vec![]
+            }
             Cmd::About => vec![Action::About],
             Cmd::SaveCutout => match self.save_job() {
                 Some(job) => vec![Action::SaveCutout(job)],
