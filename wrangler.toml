@@ -14,3 +14,8 @@ command = 'sh "$(git rev-parse --show-toplevel)/website/build.sh"'
 directory = "./website/dist"
 not_found_handling = "404-page"
 html_handling = "auto-trailing-slash"
+
+# Branch builds in Workers Builds run `wrangler preview` (Worker Previews),
+# which requires this block. Empty: a static site has no bindings that need
+# Preview-specific values; assets stay at the top level.
+[previews]
