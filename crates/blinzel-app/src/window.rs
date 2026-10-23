@@ -412,6 +412,10 @@ fn handle(
             }
             done
         }
+        WM_TIMER if wp.0 == crate::app::TIMER_ANIM => {
+            app.on_anim_timer();
+            done
+        }
         WM_TIMER if wp.0 == TIMER_NOTICE => {
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_NOTICE);

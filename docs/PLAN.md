@@ -339,6 +339,12 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - ⬜ **Zahlen:** Referenzwerte von einer definierten Referenzmaschine (Hardware wird angegeben). CI-Werte nur als Trend.
 - 🟡 **Vergleichstabelle der Funktionen** (`compare.html`, DE/EN): Lizenz, Firmennutzung, Werbung, Telemetrie, ARM64, Downloadgröße, Farbprofile, HEIC/AVIF/JPEG XL/WebP/RAW für IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv und Windows Fotos. Stand 23.10.2026, jede Zelle verlinkt ihre Quelle; Unbelegtes steht als „nicht belegt“. Vor der Veröffentlichung einmal von Hand gegenlesen. Startzeit und Speicher kommen aus der Referenzmessung.
 
+### Animationen (M5)
+
+- 🟡 **GIF:** `decode::gif::decode_animation` komponiert jeden Frame auf die Leinwand wie Browser: transparente Pixel lassen die Leinwand stehen, Disposal „Hintergrund“ leert das Frame-Rechteck, „Vorheriges“ stellt den Stand davor wieder her; Verzögerungen unter 20 ms spielen mit 100 ms; die Wiederholungszahl aus der NETSCAPE-Erweiterung gilt (sonst einmal). Höchstens 256 MB an Frames, längere Animationen spielen, was hineinpasst.
+- Der Loader hat dafür die Stufe `Anim`, nur für das aktuelle Bild und erst, wenn dessen Probe GIF sagt: Das erste Bild erscheint wie bisher sofort, die Animation läuft an, sobald alle Frames auf der GPU sind (480 × 270: 1,2 ms je Frame decodieren). Ein Timer schaltet die Frames weiter; beim Wechsel des Bildes wird die Animation verworfen.
+- Offen: animiertes WebP auf derselben Grundlage, Frames schon während des Decodierens abspielen.
+
 ## 12. Meilensteine
 
 | | Inhalt | Ziel | Status |
@@ -348,7 +354,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
-| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
+| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF-Animation fertig; offen: WebP, AVIF, HEIC, JXL, TIFF, RAW |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |

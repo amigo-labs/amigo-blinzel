@@ -34,6 +34,19 @@ pub enum Stage {
     /// Fitted to the screen (DCT-scaled for JPEG).
     Screen = 1,
     Full = 2,
+    /// Every frame of an animation (the current image only).
+    Anim = 3,
+}
+
+/// Bytes of decoded frames an animation may use; longer ones play the
+/// frames that fit.
+const ANIM_BUDGET: usize = 256 << 20;
+
+/// An animation's frames on the GPU and how long each stays.
+pub struct GpuAnimation {
+    pub frames: Vec<(Arc<GpuImage>, u32)>,
+    /// How often the whole animation plays; `None` for ever.
+    pub plays: Option<u32>,
 }
 
 /// Texture/job key: the file's cache id with the stage in the low bits.
@@ -45,7 +58,8 @@ pub fn stage_of(key: Key) -> Stage {
     match key & 3 {
         0 => Stage::Preview,
         1 => Stage::Screen,
-        _ => Stage::Full,
+        2 => Stage::Full,
+        _ => Stage::Anim,
     }
 }
 
@@ -66,6 +80,8 @@ pub struct Loaded {
     pub stage: Stage,
     pub probe: Option<Probe>,
     pub image: Result<Arc<GpuImage>, String>,
+    /// Stage `Anim`: the frames, or `None` for a still image.
+    pub animation: Option<Arc<GpuAnimation>>,
     pub read_ms: f64,
     pub decode_ms: f64,
     pub upload_ms: f64,
@@ -252,6 +268,7 @@ fn io_stage(shared: &Shared, key: Key, _cancel: &CancelToken) -> Option<IoOut> {
                 stage: job.stage,
                 probe: None,
                 image: Err(e.to_string()),
+                animation: None,
                 read_ms: 0.0,
                 decode_ms: 0.0,
                 upload_ms: 0.0,
@@ -273,6 +290,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
             stage: job.stage,
             probe,
             image: Err(msg),
+            animation: None,
             read_ms: input.read_ms,
             decode_ms: 0.0,
             upload_ms: 0.0,
@@ -286,6 +304,9 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     // A colour transform, if the image needs one, builds while it decodes.
     if let Some(c) = &*shared.color.lock().unwrap() {
         c.prepare(probe.icc.as_ref());
+    }
+    if job.stage == Stage::Anim {
+        return animation_stage(shared, &job, data, probe, input.read_ms, cancel);
     }
     let (ow, oh) = probe.oriented_size();
     let fit_scale = (sw as f64 / ow as f64).min(sh as f64 / oh as f64);
@@ -357,6 +378,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
             stage,
             probe: Some(probe.clone()),
             image: gpu.map(Arc::new).map_err(|e| e.message()),
+            animation: None,
             read_ms: input.read_ms,
             decode_ms,
             upload_ms,
@@ -409,6 +431,57 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     }
 }
 
+/// Decodes every frame of an animated image and uploads them.
+fn animation_stage(
+    shared: &Shared,
+    job: &Job,
+    data: &[u8],
+    probe: Probe,
+    read_ms: f64,
+    cancel: &CancelToken,
+) {
+    let t = Instant::now();
+    let decoded = match probe.format {
+        blinzel_core::format::Format::Gif => {
+            blinzel_core::decode::gif::decode_animation(data, ANIM_BUDGET)
+                .ok()
+                .flatten()
+        }
+        _ => None,
+    };
+    let decode_ms = t.elapsed().as_secs_f64() * 1e3;
+    let t = Instant::now();
+    let animation = decoded.and_then(|a| {
+        let device = shared.wait_device(cancel)?;
+        let tile = *shared.tile.lock().unwrap();
+        let frames = a
+            .frames
+            .into_iter()
+            .map(|f| {
+                let gpu = upload(&device, &f.image, probe.orientation, tile).ok()?;
+                Some((Arc::new(gpu), f.delay_ms))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Arc::new(GpuAnimation {
+            frames,
+            plays: a.plays,
+        }))
+    });
+    if cancel.is_cancelled() {
+        return;
+    }
+    shared.send(Loaded {
+        cache_id: job.cache_id,
+        stage: Stage::Anim,
+        probe: Some(probe),
+        image: Err("animation stage".into()),
+        animation,
+        read_ms,
+        decode_ms,
+        upload_ms: t.elapsed().as_secs_f64() * 1e3,
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,7 +489,7 @@ mod tests {
     #[test]
     fn keys_carry_stage() {
         let id = 0xDEAD_BEEF_1234_5677;
-        for s in [Stage::Preview, Stage::Screen, Stage::Full] {
+        for s in [Stage::Preview, Stage::Screen, Stage::Full, Stage::Anim] {
             assert_eq!(stage_of(key(id, s)), s);
             assert_eq!(key(id, s) & !3, id & !3);
         }
