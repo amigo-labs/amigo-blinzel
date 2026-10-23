@@ -1,0 +1,13 @@
+<!-- title: Code-Signing-Policy -->
+<p>Kostenlose Code-Signierung durch <a href="https://about.signpath.io">SignPath.io</a>, Zertifikat der <a href="https://signpath.org">SignPath Foundation</a>.</p>
+<h2>Was signiert wird</h2>
+<p>Signiert werden nur die Release-Dateien <code>amigo-blinzel-setup-x64.exe</code> und <code>amigo-blinzel-setup-arm64.exe</code>. Sie entstehen ausschließlich im Release-Workflow auf GitHub-gehosteten Runnern, aus dem öffentlichen Quellcode dieses Repositorys.</p>
+<h2>Rollen</h2>
+<ul>
+<li>Committer und Reviewer: die Mitglieder der Organisation <a href="https://github.com/amigo-labs">amigo-labs</a> auf GitHub</li>
+<li>Freigabe jeder Signatur: ein Maintainer von amigo-labs, manuell in SignPath</li>
+</ul>
+<h2>Zusätzliche Prüfung</h2>
+<p>Die Prüfsummen jedes Release werden zusätzlich mit einem eigenen Ed25519-Schlüssel des Projekts signiert. Der Updater installiert nur Dateien, deren Prüfsumme, eigene Signatur und Authenticode-Signatur stimmen.</p>
+<h2>Datenschutz</h2>
+<p>Das Programm überträgt keine Daten an andere Systeme, außer bei der Update-Prüfung bei GitHub (siehe <a href="/de/privacy">Datenschutz</a>). Sie lässt sich abschalten.</p>

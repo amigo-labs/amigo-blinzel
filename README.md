@@ -28,11 +28,14 @@ Ein Ausschnitt lässt sich als neue Datei speichern. Bei JPEG-Quellen werden dab
 
 **Systemvoraussetzung:** Windows 11 ab Version 24H2, x64 oder ARM64.
 
+**Installation:** Die Exe ist zugleich Installer. Als `amigo-blinzel-setup-*.exe` gestartet (oder mit `--install`), installiert sie sich pro Benutzer ohne Administratorrechte; `--install --silent` für winget. Deinstallieren über die Windows-Einstellungen. Updates prüft sie höchstens einmal am Tag still im Hintergrund (`auto_update = false` in `%APPDATA%\amigo-blinzel\settings.toml` schaltet das ab).
+
 Der vollständige Plan mit allen Entscheidungen und Checklisten steht in [docs/PLAN.md](docs/PLAN.md).
 
 ## Woher die Geschwindigkeit kommt
 
 - **Decodieren in Bildschirmauflösung.** JPEGs werden per DCT-Skalierung direkt in YCbCr-Ebenen decodiert, Farbumrechnung und Upsampling macht der Shader. Eingebettete Kamera-Vorschaubilder erscheinen zuerst.
+- **Eigener paralleler JPEG-Decoder.** Das sichtbare Bild decodiert `blinzel-jpeg` auf allen P-Kernen, auch ohne Restart-Marker (spekulatives Huffman-Decoding mit Selbstsynchronisation), byte-identisch mit libjpeg-turbo.
 - **Prefetch in Blätterrichtung.** Ein Prioritäts-Scheduler mit Abbruch lädt voraus, Ergebnisse liegen als GPU-Texturen bereit.
 - **Paralleler Start.**
   - Das Fenster entsteht unsichtbar, ohne DWM-Animation.
@@ -46,10 +49,13 @@ Der vollständige Plan mit allen Entscheidungen und Checklisten steht in [docs/P
 | Crate | Inhalt |
 |---|---|
 | `blinzel-core` | Decoder (JPEG via libjpeg-turbo, PNG, GIF, eigener BMP), EXIF/MPF, Layout, Auswahl, Scheduler, Caches, CPU-Referenz-Renderer – plattformunabhängig, auf Linux getestet |
-| `blinzel-jpeg` | eigener JPEG-Parser, Basis für den parallelen Decoder (nächster Meilenstein) |
+| `blinzel-jpeg` | eigener JPEG-Parser und paralleler Decoder (sequentiell und progressive), byte-identisch mit libjpeg-turbo |
 | `blinzel-i18n` | Übersetzungen aus `i18n/*.toml`, zur Compile-Zeit in statische Tabellen übersetzt (DE, EN) |
 | `blinzel-app` | `blinzel.exe`: Fenster, D3D11-Renderer, Lade-Pipeline, WIC-Fallback (TIFF, HEIC, AVIF, WebP, RAW …) |
-| `blinzel-bench` | Testkorpus-Generator und Benchmarks Library vs. Eigenbau |
+| `blinzel-bench` | Testkorpus-Generator und Benchmarks Library vs. Eigenbau (`run --check` prüft auch die Byte-Gleichheit von `blinzel-jpeg`) |
+| `blinzel-race` | Wettbewerbsvergleich: misst Viewer von außen über Desktop Duplication |
+| `blinzel-release` | Release-Schlüssel erzeugen, `SHA256SUMS` signieren und prüfen |
+| `blinzel-site` | baut die Website (`website/`) mit Diagrammen als Inline-SVG |
 
 ## Bauen
 
@@ -66,6 +72,14 @@ Benchmarks:
 cargo run --release -p blinzel-bench -- corpus testdata/generated
 cargo run --release -p blinzel-bench -- run testdata/generated --json bench.json
 target/release/blinzel.exe --bench testdata/generated --json bench-app.json
+```
+
+Wettbewerbsvergleich und Website:
+
+```
+cargo run --release -p blinzel-race -- corpus race-images
+cargo run --release -p blinzel-race -- run race-images --json website/data/race.json
+cargo run --release -p blinzel-site                       # website/dist
 ```
 
 Unter Linux laufen alle plattformunabhängigen Tests. `cargo xwin check --target x86_64-pc-windows-msvc` prüft die Windows-App.

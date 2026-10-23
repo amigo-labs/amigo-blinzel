@@ -1,0 +1,13 @@
+<!-- title: Download -->
+<p>Version {{version}} · Windows 11 version 24H2 or newer</p>
+<div class="cta">
+<a class="button" href="{{download:x64}}">x64</a>
+<a class="button secondary" href="{{download:arm64}}">ARM64</a>
+</div>
+<h2>Installation</h2>
+<p>The downloaded file is viewer and installer in one. It installs for you only, to <code>%LOCALAPPDATA%\Programs\amigo-blinzel</code>, without administrator rights. To make amigo-blinzel the default for images, use Windows Settings; the setup opens the page if you like.</p>
+<p>Uninstall: Settings → Apps → Installed apps.</p>
+<h2>Verify</h2>
+<p>The checksums are in <a href="{{download:sums}}">SHA256SUMS</a>, signed with the project's release key. On Windows: <code>Get-FileHash amigo-blinzel-setup-x64.exe</code>.</p>
+<h2>Updates</h2>
+<p>amigo-blinzel asks GitHub at most once a day whether there is a new version and installs it silently; it takes effect at the next start. To turn this off: <code>auto_update = false</code> in <code>%APPDATA%\amigo-blinzel\settings.toml</code>.</p>

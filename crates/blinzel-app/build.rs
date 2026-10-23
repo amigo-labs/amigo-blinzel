@@ -19,10 +19,15 @@ fn main() {
     let src = PathBuf::from("src/gfx/shaders/blinzel.hlsl");
     println!("cargo:rerun-if-changed={}", src.display());
     println!("cargo:rerun-if-env-changed=FXC");
+    println!("cargo:rerun-if-env-changed=RC");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let target_windows = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
 
-    let fxc = if cfg!(windows) { find_fxc() } else { None };
+    let fxc = if cfg!(windows) {
+        find_sdk_tool("fxc.exe", "FXC")
+    } else {
+        None
+    };
     match (target_windows, fxc) {
         (true, Some(fxc)) => {
             for (entry, profile, file) in SHADERS {
@@ -64,12 +69,64 @@ fn main() {
             manifest.display()
         );
         println!("cargo:rustc-link-arg-bins=/MANIFESTUAC:NO");
+        version_resource(&out);
     }
 }
 
-/// `FXC` env var, else the newest `Windows Kits\10\bin\<ver>\x64\fxc.exe`.
-fn find_fxc() -> Option<PathBuf> {
-    if let Some(p) = env::var_os("FXC") {
+/// VERSIONINFO from the crate version: file properties, Authenticode
+/// metadata and benchmark tools read it.
+fn version_resource(out: &Path) {
+    let Some(rc) = find_sdk_tool("rc.exe", "RC") else {
+        println!("cargo:warning=rc.exe not found: no version resource");
+        return;
+    };
+    let version = env::var("CARGO_PKG_VERSION").unwrap();
+    let nums: Vec<&str> = version.split('.').collect();
+    let comma = format!("{},{},{},0", nums[0], nums[1], nums[2]);
+    let script = format!(
+        r#"1 VERSIONINFO
+FILEVERSION {comma}
+PRODUCTVERSION {comma}
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "amigo-labs"
+      VALUE "FileDescription", "amigo-blinzel"
+      VALUE "FileVersion", "{version}"
+      VALUE "InternalName", "blinzel"
+      VALUE "OriginalFilename", "blinzel.exe"
+      VALUE "ProductName", "amigo-blinzel"
+      VALUE "ProductVersion", "{version}"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+"#
+    );
+    let src = out.join("version.rc");
+    let res = out.join("version.res");
+    std::fs::write(&src, script).unwrap();
+    let status = Command::new(&rc)
+        .args(["/nologo", "/fo"])
+        .arg(&res)
+        .arg(&src)
+        .status()
+        .unwrap_or_else(|e| panic!("cannot run {}: {e}", rc.display()));
+    assert!(status.success(), "rc.exe failed");
+    println!("cargo:rustc-link-arg-bins={}", res.display());
+}
+
+/// The `var` environment variable, else the newest
+/// `Windows Kits\10\bin\<ver>\x64\<name>`.
+fn find_sdk_tool(name: &str, var: &str) -> Option<PathBuf> {
+    if let Some(p) = env::var_os(var) {
         return Some(PathBuf::from(p));
     }
     let roots = [
@@ -90,13 +147,13 @@ fn find_fxc() -> Option<PathBuf> {
             .into_iter()
             .flatten()
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.join(arch).join("fxc.exe").is_file())
+            .filter(|p| p.join(arch).join(name).is_file())
             .collect();
         versions.sort_by_key(|p| version_key(p));
         if let Some(v) = versions.pop() {
-            return Some(v.join(arch).join("fxc.exe"));
+            return Some(v.join(arch).join(name));
         }
-        let flat = bin.join(arch).join("fxc.exe");
+        let flat = bin.join(arch).join(name);
         if flat.is_file() {
             return Some(flat);
         }

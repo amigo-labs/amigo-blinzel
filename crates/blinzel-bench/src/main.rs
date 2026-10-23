@@ -684,9 +684,9 @@ fn write_json(path: &Path, results: &[Result_]) -> Result<(), String> {
         "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {cpus},\n  \"cpu\": {}, \"cpu_features\": {}, \"build_features\": {},\n  \"results\": [\n{}\n  ]\n}}\n",
         json_str(std::env::consts::OS),
         json_str(std::env::consts::ARCH),
-        json_str(&simd::cpu_name()),
-        list(simd::cpu_features()),
-        list(simd::build_features()),
+        json_str(&blinzel_core::kernels::cpu_name()),
+        list(blinzel_core::kernels::cpu_features()),
+        list(blinzel_core::kernels::build_features()),
         items.join(",\n")
     );
     fs::write(path, json).map_err(|e| e.to_string())
