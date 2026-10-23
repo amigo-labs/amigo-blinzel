@@ -2,29 +2,11 @@
 //! animations every frame composited the way browsers do (transparency,
 //! disposal, minimum delay).
 
-use super::{DecodeError, Result, check_size};
+use super::{AnimFrame, Animation, DecodeError, Result, check_size, min_delay_ms};
 use crate::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 
-/// One frame of an animation: the whole canvas after it, and how long it
-/// stays.
-pub struct AnimFrame {
-    pub image: Image,
-    pub delay_ms: u32,
-}
-
-pub struct Animation {
-    pub frames: Vec<AnimFrame>,
-    /// How often the whole animation plays; `None` for ever.
-    pub plays: Option<u32>,
-}
-
-/// Delays below 20 ms play at 100 ms, like in browsers (many files say 0).
 fn delay_ms(centiseconds: u16) -> u32 {
-    if centiseconds < 2 {
-        100
-    } else {
-        centiseconds as u32 * 10
-    }
+    min_delay_ms(centiseconds as u32 * 10)
 }
 
 /// Every frame of an animated GIF on its canvas, as long as the frames
