@@ -7,6 +7,7 @@ pub mod gif;
 pub mod jpeg;
 pub mod own_jpeg;
 pub mod png;
+pub mod webp;
 
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -61,6 +62,25 @@ impl fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 
 pub type Result<T> = std::result::Result<T, DecodeError>;
+
+/// One frame of an animation: the whole canvas after it, and how long it
+/// stays.
+pub struct AnimFrame {
+    pub image: Image,
+    pub delay_ms: u32,
+}
+
+pub struct Animation {
+    pub frames: Vec<AnimFrame>,
+    /// How often the whole animation plays; `None` for ever.
+    pub plays: Option<u32>,
+}
+
+/// Frame durations below 20 ms play at 100 ms, like in browsers (many
+/// files say 0).
+pub fn min_delay_ms(ms: u32) -> u32 {
+    if ms < 20 { 100 } else { ms }
+}
 
 /// Header information, available without decoding pixels.
 #[derive(Clone, Debug, PartialEq, Eq)]
