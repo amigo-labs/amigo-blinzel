@@ -441,12 +441,11 @@ fn animation_stage(
     cancel: &CancelToken,
 ) {
     let t = Instant::now();
+    use blinzel_core::decode::{gif, webp};
+    use blinzel_core::format::Format;
     let decoded = match probe.format {
-        blinzel_core::format::Format::Gif => {
-            blinzel_core::decode::gif::decode_animation(data, ANIM_BUDGET)
-                .ok()
-                .flatten()
-        }
+        Format::Gif => gif::decode_animation(data, ANIM_BUDGET).ok().flatten(),
+        Format::WebP => webp::decode_animation(data, ANIM_BUDGET).ok().flatten(),
         _ => None,
     };
     let decode_ms = t.elapsed().as_secs_f64() * 1e3;

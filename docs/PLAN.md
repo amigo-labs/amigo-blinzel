@@ -50,6 +50,7 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Thumbnail-Skalierung | Windows-Thumbnail-Provider (`IShellItemImageFactory`) | DCT 1/8 + Flächenmittelung je YCbCr-Ebene | ✅ 200 12-MP-JPEGs, 16 Threads: 287/s statt 18/s |
 | Thumbnail-Speicher | Windows-Thumbnail-Cache (`thumbcache_*.db`) | eigene Pack-Datei | ✅ 200 aus dem Cache: 23,6 ms statt 432 ms (CPU-Seite, ohne Atlas-Upload) |
 | Verzeichnis | FindFirstFileExW (`LARGE_FETCH`, `InfoBasic`) | `GetFileInformationByHandleEx(FileFullDirectoryInfo)` (was `NtQueryDirectoryFile` liefert) | ✅ gemessen, bleibt bei FindFirstFileExW: 10k Einträge 7,7–8,0 ms gegen 6,8–7,3 ms (64-KB-Puffer) bzw. −8 bis +18 % (256 KB), im Mittel unter 10 %; Sortieren 2,5 ms. Ziel ≤ 25 ms erfüllt. |
+| WebP | WIC (Store-Erweiterung) | `image-webp` (reines Rust, MIT/Apache) | ✅ gemessen (12/24 MP, gleiche Pixel): verlustfrei 210 statt 303 ms → nativ. Verlustbehaftet ist WIC mit geladenem Codec ca. 20 % schneller (12 MP 411–454 statt 485–541 ms, 24 MP 604–649 statt 751–812 ms), sein erster Aufruf im Prozess kostet aber 200–400 ms. Daher: das erste verlustbehaftete WebP nativ, der WIC-Codec lädt dabei im Hintergrund, die folgenden über WIC. Animationen nativ. |
 | SIMD-Stufen | Basis x86-64-v2 | Laufzeit-Dispatch je Kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ gemessen: keine Stufe bringt ≥ 10 % auf einem Hot Path, daher kein Dispatch ([Abschnitt 15](#simd-stufen)) |
 
 **Erkenntnis aus den Messungen:** DCT-Skalierung bringt weniger als erwartet (24 MP: 1/8 = 74 ms, voll = 118 ms). Das Huffman-Decoding dominiert. Der **parallele Huffman-Decoder (M3)** ist deshalb der größte verbleibende Hebel; progressive JPEGs (ca. 320 ms) brauchen ihn besonders.
@@ -140,9 +141,9 @@ Reihenfolge der Stufen:
   - Eine eigene Prüfung erkennt sRGB-Profile an Primärfarben und Gradationskurve. Sind Quelle und Ziel sRGB (der Normalfall), passiert nichts: kein DLL-Laden, kein Shader-Aufwand.
   - Sonst baut das Windows Color System (`mscms`, alle Profilarten) eine 3D-LUT mit 33³ Punkten (16 Bit), zwischengespeichert je Profilpaar. Der Bild-Shader wendet sie nach der Filterung trilinear an, vor dem Zusammensetzen mit dem Hintergrund; die CPU-Referenz und das GDI-Erstbild tun dasselbe.
   - Beim Wechsel auf einen anderen Monitor (oder `WM_DISPLAYCHANGE`) wird das Ziel neu bestimmt.
-  - `GetICMProfileW` lädt beim ersten Aufruf das ICM-Subsystem (ca. 7 ms, die beim Start mit Decode und Device konkurrierten: GDI-Erstbild und Direct3D-Frame je ca. 7 ms später). Deshalb nutzt ein Start das Ziel des letzten Laufs (`%LOCALAPPDATA%migo-blinzel\display-color.txt`) und fragt Windows erst nach dem ersten Frame; weicht die Antwort ab, wird neu gezeichnet. Danach im A/B kein messbarer Unterschied mehr.
+  - `GetICMProfileW` lädt beim ersten Aufruf das ICM-Subsystem (ca. 7 ms, die beim Start mit Decode und Device konkurrierten: GDI-Erstbild und Direct3D-Frame je ca. 7 ms später). Deshalb nutzt ein Start das Ziel des letzten Laufs (`%LOCALAPPDATA%\amigo-blinzel\display-color.txt`) und fragt Windows erst nach dem ersten Frame; weicht die Antwort ab, wird neu gezeichnet. Danach im A/B kein messbarer Unterschied mehr.
   - Eine benötigte LUT entsteht parallel zum Decodieren (4–7 ms, kalt mit DLL-Laden). Display-P3-Bild (24 MP) kalt: GDI-Erstbild wie ohne Profil; Resident-Übergabe mit Profil 24–26 ms. Der `--resident`-Start lädt `mscms` vorab.
-  - Profile aus WIC-Formaten (HEIC, AVIF, WebP, TIFF) werden noch nicht gelesen (kommt mit den nativen Decodern in M5); Graustufen- und CMYK-Profile ergeben keine Transformation.
+  - WebP-Profile (und die EXIF-Ausrichtung) liest der native Probe. Profile aus WIC-Formaten (HEIC, AVIF, TIFF) werden noch nicht gelesen (kommt mit den nativen Decodern in M5); Graustufen- und CMYK-Profile ergeben keine Transformation.
 - 🟡 **App-Icon:** `build.rs` zeichnet das Favicon-Motiv und bettet es als ICO ein (DIB bis 64 px, PNG für 256 px). Fenster, Taskleiste, Tray und Startmenü-Verknüpfung nutzen es.
 - 🟡 **Erstes Bild über GDI:** Die Device-Erzeugung dauert länger als Lesen und Decodieren. Der Loader rendert das erste decodierte Bild deshalb selbst auf der CPU (`blinzel_core::preview`, dieselbe Geometrie wie die GPU), der UI-Thread pumpt Nachrichten statt auf das Device zu warten und zeigt es mit `SetDIBitsToDevice`. Direct3D übernimmt, sobald das Device steht. Das Fenster wird ohne Aktivierung gezeigt (`SW_SHOWNA`, spart ca. 20 ms) und holt sich den Vordergrund nach dem ersten Bild.
 
@@ -165,7 +166,7 @@ Reihenfolge der Stufen:
   - Quelle ist die kleinste, die die Kachel abdeckt: eingebettete Vorschau (EXIF/MPF), wenn sie groß genug ist und das Seitenverhältnis stimmt (EXIF-Thumbnails haben oft Balken), sonst das Bild selbst mit DCT-Skalierung (JPEG bis 1/8).
   - Ein Thread je Bild, viele Bilder parallel auf dem Hintergrund-Pool; die Ansicht hat Vorrang.
   - Verkleinern mit exakter Flächenmittelung (separabler Box-Filter mit Bruchteilgewichten), Ausgabe BGRA; die EXIF-Orientierung wird beim Zeichnen angewandt.
-- **Cache** (Benchmark-Gate gegen den Windows-Thumbnail-Cache `IShellItemImageFactory`): eigene Pack-Datei unter `%LOCALAPPDATA%migo-blinzel	humbs\`.
+- **Cache** (Benchmark-Gate gegen den Windows-Thumbnail-Cache `IShellItemImageFactory`): eigene Pack-Datei unter `%LOCALAPPDATA%\amigo-blinzel\thumbs\`.
   - `thumbs.pack`: angehängte Einträge (JPEG, Qualität 85, ca. 10–15 KB je Thumbnail).
   - `thumbs.idx`: Log fester Datensätze (Pfad-Hash, Größe und Änderungszeit der Datei, Offset, Länge, Maße, Orientierung), beim ersten Zugriff in eine Hash-Tabelle geladen.
   - Ein veralteter Eintrag (Größe oder Zeit geändert) wird neu erzeugt. Über 1 GB beginnt eine neue Generation (Pack und Index werden ersetzt).
@@ -343,7 +344,8 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 
 - 🟡 **GIF:** `decode::gif::decode_animation` komponiert jeden Frame auf die Leinwand wie Browser: transparente Pixel lassen die Leinwand stehen, Disposal „Hintergrund“ leert das Frame-Rechteck, „Vorheriges“ stellt den Stand davor wieder her; Verzögerungen unter 20 ms spielen mit 100 ms; die Wiederholungszahl aus der NETSCAPE-Erweiterung gilt (sonst einmal). Höchstens 256 MB an Frames, längere Animationen spielen, was hineinpasst.
 - Der Loader hat dafür die Stufe `Anim`, nur für das aktuelle Bild und erst, wenn dessen Probe GIF sagt: Das erste Bild erscheint wie bisher sofort, die Animation läuft an, sobald alle Frames auf der GPU sind (480 × 270: 1,2 ms je Frame decodieren). Ein Timer schaltet die Frames weiter; beim Wechsel des Bildes wird die Animation verworfen.
-- Offen: animiertes WebP auf derselben Grundlage, Frames schon während des Decodierens abspielen.
+- 🟡 **WebP:** `decode::webp::decode_animation` (`image-webp` komponiert die Frames selbst), gleiche Regeln für Verzögerungen, Wiederholungen und das 256-MB-Budget; die Stufe `Anim` gilt jetzt für GIF und WebP. Ein stilles WebP meldet die Stufe als Standbild.
+- Offen: Frames schon während des Decodierens abspielen.
 
 ## 12. Meilensteine
 
@@ -354,7 +356,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
-| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF-Animation fertig; offen: WebP, AVIF, HEIC, JXL, TIFF, RAW |
+| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF- und WebP-Animation, WebP nativ (Gate: verlustfrei und Animationen nativ, verlustbehaftet WIC sobald geladen); offen: AVIF, HEIC, JXL, TIFF, RAW |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |
