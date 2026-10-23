@@ -9,6 +9,7 @@
 
 mod compare;
 mod simd;
+mod thumbs;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ fn main() {
         Some("compare") => compare::compare(&args[1..]),
         Some("simd-child") => simd::child(&args[1..]),
         Some("jpeg-ab") => jpeg_ab(&args[1..]),
+        Some("thumbs") => thumbs::thumbs(&args[1..]),
         _ => Err(usage()),
     };
     if let Err(e) = result {
@@ -40,7 +42,8 @@ fn main() {
 }
 
 fn usage() -> String {
-    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]\n  blinzel-bench compare <a.json> <b.json>".into()
+    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]\n  blinzel-bench compare <a.json> <b.json>
+  blinzel-bench thumbs <dir> [--count N] [--threads T]".into()
 }
 
 fn flag(args: &[String], name: &str) -> bool {

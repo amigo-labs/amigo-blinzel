@@ -47,9 +47,11 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Weg zur GPU | RGBA vom Decoder | YCbCr-Planes, Farbkonvertierung im Shader | ✅ gemessen: 24 MP 118 statt 147 ms, 45 MP 190 statt 410 ms |
 | PNG | zune-png, png | `png` + eigene fusionierte RGBA-Expansion | ✅ 1,9× (Foto) bzw. 3,2× (Screenshot) schneller als zune-png |
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
-| Thumbnail-Skalierung | fast_image_resize | DCT 1/8 + SIMD-Reducer / GPU | ⬜ M4 |
-| Thumbnail-Speicher | SQLite | eigene Pack-Datei | ⬜ M4 |
-| Verzeichnis | FindFirstFileExW | NtQueryDirectoryFileEx | ⬜ messen (10k-Ordner im App-Bench) |
+| Thumbnail-Skalierung | Windows-Thumbnail-Provider (`IShellItemImageFactory`) | DCT 1/8 + Flächenmittelung je YCbCr-Ebene | ✅ 200 12-MP-JPEGs, 16 Threads: 287/s statt 18/s |
+| Thumbnail-Speicher | Windows-Thumbnail-Cache (`thumbcache_*.db`) | eigene Pack-Datei | ✅ 200 aus dem Cache: 23,6 ms statt 432 ms (CPU-Seite, ohne Atlas-Upload) |
+| Verzeichnis | FindFirstFileExW (`LARGE_FETCH`, `InfoBasic`) | `GetFileInformationByHandleEx(FileFullDirectoryInfo)` (was `NtQueryDirectoryFile` liefert) | ✅ gemessen, bleibt bei FindFirstFileExW: 10k Einträge 7,7–8,0 ms gegen 6,8–7,3 ms (64-KB-Puffer) bzw. −8 bis +18 % (256 KB), im Mittel unter 10 %; Sortieren 2,5 ms. Ziel ≤ 25 ms erfüllt. |
+| WebP | WIC (Store-Erweiterung) | `image-webp` (reines Rust, MIT/Apache) | ✅ gemessen (12/24 MP, gleiche Pixel): verlustfrei 210 statt 303 ms → nativ. Verlustbehaftet ist WIC mit geladenem Codec ca. 20 % schneller (12 MP 411–454 statt 485–541 ms, 24 MP 604–649 statt 751–812 ms), sein erster Aufruf im Prozess kostet aber 200–400 ms. Daher: das erste verlustbehaftete WebP nativ, der WIC-Codec lädt dabei im Hintergrund, die folgenden über WIC. Animationen nativ. |
+| JPEG XL | WIC (Store-Erweiterung „JPEG XL Image Extension“) | `jxl-oxide` (reines Rust, MIT/Apache) mit eigener zeilenweiser Umwandlung in RGBA8 statt des generischen Pixel-Streams (der kostete 225–800 ms, so viel wie das Decodieren) | ✅ nativ, jxl-Crates mit `opt-level = "s"`: Exe 2,9 → 4,6 MB (mit `opt-level = 3` 5,1 MB, `"z"` 4,4 MB und deutlich langsamer). Gemessen im selben Durchgang (12/24 MP, Distanz 1 und verlustfrei): 12 MP erstes Bild 270–353 statt 514–559 ms, danach 259–265 statt 319–364 ms; 24 MP 523–535 statt 600–662 ms; verlustfrei gleichauf (581–707 gegen 671–692 ms). Dazu: kein Store-Codec nötig, Farbprofil und Ausrichtung aus dem Header. Kanäle mit versetzter Region und CMYK bleiben bei WIC. |
 | SIMD-Stufen | Basis x86-64-v2 | Laufzeit-Dispatch je Kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ gemessen: keine Stufe bringt ≥ 10 % auf einem Hot Path, daher kein Dispatch ([Abschnitt 15](#simd-stufen)) |
 
 **Erkenntnis aus den Messungen:** DCT-Skalierung bringt weniger als erwartet (24 MP: 1/8 = 74 ms, voll = 118 ms). Das Huffman-Decoding dominiert. Der **parallele Huffman-Decoder (M3)** ist deshalb der größte verbleibende Hebel; progressive JPEGs (ca. 320 ms) brauchen ihn besonders.
@@ -140,9 +142,9 @@ Reihenfolge der Stufen:
   - Eine eigene Prüfung erkennt sRGB-Profile an Primärfarben und Gradationskurve. Sind Quelle und Ziel sRGB (der Normalfall), passiert nichts: kein DLL-Laden, kein Shader-Aufwand.
   - Sonst baut das Windows Color System (`mscms`, alle Profilarten) eine 3D-LUT mit 33³ Punkten (16 Bit), zwischengespeichert je Profilpaar. Der Bild-Shader wendet sie nach der Filterung trilinear an, vor dem Zusammensetzen mit dem Hintergrund; die CPU-Referenz und das GDI-Erstbild tun dasselbe.
   - Beim Wechsel auf einen anderen Monitor (oder `WM_DISPLAYCHANGE`) wird das Ziel neu bestimmt.
-  - `GetICMProfileW` lädt beim ersten Aufruf das ICM-Subsystem (ca. 7 ms, die beim Start mit Decode und Device konkurrierten: GDI-Erstbild und Direct3D-Frame je ca. 7 ms später). Deshalb nutzt ein Start das Ziel des letzten Laufs (`%LOCALAPPDATA%migo-blinzel\display-color.txt`) und fragt Windows erst nach dem ersten Frame; weicht die Antwort ab, wird neu gezeichnet. Danach im A/B kein messbarer Unterschied mehr.
+  - `GetICMProfileW` lädt beim ersten Aufruf das ICM-Subsystem (ca. 7 ms, die beim Start mit Decode und Device konkurrierten: GDI-Erstbild und Direct3D-Frame je ca. 7 ms später). Deshalb nutzt ein Start das Ziel des letzten Laufs (`%LOCALAPPDATA%\amigo-blinzel\display-color.txt`) und fragt Windows erst nach dem ersten Frame; weicht die Antwort ab, wird neu gezeichnet. Danach im A/B kein messbarer Unterschied mehr.
   - Eine benötigte LUT entsteht parallel zum Decodieren (4–7 ms, kalt mit DLL-Laden). Display-P3-Bild (24 MP) kalt: GDI-Erstbild wie ohne Profil; Resident-Übergabe mit Profil 24–26 ms. Der `--resident`-Start lädt `mscms` vorab.
-  - Profile aus WIC-Formaten (HEIC, AVIF, WebP, TIFF) werden noch nicht gelesen (kommt mit den nativen Decodern in M5); Graustufen- und CMYK-Profile ergeben keine Transformation.
+  - WebP-Profile (und die EXIF-Ausrichtung) liest der native Probe; bei JPEG XL beschreibt das Profil den Farbraum, in den `jxl-oxide` rendert (sRGB ergibt kein Profil). Profile aus WIC-Formaten (HEIC, AVIF, TIFF) werden noch nicht gelesen (kommt mit den nativen Decodern in M5); Graustufen- und CMYK-Profile ergeben keine Transformation.
 - 🟡 **App-Icon:** `build.rs` zeichnet das Favicon-Motiv und bettet es als ICO ein (DIB bis 64 px, PNG für 256 px). Fenster, Taskleiste, Tray und Startmenü-Verknüpfung nutzen es.
 - 🟡 **Erstes Bild über GDI:** Die Device-Erzeugung dauert länger als Lesen und Decodieren. Der Loader rendert das erste decodierte Bild deshalb selbst auf der CPU (`blinzel_core::preview`, dieselbe Geometrie wie die GPU), der UI-Thread pumpt Nachrichten statt auf das Device zu warten und zeigt es mit `SetDIBitsToDevice`. Direct3D übernimmt, sobald das Device steht. Das Fenster wird ohne Aktivierung gezeigt (`SW_SHOWNA`, spart ca. 20 ms) und holt sich den Vordergrund nach dem ersten Bild.
 
@@ -157,8 +159,29 @@ Reihenfolge der Stufen:
 - 🟡 **Ansichtsmodi** (1/2/3), Zoom um den Cursor (Rad, +/−, 0), Pan (Maus, Pfeile bei Überlauf), Vollbild (F11, Eingabe, Doppelklick), Drehen nur in der Ansicht (R/L).
 - 🟡 Modus 1 („Originalgröße“): Das Fenster folgt jedem Bild, begrenzt auf den Arbeitsbereich und um die Mitte zentriert.
 - 🟡 Leerer Start zeigt einen Hinweis; Drag & Drop, Strg+O, Entf (Papierkorb), Maus-Zurück/Vor.
-- ⬜ Filmstreifen und Raster (M4).
-- ⬜ Fensterposition und -größe merken.
+- 🟡 Filmstreifen (T) und Raster (G), siehe unten.
+
+### Thumbnails (M4)
+
+- **Erzeugung** (`blinzel_core::thumb`): Kante 256 px (Explorer-Größe; bei 150 % Skalierung reicht das für 160-px-Kacheln).
+  - Quelle ist die kleinste, die die Kachel abdeckt: eingebettete Vorschau (EXIF/MPF), wenn sie groß genug ist und das Seitenverhältnis stimmt (EXIF-Thumbnails haben oft Balken), sonst das Bild selbst mit DCT-Skalierung (JPEG bis 1/8).
+  - Ein Thread je Bild, viele Bilder parallel auf dem Hintergrund-Pool; die Ansicht hat Vorrang.
+  - Verkleinern mit exakter Flächenmittelung (separabler Box-Filter mit Bruchteilgewichten), Ausgabe BGRA; die EXIF-Orientierung wird beim Zeichnen angewandt.
+- **Cache** (Benchmark-Gate gegen den Windows-Thumbnail-Cache `IShellItemImageFactory`): eigene Pack-Datei unter `%LOCALAPPDATA%\amigo-blinzel\thumbs\`.
+  - `thumbs.pack`: angehängte Einträge (JPEG, Qualität 85, ca. 10–15 KB je Thumbnail).
+  - `thumbs.idx`: Log fester Datensätze (Pfad-Hash, Größe und Änderungszeit der Datei, Offset, Länge, Maße, Orientierung), beim ersten Zugriff in eine Hash-Tabelle geladen.
+  - Ein veralteter Eintrag (Größe oder Zeit geändert) wird neu erzeugt. Über 1 GB beginnt eine neue Generation (Pack und Index werden ersetzt).
+  - Mehrere Instanzen: Anhängen unter einem benannten Mutex; was eine andere Instanz geschrieben hat, sieht man erst beim nächsten Laden (Doppelte schaden nicht).
+- **GPU:** Atlas-Seiten mit 64 Slots für 256er-Thumbnails in YCbCr 4:2:0 (2048² R8 für Y, 1024² R8G8 für Cb/Cr, 6 MB je Seite, höchstens 8 Seiten), LRU; der Shader rechnet nach RGB um. Thumbnails aus dem Cache (JPEG) kommen ohne RGB-Umweg als Ebenen in den Atlas, 1,5 statt 4 Byte je Pixel. Ein Raster mit 200 Kacheln sind 200 kleine Draws.
+- **Oberfläche** (beide standardmäßig aus, im Menü „Ansicht“ und per Taste):
+  - Filmstreifen (T, Einstellung) unten mit den Nachbarn des aktuellen Bildes; das Bild bekommt die Fläche darüber. Klick öffnet, Rad blättert.
+  - Raster (G) über das ganze Fenster für den Ordner: Klick wählt, Doppelklick, Eingabe oder Leertaste öffnet, Pfeile/Bild auf/ab/Pos1/Ende bewegen die Auswahl, Rad scrollt, Esc oder G schließt.
+  - Angefordert wird, was sichtbar ist, dann die nächste und die vorige Seite; der Pool läuft mit normaler Priorität, das angezeigte Bild decodiert darüber.
+- **Messung** (`blinzel-bench thumbs <dir> [--count N] [--threads T]`): kalt (ohne Cache) Thumbnails pro Sekunde über einen Ordner mit 12-MP-JPEGs mit Sensorrauschen (ca. 4 MB je Datei), warm 200 Kacheln aus dem Cache. Ziele aus Abschnitt 12: kalt ≥ 150/s, 200 aus dem Cache ≤ 30 ms.
+- **Stand (Ryzen 7 PRO 6850H, 16 Threads):** kalt 287/s (1 Thread: 26/s), Speichern 1,1–1,3 ms je Thumbnail (12,6 KB), warm 200 in 23,6 ms (1 Thread: 0,9 ms je Thumbnail). Erst die Umrechnung je Ebene auf Zielgröße brachte das: `Image::to_bgra` (exakt, Float, bilineare Chroma) kostete 1,8 ms je 256er-Thumbnail und 15 ms je 1/8-Decode.
+- Zum Vergleich auf denselben Dateien der Windows-Thumbnail-Provider und -Cache: kalt 18/s, warm 432–446 ms für 200.
+- **Ende zu Ende in der App** (`blinzel --bench`, `thumb_grid_200`: Cache öffnen, 200 lesen und decodieren, in den Atlas laden, Raster zeichnen, GPU fertig): **16 ms** im Median (Ziel ≤ 30 ms). Mit BGRA-Atlas waren es 37–69 ms; das Hochladen und die Umrechnung nach RGB machten den Unterschied.
+- 🟡 Fensterposition und -größe merken: beim Schließen (und Verstecken) `GetWindowPlacement` in die Einstellungen, beim Start `SetWindowPlacement`, solange dort noch ein Monitor ist; ein maximiertes Fenster wird noch verhüllt maximiert, damit das erste Bild für die echte Größe gerechnet wird. Sichtprüfung offen.
 
 ## 7. Auswahl, Kopieren, Ausschneiden, Speichern
 
@@ -282,8 +305,9 @@ Umsetzung:
   - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz, Code-Signing-Policy (für SignPath).
   - Charts werden beim Build als Inline-SVG aus den Benchmark-JSONs erzeugt; keine Chart-Library im Browser.
   - Der Download-Link zeigt auf `releases/latest/download/amigo-blinzel-setup-x64.exe` (stabile URL).
-- 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml`), per GitHub Action (`cloudflare/wrangler-action`) bei Änderungen an `website/` und bei jedem Release.
-  - Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (bei dir).
+- 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml` im Repo-Wurzelverzeichnis).
+  - Cloudflare Workers Builds ist mit dem Repo verbunden (Root-Verzeichnis `/`, Standard-Deploy-Befehl). Wrangler führt vor jedem Deploy `website/build.sh` aus: Das installiert die fehlende Rust-Toolchain im Build-Image und erzeugt `website/dist` mit `blinzel-site`.
+  - Alternativ deployt `.github/workflows/website.yml`, sobald die Secrets `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` gesetzt sind; mit Workers Builds ist das nicht nötig.
   - Zunächst die `workers.dev`-Subdomain; eine eigene Domain kann jederzeit dazukommen.
 
 ### Wettbewerbs-Benchmark `blinzel-race`
@@ -317,7 +341,15 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
   - Rohdaten, Versionen und Methodik werden veröffentlicht.
   - Damit sachlich, nachprüfbar und relevant, wie es vergleichende Werbung (UWG §6) verlangt.
 - ⬜ **Zahlen:** Referenzwerte von einer definierten Referenzmaschine (Hardware wird angegeben). CI-Werte nur als Trend.
-- ⬜ **Vergleichstabelle der Funktionen:** Formate, Startzeit, Speicherbedarf, Größe der Installation, Lizenz, Werbung/Telemetrie, ARM64-nativ.
+- 🟡 **Vergleichstabelle der Funktionen** (`compare.html`, DE/EN): Lizenz, Firmennutzung, Werbung, Telemetrie, ARM64, Downloadgröße, Farbprofile, HEIC/AVIF/JPEG XL/WebP/RAW für IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv und Windows Fotos. Stand 23.10.2026, jede Zelle verlinkt ihre Quelle; Unbelegtes steht als „nicht belegt“. Vor der Veröffentlichung einmal von Hand gegenlesen. Startzeit und Speicher kommen aus der Referenzmessung.
+
+### Animationen (M5)
+
+- 🟡 **GIF:** `decode::gif::decode_animation` komponiert jeden Frame auf die Leinwand wie Browser: transparente Pixel lassen die Leinwand stehen, Disposal „Hintergrund“ leert das Frame-Rechteck, „Vorheriges“ stellt den Stand davor wieder her; Verzögerungen unter 20 ms spielen mit 100 ms; die Wiederholungszahl aus der NETSCAPE-Erweiterung gilt (sonst einmal). Höchstens 256 MB an Frames, längere Animationen spielen, was hineinpasst.
+- Der Loader hat dafür die Stufe `Anim`, nur für das aktuelle Bild und erst, wenn dessen Probe GIF sagt: Das erste Bild erscheint wie bisher sofort, die Animation läuft an, sobald alle Frames auf der GPU sind (480 × 270: 1,2 ms je Frame decodieren). Ein Timer schaltet die Frames weiter; beim Wechsel des Bildes wird die Animation verworfen.
+- 🟡 **WebP:** `decode::webp::decode_animation` (`image-webp` komponiert die Frames selbst), gleiche Regeln für Verzögerungen, Wiederholungen und das 256-MB-Budget; die Stufe `Anim` gilt jetzt für GIF und WebP. Ein stilles WebP meldet die Stufe als Standbild.
+- 🟡 **JPEG XL:** `decode::jxl::decode_animation` rendert jedes Keyframe (Dauer aus Ticks und `tps`, Wiederholungen aus dem Header), gleiche Regeln und Budget. Stille Dateien prüft schon der Header.
+- Offen: Frames schon während des Decodierens abspielen.
 
 ## 12. Meilensteine
 
@@ -327,11 +359,11 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
-| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
-| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
+| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
+| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF- und WebP-Animation, WebP nativ (Gate: verlustfrei und Animationen nativ, verlustbehaftet WIC sobald geladen), JPEG XL nativ (Gate bestanden, +1,7 MB); offen: AVIF, HEIC, TIFF, RAW, Lizenzhinweise der eingebundenen Bibliotheken |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
-| **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt, Lizenz MIT; offen: Release-Schlüssel, erster Release, SignPath |
-| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug und Website fertig; offen: Referenzmessung, Funktionstabelle mit Quellen, Cloudflare-Secrets |
+| **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
+| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |
 
 **Reihenfolge:**
 1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
@@ -367,7 +399,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - ✅ Lizenz: MIT.
 - ⬜ SignPath-Foundation-Antrag nach dem ersten Release (Abschnitt 10) sowie `SIGNPATH_API_TOKEN` (Secret) und die Org-ID (Variable `SIGNPATH_ORGANIZATION_ID`).
 - ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-app/src/update.rs`.
-- ⬜ Cloudflare-Konto: `CLOUDFLARE_API_TOKEN` (Workers bearbeiten) und `CLOUDFLARE_ACCOUNT_ID` als Repo-Secrets; optional eine Domain.
+- 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
 - ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
 - ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
@@ -517,5 +549,5 @@ Speicher der versteckten Instanz: 50 MB privat nach dem Start, nach Benutzung ca
 **Als Nächstes, in dieser Reihenfolge:**
 1. Bei entsperrtem Bildschirm: Sichtprüfung des GDI-Übergangs, Tray-Menü und Aufwecken ansehen, `blinzel-race` mit Kaltstart und Resident messen.
 2. M6 abschließen: Sichtprüfung von Tray, Aufwecken und Farbmanagement auf einem Monitor mit Wide-Gamut-Profil.
-3. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
-4. M4, M5 wie in Abschnitt 12.
+3. M4: Sichtprüfung von Raster und Filmstreifen; danach Dateinamen unter den Kacheln und ein Raster-Szenario in `blinzel-race`.
+4. M5 wie in Abschnitt 12.

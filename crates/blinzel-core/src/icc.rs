@@ -27,9 +27,9 @@ impl Profile {
 }
 
 fn fnv1a(data: &[u8]) -> u64 {
-    data.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
-        (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
-    })
+    let mut h = crate::filelist::Fnv::new();
+    h.write(data);
+    h.finish()
 }
 
 /// The profile embedded in a JPEG (APP2 `ICC_PROFILE` chunks).

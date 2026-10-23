@@ -297,7 +297,15 @@ pub fn run() -> i32 {
         Ok(h) => h,
         Err(e) => return fatal(&e.message()),
     };
+    // Where it was last time; a maximized window is maximized now (still
+    // cloaked), so the first frame is laid out for its real size.
+    let maximized = window::restore_placement(hwnd, settings.window, settings.maximized);
     prepare_window(hwnd);
+    if maximized && !args.resident {
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+        }
+    }
     let mut cr = RECT::default();
     unsafe {
         let _ = GetClientRect(hwnd, &mut cr);
@@ -313,7 +321,7 @@ pub fn run() -> i32 {
     // The loader may post the first decoded image from now on.
     loader.set_hwnd(hwnd);
     MAIN_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
-    if !args.resident {
+    if !args.resident && !maximized {
         unsafe {
             // Still cloaked, so nothing shows yet; but a shown window gets
             // painted. Not activated: activation costs ~20 ms and waits

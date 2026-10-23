@@ -103,13 +103,28 @@ float4 ps_image(VSOut i) : SV_Target
 //   1  line segment         tex1 = ax, ay, bx, by   params.y = thickness
 //   2  box outline          tex1 = x0, y0, x1, y1   params.y = thickness, params.z = radius
 //   3  text texture (premultiplied coverage in alpha), tex0 = origin, 1/size
+//   4  atlas thumbnail, 4:2:0 YCbCr: t0 = Y page, t1 = Cb/Cr page (half
+//      size); src = thumbnail texels, tex0 = -slot origin, 1/Y page size;
+//      tex1 = thumbnail size, chroma size (clamps to the slot)
 // Output is premultiplied alpha.
 float4 ps_overlay(VSOut i) : SV_Target
 {
     float2 p = i.src;
     float shape = params.x;
+    // Colour (straight) and coverage; one exit (fxc rejects early returns
+    // that leave a variable possibly uninitialized).
+    float3 rgb = color.rgb;
     float cov;
-    if (shape > 2.5)
+    if (shape > 3.5)
+    {
+        float2 q = clamp(p, 0.5, tex1.xy - 0.5);
+        float2 cq = clamp(q * 0.5, 0.5, tex1.zw - 0.5);
+        float y = t0.SampleLevel(lin, (q - tex0.xy) * tex0.zw, 0).r;
+        float2 c = t1.SampleLevel(lin, (cq - tex0.xy * 0.5) * (tex0.zw * 2.0), 0).rg;
+        rgb = ycc_to_rgb(y, c.x, c.y);
+        cov = 1.0;
+    }
+    else if (shape > 2.5)
     {
         cov = t0.SampleLevel(lin, (p - tex0.xy) * tex0.zw, 0).a;
     }
@@ -131,5 +146,5 @@ float4 ps_overlay(VSOut i) : SV_Target
         cov = shape < 0.5 ? saturate(0.5 - d) : saturate(params.y * 0.5 - abs(d) + 0.5);
     }
     float a = cov * color.a;
-    return float4(color.rgb * a, a);
+    return float4(rgb * a, a);
 }

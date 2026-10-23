@@ -203,6 +203,19 @@ pub fn ycc_to_rgb(y: f32, cb: f32, cr: f32) -> [f32; 3] {
     ]
 }
 
+/// [`ycc_to_rgb`] in 16.16 fixed point on 8-bit values (fast paths: the
+/// CPU first frame, thumbnails).
+#[inline(always)]
+pub fn ycc_to_rgb_u8(y: i32, cb: i32, cr: i32) -> [u8; 3] {
+    let (cb, cr) = (cb - 128, cr - 128);
+    let c = |v: i32| v.clamp(0, 255) as u8;
+    [
+        c(y + ((91_881 * cr + 32_768) >> 16)),
+        c(y - ((22_554 * cb + 46_802 * cr - 32_768) >> 16)),
+        c(y + ((116_130 * cb + 32_768) >> 16)),
+    ]
+}
+
 #[inline]
 pub fn to_u8(v: f32) -> u8 {
     (v * 255.0 + 0.5).clamp(0.0, 255.0) as u8

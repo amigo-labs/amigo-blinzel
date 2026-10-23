@@ -368,6 +368,49 @@ impl Renderer {
         }
     }
 
+    /// Draws an atlas thumbnail into `dest` (client pixels), oriented, with
+    /// opacity `alpha`.
+    pub fn draw_thumb(
+        &self,
+        ctx: &ID3D11DeviceContext,
+        t: &super::atlas::Placed,
+        dest: &Rect,
+        alpha: f32,
+    ) {
+        let (w, h) = (t.size.0 as f64, t.size.1 as f64);
+        let (ow, oh) = t.orientation.oriented_size(w, h);
+        let xform = t
+            .orientation
+            .transform(w, h)
+            .then(&Affine::scale(dest.w / ow, dest.h / oh))
+            .then(&Affine::translate(dest.x, dest.y));
+        unsafe {
+            ctx.PSSetShader(&self.ps_overlay, None);
+            ctx.OMSetBlendState(&self.blend_premul, None, 0xFFFF_FFFF);
+            ctx.PSSetShaderResources(0, Some(&[Some(t.y.clone()), Some(t.cbcr.clone())]));
+        }
+        let page = super::atlas::PAGE as f32;
+        let (cw, ch) = (t.size.0.div_ceil(2) as f32, t.size.1.div_ceil(2) as f32);
+        let cb = DrawCb {
+            m0: [xform.a as f32, xform.b as f32, xform.c as f32, 0.0],
+            m1: [xform.d as f32, xform.e as f32, xform.f as f32, 0.0],
+            rect: [0.0, 0.0, w as f32, h as f32],
+            tex0: [
+                -(t.origin.0 as f32),
+                -(t.origin.1 as f32),
+                1.0 / page,
+                1.0 / page,
+            ],
+            tex1: [w as f32, h as f32, cw, ch],
+            view: self.view_vec(1.0, 1.0),
+            color: [1.0, 1.0, 1.0, alpha],
+            params: [4.0, 0.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        self.upload_cb(ctx, &cb);
+        unsafe { ctx.Draw(4, 0) };
+    }
+
     /// Draws a text texture (coverage in alpha) at `pos`, tinted.
     pub fn draw_text(
         &self,

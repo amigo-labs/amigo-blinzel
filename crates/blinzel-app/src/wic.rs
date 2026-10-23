@@ -5,6 +5,7 @@
 //! directly at the requested size.
 
 use std::cell::Cell;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use blinzel_core::decode::{DecodeError, Probe, Request, Result};
 use blinzel_core::geom::Orientation;
@@ -186,8 +187,40 @@ pub fn decode(data: &[u8], req: Request) -> Result<Image> {
     }
 }
 
+/// WIC's WebP codec: decodes lossy stills about 20 % faster than
+/// `image-webp`, but its first use in a process costs 200-400 ms, more than
+/// it saves on one image. So the first lossy WebP decodes natively and
+/// loads the codec in the background; later ones go to WIC.
+static WEBP_CODEC: AtomicU8 = AtomicU8::new(COLD);
+const COLD: u8 = 0;
+const LOADING: u8 = 1;
+const READY: u8 = 2;
+/// No WebP codec in WIC (e.g. Windows N without the extension).
+const MISSING: u8 = 3;
+
+fn webp_via_wic(data: &[u8]) -> bool {
+    use blinzel_core::format::{Format, detect};
+    if detect(data) != Format::WebP || !blinzel_core::decode::webp::is_lossy_still(data) {
+        return false;
+    }
+    match WEBP_CODEC.compare_exchange(COLD, LOADING, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => {
+            let _ = std::thread::Builder::new()
+                .name("wic-webp".into())
+                .spawn(|| {
+                    let tiny = &blinzel_core::decode::webp::TINY_LOSSY;
+                    let ok = blinzel_core::decode::guard(|| decode(tiny, Request::Full)).is_ok();
+                    WEBP_CODEC.store(if ok { READY } else { MISSING }, Ordering::Release);
+                });
+            false
+        }
+        Err(state) => state == READY,
+    }
+}
+
 /// Native decoding first, WIC for everything else (and for JPEGs the
-/// native path rejects, e.g. 12-bit).
+/// native path rejects, e.g. 12-bit). Lossy WebP stills go to WIC once
+/// its codec is loaded (benchmark gate, see `WEBP_CODEC`).
 pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
     decode_any_with(data, req, 1)
 }
@@ -195,6 +228,11 @@ pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
 /// [`decode_any`] with up to `threads` threads for the native decoders that
 /// parallelize (JPEG); for the image the user waits for.
 pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
+    if webp_via_wic(data)
+        && let Ok(img) = blinzel_core::decode::guard(|| decode(data, req))
+    {
+        return Ok(img);
+    }
     match blinzel_core::decode::decode_with(data, req, threads) {
         Err(DecodeError::Unsupported(_)) => blinzel_core::decode::guard(|| decode(data, req)),
         r => r,

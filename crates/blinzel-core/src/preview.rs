@@ -41,17 +41,7 @@ fn rows(out: &mut [u8], width: usize, parallel: bool, f: impl Fn(usize, &mut [u8
     });
 }
 
-/// Full-range BT.601 (JFIF) to RGB in 16.16 fixed point.
-#[inline(always)]
-fn ycc(y: i32, cb: i32, cr: i32) -> [u8; 3] {
-    let (cb, cr) = (cb - 128, cr - 128);
-    let c = |v: i32| v.clamp(0, 255) as u8;
-    [
-        c(y + ((91_881 * cr + 32_768) >> 16)),
-        c(y - ((22_554 * cb + 46_802 * cr - 32_768) >> 16)),
-        c(y + ((116_130 * cb + 32_768) >> 16)),
-    ]
-}
+use crate::pixel::ycc_to_rgb_u8 as ycc;
 
 #[inline(always)]
 fn texel(p: &Plane, bpp: usize, x: i64, y: i64) -> &[u8] {

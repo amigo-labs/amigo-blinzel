@@ -1,0 +1,16 @@
+# Cloudflare Workers static assets: the generated site, no worker code.
+# Workers Builds (default deploy commands) and the website workflow both
+# deploy from here; the build step generates website/dist.
+name = "amigo-blinzel"
+compatibility_date = "2026-10-01"
+
+[build]
+# Wrangler finds this file from website/ too but runs the command in its
+# own working directory, so the script is found through git (Workers
+# Builds with either root directory, the website workflow; Linux only).
+command = 'sh "$(git rev-parse --show-toplevel)/website/build.sh"'
+
+[assets]
+directory = "./website/dist"
+not_found_handling = "404-page"
+html_handling = "auto-trailing-slash"
