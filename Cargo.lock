@@ -67,6 +67,14 @@ name = "blinzel-jpeg"
 version = "0.1.0"
 
 [[package]]
+name = "blinzel-race"
+version = "0.1.0"
+dependencies = [
+ "blinzel-core",
+ "windows",
+]
+
+[[package]]
 name = "blinzel-release"
 version = "0.1.0"
 dependencies = [

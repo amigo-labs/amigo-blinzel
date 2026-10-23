@@ -56,7 +56,9 @@ impl Gfx {
     /// Creates a hardware device, or WARP (software) if asked or if no
     /// usable GPU exists.
     pub fn create(warp: bool) -> windows::core::Result<Gfx> {
+        blinzel_core::timing::mark("gfx_start");
         let create = load_create_device()?;
+        blinzel_core::timing::mark("d3d11_loaded");
         // Windows 11 requires a DX12/WDDM 2 GPU, so 11_0 is always there.
         let levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0];
         let attempt = |driver: D3D_DRIVER_TYPE, levels: &[D3D_FEATURE_LEVEL]| {
@@ -95,6 +97,7 @@ impl Gfx {
         for &driver in drivers {
             match attempt(driver, &levels) {
                 Ok((device, context, feature_level)) => {
+                    blinzel_core::timing::mark("d3d11_device_created");
                     let dxgi: IDXGIDevice1 = device.cast()?;
                     // One queued frame: input-to-photon latency over throughput.
                     unsafe { dxgi.SetMaximumFrameLatency(1)? };
