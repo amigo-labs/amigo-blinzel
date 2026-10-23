@@ -9,6 +9,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "build_icon.rs"]
+mod icon;
+
 const SHADERS: &[(&str, &str, &str)] = &[
     ("vs_main", "vs_5_0", "vs.cso"),
     ("ps_image", "ps_5_0", "ps_image.cso"),
@@ -109,6 +112,13 @@ BEGIN
   END
 END
 "#
+    );
+    // The application icon (window, taskbar, tray, Start menu shortcut).
+    let ico = out.join("blinzel.ico");
+    std::fs::write(&ico, icon::ico(&[16, 20, 24, 32, 40, 48, 64, 256])).unwrap();
+    let script = format!(
+        "{script}1 ICON \"{}\"\n",
+        ico.display().to_string().replace('\\', "\\\\")
     );
     let src = out.join("version.rc");
     let res = out.join("version.res");
