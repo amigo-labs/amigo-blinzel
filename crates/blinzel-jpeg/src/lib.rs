@@ -12,6 +12,8 @@ mod bits;
 mod decoder;
 mod huffman;
 mod idct;
+mod parallel;
+mod scan;
 
 use std::fmt;
 use std::ops::Range;
