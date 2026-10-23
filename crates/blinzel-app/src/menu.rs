@@ -3,12 +3,13 @@
 
 use blinzel_core::layout::ViewMode;
 use blinzel_i18n::{Lang, Msg, tr};
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENU_ITEM_FLAGS, MF_CHECKED, MF_GRAYED,
-    MF_POPUP, MF_SEPARATOR, MF_STRING, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_TOPALIGN,
-    TrackPopupMenuEx,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS,
+    MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW, SM_MENUDROPALIGNMENT,
+    SetForegroundWindow, SetMenuDefaultItem, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenuEx, WM_NULL,
 };
 use windows::core::{PCSTR, PCWSTR, w};
 
@@ -39,6 +40,13 @@ pub enum Cmd {
     Language(Option<Lang>),
     CheckUpdates,
     About,
+    ToggleResident,
+    ToggleAutoUpdate,
+    ToggleSingleInstance,
+    /// Tray: show the (hidden) window.
+    ShowWindow,
+    /// Tray: exit for good, also in resident mode.
+    Quit,
     Exit,
 }
 
@@ -71,6 +79,11 @@ impl Cmd {
             Cmd::SaveCutout => 22,
             Cmd::CheckUpdates => 23,
             Cmd::About => 24,
+            Cmd::ToggleResident => 25,
+            Cmd::ToggleAutoUpdate => 26,
+            Cmd::ToggleSingleInstance => 27,
+            Cmd::ShowWindow => 28,
+            Cmd::Quit => 29,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -91,7 +104,7 @@ impl Cmd {
     }
 }
 
-const ALL: [Cmd; 24] = [
+const ALL: [Cmd; 29] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -116,6 +129,11 @@ const ALL: [Cmd; 24] = [
     Cmd::SaveCutout,
     Cmd::CheckUpdates,
     Cmd::About,
+    Cmd::ToggleResident,
+    Cmd::ToggleAutoUpdate,
+    Cmd::ToggleSingleInstance,
+    Cmd::ShowWindow,
+    Cmd::Quit,
 ];
 
 /// State the menu reflects.
@@ -128,6 +146,9 @@ pub struct MenuState {
     pub is_cropped: bool,
     pub has_neighbours: bool,
     pub language: Option<Lang>,
+    pub resident: bool,
+    pub auto_update: bool,
+    pub single_instance: bool,
 }
 
 fn accel(keys: &[&str]) -> String {
@@ -367,6 +388,29 @@ fn build(s: &MenuState) -> Option<HMENU> {
         );
     }
     m.submenu(tr(Msg::MenuLanguage), lang);
+    let settings = Builder::new()?;
+    settings.item(
+        Cmd::ToggleResident,
+        tr(Msg::SettingResident),
+        None,
+        s.resident,
+        true,
+    );
+    settings.item(
+        Cmd::ToggleSingleInstance,
+        tr(Msg::SettingSingleInstance),
+        None,
+        s.single_instance,
+        true,
+    );
+    settings.item(
+        Cmd::ToggleAutoUpdate,
+        tr(Msg::SettingAutoUpdate),
+        None,
+        s.auto_update,
+        true,
+    );
+    m.submenu(tr(Msg::MenuSettings), settings);
     m.separator();
     m.item(
         Cmd::CheckUpdates,
@@ -399,6 +443,38 @@ pub fn show(hwnd: HWND, x: i32, y: i32, state: &MenuState) -> Option<Cmd> {
     unsafe {
         let _ = DestroyMenu(menu);
     }
+    Cmd::from_id(id.0 as u32)
+}
+
+/// The tray icon's menu at screen position `(x, y)`.
+pub fn show_tray(hwnd: HWND, x: i32, y: i32) -> Option<Cmd> {
+    enable_dark_menus(hwnd);
+    let m = Builder::new()?;
+    m.item(Cmd::ShowWindow, tr(Msg::TrayShow), None, false, true);
+    m.item(Cmd::Open, tr(Msg::MenuOpen), None, false, true);
+    m.separator();
+    m.item(Cmd::Quit, tr(Msg::Exit), None, false, true);
+    let horizontal = if unsafe { GetSystemMetrics(SM_MENUDROPALIGNMENT) } != 0 {
+        TPM_RIGHTALIGN
+    } else {
+        TPM_LEFTALIGN
+    };
+    let id = unsafe {
+        let _ = SetMenuDefaultItem(m.menu, Cmd::ShowWindow.id(), 0);
+        // Otherwise the menu stays open when the user clicks elsewhere.
+        let _ = SetForegroundWindow(hwnd);
+        let id = TrackPopupMenuEx(
+            m.menu,
+            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | horizontal).0,
+            x,
+            y,
+            hwnd,
+            None,
+        );
+        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
+        let _ = DestroyMenu(m.menu);
+        id
+    };
     Cmd::from_id(id.0 as u32)
 }
 

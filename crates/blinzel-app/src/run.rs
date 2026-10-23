@@ -13,15 +13,13 @@ use std::sync::mpsc::channel;
 
 use blinzel_core::timing;
 use blinzel_i18n::{Lang, Msg, negotiate, set_lang, tr};
-use windows::Win32::Foundation::{FILETIME, HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmExtendFrameIntoClientArea,
     DwmSetWindowAttribute,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime;
-use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
@@ -35,7 +33,7 @@ use crate::gfx::{Gfx, Renderer, SwapChain};
 use crate::loader::{Job, Loader, Stage, WM_LOADED};
 use crate::platform::{io, threads, wide};
 use crate::window::{self, APP, run_actions, set_cloak, start_uncloak_timer};
-use crate::{bench, instance, settings_store, setup, update};
+use crate::{bench, instance, resident, settings_store, setup, update};
 
 /// The main window for the device thread's wake-up message (0 until it
 /// exists).
@@ -48,6 +46,8 @@ pub struct Args {
     pub warp: bool,
     pub json: Option<PathBuf>,
     pub exit_after_first_frame: bool,
+    /// Started at sign-in: hidden, tray icon only (resident mode).
+    pub resident: bool,
 }
 
 pub fn parse_args() -> Args {
@@ -59,6 +59,7 @@ pub fn parse_args() -> Args {
             Some("--warp") => a.warp = true,
             Some("--json") => a.json = it.next().map(PathBuf::from),
             Some("--exit-after-first-frame") => a.exit_after_first_frame = true,
+            Some("--resident") => a.resident = true,
             _ => a.file = Some(PathBuf::from(arg)),
         }
     }
@@ -68,20 +69,7 @@ pub fn parse_args() -> Args {
 /// Microseconds since the process was created (loader, Defender scan and
 /// CRT init happened before `main`).
 fn process_age_us() -> i64 {
-    unsafe {
-        let (mut c, mut e, mut k, mut u) = (
-            FILETIME::default(),
-            FILETIME::default(),
-            FILETIME::default(),
-            FILETIME::default(),
-        );
-        if GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u).is_err() {
-            return 0;
-        }
-        let now = GetSystemTimePreciseAsFileTime();
-        let ticks = |f: FILETIME| ((f.dwHighDateTime as i64) << 32) | f.dwLowDateTime as i64;
-        (ticks(now) - ticks(c)) / 10
-    }
+    crate::platform::process_created().map_or(0, |c| (crate::platform::now_filetime() - c) / 10)
 }
 
 /// The best shipped language for the user's Windows UI languages.
@@ -180,20 +168,35 @@ pub fn run() -> i32 {
             windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(PCWSTR(id.as_ptr()));
     }
 
-    if let Some(file) = &args.file
-        && settings.single_instance
-        && !args.exit_after_first_frame
-        && instance::hand_off(file)
+    if args.resident {
+        // Started at sign-in: only if still wanted, and only once.
+        if !settings.resident {
+            resident::set_autostart(false);
+            return 0;
+        }
+        if instance::running().is_some() {
+            return 0;
+        }
+    } else if !args.exit_after_first_frame
+        && let Some(target) = instance::target(settings.single_instance, settings.resident)
     {
-        return 0;
+        let handed_off = match &args.file {
+            Some(file) => instance::hand_off(target, file),
+            // Start menu: a resident instance shows its window.
+            None => settings.resident && instance::show(target),
+        };
+        if handed_off {
+            return 0;
+        }
     }
+    let file = args.file.clone().filter(|_| !args.resident);
     timing::mark("instance_checked");
 
     // Decode workers: P-cores only (at most what the prefetch window can
     // use); the visible image decodes on all P-cores. One I/O thread on
     // rotating disks.
     let cpu = threads::cpu_info();
-    let drive = args.file.as_deref().map(io::drive_info).unwrap_or_default();
+    let drive = file.as_deref().map(io::drive_info).unwrap_or_default();
     let io_threads = if drive.seek_penalty { 1 } else { 2 };
     let cpu_threads = cpu.performance.clamp(2, 6);
     let loader = Loader::new(io_threads, cpu_threads, cpu.performance);
@@ -204,8 +207,7 @@ pub fn run() -> i32 {
     ));
 
     // Start decoding the file before anything else.
-    let first = args
-        .file
+    let first = file
         .as_ref()
         .and_then(|f| io::entry(f).ok().map(|e| (f.clone(), e)));
     if let Some((path, entry)) = &first {
@@ -296,11 +298,13 @@ pub fn run() -> i32 {
     // The loader may post the first decoded image from now on.
     loader.set_hwnd(hwnd);
     MAIN_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
-    unsafe {
-        // Still cloaked, so nothing shows yet; but a shown window gets
-        // painted. Not activated: activation costs ~20 ms and waits until
-        // an image is on screen.
-        let _ = ShowWindow(hwnd, SW_SHOWNA);
+    if !args.resident {
+        unsafe {
+            // Still cloaked, so nothing shows yet; but a shown window gets
+            // painted. Not activated: activation costs ~20 ms and waits
+            // until an image is on screen.
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
     }
     timing::mark("window_created");
 
@@ -344,7 +348,7 @@ pub fn run() -> i32 {
     timing::mark("swapchain_ready");
 
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
-    let auto_update = settings.auto_update;
+    let resident_mode = settings.resident;
     let mut app = App::new(hwnd, gfx, renderer, swap, settings, loader, dpi, client);
     // The GDI first frame already made the window visible.
     app.cloaked = !crate::first_frame::shown();
@@ -353,6 +357,10 @@ pub fn run() -> i32 {
             .json
             .clone()
             .or_else(|| Some(PathBuf::from("startup.json")));
+    }
+    if args.resident {
+        app.hidden = true;
+        app.wake_report = args.json.clone();
     }
     let has_file = first.is_some();
     let mut actions = match first {
@@ -363,7 +371,34 @@ pub fn run() -> i32 {
     app.loader.set_hwnd(hwnd);
     APP.with(|cell| *cell.borrow_mut() = Some(app));
     crate::first_frame::release();
-    update::schedule(auto_update);
+    update::schedule();
+    if resident_mode {
+        resident::add_tray(hwnd);
+        resident::refresh_autostart();
+    }
+    if args.resident {
+        // Nothing to show. This version starts fine (see update::on_start);
+        // the hint frame warms the renderer and text pipeline.
+        update::on_first_frame();
+        // Shown once while cloaked (never on screen): the first present of a
+        // window that was never visible costs extra in DWM. As a tool window
+        // meanwhile, so the taskbar does not add a button.
+        let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+        unsafe {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as isize);
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+        #[cfg(feature = "turbojpeg")]
+        window::with_app(|a| a.warm_up(cpu.performance));
+        run_actions(hwnd, window::with_app(|a| a.render()).unwrap_or_default());
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+        }
+        blinzel_core::bufpool::global().set_max_retained(0);
+        message_loop();
+        return finish();
+    }
 
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOW);
@@ -382,7 +417,14 @@ pub fn run() -> i32 {
     run_actions(hwnd, actions);
 
     message_loop();
+    finish()
+}
+
+fn finish() -> i32 {
     APP.with(|cell| cell.borrow_mut().take());
+    if window::restart_requested() {
+        update::start_installed_resident();
+    }
     0
 }
 

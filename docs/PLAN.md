@@ -125,6 +125,16 @@ Reihenfolge der Stufen:
 - 🟡 **Hybrid-CPUs:** Worker nur auf P-Kernen (EfficiencyClass), ABOVE_NORMAL, ohne Power-Throttling.
 - 🟡 **Robust:** kein `panic=abort`, jeder Decode läuft in `catch_unwind`.
 - ✅ **Delay-Load** für shell32/ole32/oleaut32/shlwapi gemessen: Der Start bis `main` bleibt bei 20–23 ms (das ist die Prozesserzeugung selbst). Kein Delay-Load.
+- 🟡 **Resident-Modus (M6, Einstellung, standardmäßig aus):**
+  - Schließen versteckt das Fenster, statt den Prozess zu beenden. Bild, Ordnerliste, Texturen und Puffer werden freigegeben; Device, Shader und Decoder-Threads bleiben warm.
+  - Ein zweiter Start übergibt nur die Datei (`WM_COPYDATA`). Das versteckte Fenster kommt gecloakt zurück, wird mit dem ersten Frame entcloakt und holt sich dann den Vordergrund.
+  - Ohne „Bilder im selben Fenster öffnen“ geht die Übergabe nur an eine versteckte Instanz, und beim Schließen wird nur versteckt, wenn es noch keine versteckte gibt.
+  - Tray-Icon (Anzeigen, Öffnen…, Beenden), nach einem Explorer-Neustart wieder eingetragen (`TaskbarCreated`).
+  - Start bei der Anmeldung über `HKCU\…\Run` (`blinzel.exe --resident`), solange die Einstellung an ist. Die Deinstallation entfernt den Eintrag und beendet laufende Instanzen vorher.
+  - Der `--resident`-Start wärmt Decode, Upload und Present einmal vor (generiertes JPEG in Bildschirmgröße; das Fenster wird dafür einmal gecloakt und als Toolfenster gezeigt, also ohne Taskleisten-Knopf).
+  - Ist inzwischen ein Update installiert, startet die versteckte Instanz beim nächsten Verstecken die neue Version.
+  - Eine aufgeweckte Instanz lädt die Einstellungen neu; eine versteckte speichert beim Beenden nicht (ihre Kopie kann veraltet sein).
+- 🟡 **App-Icon:** `build.rs` zeichnet das Favicon-Motiv und bettet es als ICO ein (DIB bis 64 px, PNG für 256 px). Fenster, Taskleiste, Tray und Startmenü-Verknüpfung nutzen es.
 - 🟡 **Erstes Bild über GDI:** Die Device-Erzeugung dauert länger als Lesen und Decodieren. Der Loader rendert das erste decodierte Bild deshalb selbst auf der CPU (`blinzel_core::preview`, dieselbe Geometrie wie die GPU), der UI-Thread pumpt Nachrichten statt auf das Device zu warten und zeigt es mit `SetDIBitsToDevice`. Direct3D übernimmt, sobald das Device steht. Das Fenster wird ohne Aktivierung gezeigt (`SW_SHOWNA`, spart ca. 20 ms) und holt sich den Vordergrund nach dem ersten Bild.
 
 ## 6. UI und Fensterverhalten
@@ -309,7 +319,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
-| **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | ⬜ |
+| **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon fertig; Handoff 24 ms (Median); offen: ICC |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug und Website fertig; offen: Referenzmessung, Funktionstabelle mit Quellen, Cloudflare-Secrets |
 
@@ -482,7 +492,20 @@ Die Zeit bis `main` (20–25 ms) ist Prozesserzeugung, Delay-Load ändert daran 
 
 **Noch offen:** Messung von außen mit `blinzel-race` und Sichtprüfung des Übergangs GDI → Direct3D. Beides geht nur bei entsperrtem Bildschirm; der Rechner war während der Messung gesperrt. Unter 50 ms kommt nur der Resident-Modus (M6).
 
+**Resident-Handoff (M6, Branch `m6-resident`, gleiche Maschine, 24-MP-JPEG):** Gemessen mit `blinzel --resident --json <datei>`: Die Übergabe trägt die Erzeugungszeit des zweiten Prozesses, die Marken zählen also wie beim Kaltstart ab dessen Prozessstart.
+
+| Stand | Übergabe empfangen → sichtbar (Median) | erste Übergabe nach dem Start |
+|---|---|---|
+| ohne Vorwärmen | 24,6 ms | 43 ms |
+| + Decode/Upload in Bildschirmgröße vorgewärmt | 24,7 ms | 33 ms |
+| + Fenster einmal gecloakt gezeigt | **23–25 ms** (Spanne 22–29 ms) | 23–24 ms |
+
+Davon Lesen ca. 2 ms, Decodieren ca. 19 ms (3000 × 2000, alle P-Kerne), Upload ca. 1,5 ms, Present unter 1 ms. Ziel ≤ 25 ms erreicht. Der zweite Prozess braucht bis zur Übergabe so lange wie ein Kaltstart bis `main` (normal 20–25 ms; während dieser Messung war der Rechner gesperrt und brauchte 120–150 ms, auch der alte Stand). Von außen also normal ca. 45–50 ms vom Doppelklick bis zum Bild.
+
+Speicher der versteckten Instanz: 50 MB privat nach dem Start, nach Benutzung ca. 70 MB und stabil (60 Übergaben, kein Wachstum).
+
 **Als Nächstes, in dieser Reihenfolge:**
-1. M6 mit dem Resident-Modus (≤ 25 ms Handoff) vorziehen, vorher die Sichtprüfung des GDI-Übergangs bei entsperrtem Bildschirm.
-2. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
-3. M4, M5 wie in Abschnitt 12.
+1. Bei entsperrtem Bildschirm: Sichtprüfung des GDI-Übergangs, Tray-Menü und Aufwecken ansehen, `blinzel-race` mit Kaltstart und Resident messen.
+2. M6 abschließen: ICC-Farbmanagement (eingebettete Profile → Monitorprofil).
+3. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
+4. M4, M5 wie in Abschnitt 12.

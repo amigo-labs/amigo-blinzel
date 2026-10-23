@@ -71,5 +71,9 @@ features = [
     "Win32_UI_WindowsAndMessaging",
 ]
 
+[build-dependencies]
+# Encodes the generated application icon.
+png.workspace = true
+
 [dev-dependencies]
 png.workspace = true

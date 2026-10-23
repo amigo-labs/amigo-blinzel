@@ -24,7 +24,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::app::{Action, App, CursorKind, WM_DIR_CHANGED, WM_LIST, monitor_rect};
 use crate::chrome::Button;
+use crate::instance::Request;
 use crate::loader::WM_LOADED;
+use crate::resident::{self, WM_TRAY};
 use crate::{clipboard, instance, menu, platform};
 
 thread_local! {
@@ -402,7 +404,7 @@ fn handle(
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_UNCLOAK);
             }
-            if app.cloaked {
+            if app.cloaked && !app.hidden {
                 actions.push(Action::Uncloak);
             }
             done
@@ -437,14 +439,34 @@ fn handle(
         }
         WM_COPYDATA => {
             let cds = unsafe { &*(lp.0 as *const COPYDATASTRUCT) };
-            match instance::received_path(cds) {
-                Some(path) => {
+            match instance::received(cds) {
+                Some(Request::Open {
+                    path,
+                    sender_created,
+                }) => {
+                    // Marks of this hand-off count from the second launch's
+                    // process creation, like a cold start's.
+                    let age = sender_created.map_or(0, |c| (platform::now_filetime() - c) / 10);
+                    blinzel_core::timing::init(age);
+                    blinzel_core::timing::mark("handoff_received");
                     actions.extend(app.open(path));
-                    actions.push(Action::Activate);
+                    actions.push(Action::Wake { opened: true });
+                    Outcome::Result(LRESULT(1))
+                }
+                Some(Request::Show) => {
+                    actions.push(Action::Wake { opened: false });
+                    Outcome::Result(LRESULT(1))
+                }
+                Some(Request::Quit) => {
+                    actions.push(Action::Exit);
                     Outcome::Result(LRESULT(1))
                 }
                 None => done,
             }
+        }
+        WM_TRAY => {
+            actions.extend(resident::on_tray(wp, lp));
+            done
         }
         WM_DROPFILES => {
             let drop = HDROP(wp.0 as *mut _);
@@ -478,6 +500,10 @@ fn handle(
         }
         WM_DESTROY => {
             unsafe { PostQuitMessage(0) };
+            done
+        }
+        _ if msg == resident::taskbar_created() => {
+            resident::on_taskbar_created(hwnd);
             done
         }
         _ => Outcome::Default,
@@ -553,7 +579,12 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::OpenDialog => match crate::dialogs::open_file(hwnd) {
-            Some(p) => with_app(|a| a.open(p)).unwrap_or_default(),
+            Some(p) => {
+                // From the tray the window may be hidden.
+                let mut more = with_app(|a| a.open(p)).unwrap_or_default();
+                more.push(Action::Wake { opened: true });
+                more
+            }
             None => vec![],
         },
         Action::Recycle(path) => {
@@ -614,18 +645,35 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             }
             vec![]
         }
+        Action::SetResident(on) => {
+            resident::set_autostart(on);
+            if on {
+                resident::add_tray(hwnd);
+            } else {
+                resident::remove_tray(hwnd);
+            }
+            vec![]
+        }
+        Action::TrayMenu { x, y } => match menu::show_tray(hwnd, x, y) {
+            Some(cmd) => with_app(|a| a.command(cmd)).unwrap_or_default(),
+            None => vec![],
+        },
+        Action::Wake { opened } => wake(hwnd, opened),
         Action::Close => {
-            let clip = with_app(|a| {
-                crate::settings_store::save(&a.settings);
-                a.clip.take()
-            })
-            .flatten();
-            if let Some(src) = clip {
-                clipboard::render_all(hwnd, &src);
+            // One hidden instance is enough (several windows with "open in
+            // the same window" off). A hidden window closed by someone
+            // else (e.g. taskkill) exits.
+            let hide = with_app(|a| a.settings.resident && !a.hidden).unwrap_or(false)
+                && instance::hidden(Some(hwnd)).is_none();
+            if hide {
+                hide_window(hwnd);
+            } else {
+                exit(hwnd);
             }
-            unsafe {
-                let _ = DestroyWindow(hwnd);
-            }
+            vec![]
+        }
+        Action::Exit => {
+            exit(hwnd);
             vec![]
         }
         Action::Activate => {
@@ -639,13 +687,112 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
         }
         Action::Uncloak => {
             uncloak(hwnd);
-            with_app(|a| a.cloaked = false);
+            let woke = with_app(|a| {
+                a.cloaked = false;
+                std::mem::take(&mut a.activate_on_uncloak).then(|| a.wake_report.clone())
+            })
+            .flatten();
+            if let Some(report) = woke {
+                unsafe {
+                    let _ = SetForegroundWindow(hwnd);
+                }
+                if let Some(path) = report {
+                    let json = format!("{{\"marks\": {}}}", blinzel_core::timing::marks_json());
+                    let _ = std::fs::write(path, json);
+                }
+            }
             vec![]
         }
         Action::Quit => {
             unsafe { PostQuitMessage(0) };
             vec![]
         }
+    }
+}
+
+/// Saves the settings, keeps a copied image on the clipboard, removes the
+/// tray icon and closes the window (which ends the message loop).
+fn exit(hwnd: HWND) {
+    let clip = with_app(|a| {
+        // A hidden instance's copy may be older than what another window
+        // saved.
+        if !a.hidden {
+            crate::settings_store::save(&a.settings);
+        }
+        a.clip.take()
+    })
+    .flatten();
+    if let Some(src) = clip {
+        clipboard::render_all(hwnd, &src);
+    }
+    resident::remove_tray(hwnd);
+    unsafe {
+        let _ = DestroyWindow(hwnd);
+    }
+}
+
+/// Resident mode: the window goes away, the process stays warm. An
+/// installed update takes over now instead.
+fn hide_window(hwnd: HWND) {
+    if with_app(|a| a.fullscreen) == Some(true) {
+        toggle_fullscreen(hwnd);
+    }
+    with_app(|a| crate::settings_store::save(&a.settings));
+    set_cloak(hwnd, true);
+    unsafe {
+        let _ = KillTimer(Some(hwnd), TIMER_UNCLOAK);
+        let _ = ShowWindow(hwnd, SW_HIDE);
+    }
+    with_app(|a| a.hide());
+    if crate::update::restart_pending() {
+        RESTART.with(|r| r.set(true));
+        exit(hwnd);
+    }
+}
+
+thread_local! {
+    /// Start the updated executable once the message loop has ended.
+    static RESTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the hidden instance exited for an installed update.
+pub fn restart_requested() -> bool {
+    RESTART.with(|r| r.get())
+}
+
+/// Brings a hidden resident window back: shown cloaked, uncloaked with the
+/// first frame of the file just opened (or right away with the hint), then
+/// activated. A visible window is only activated.
+fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
+    let was_hidden = with_app(|a| {
+        let hidden = a.hidden;
+        if hidden {
+            if !opened {
+                a.reload_settings();
+            }
+            a.hidden = false;
+            a.cloaked = true;
+            a.activate_on_uncloak = true;
+        }
+        hidden
+    })
+    .unwrap_or(false);
+    if !was_hidden {
+        return vec![Action::Activate];
+    }
+    blinzel_core::timing::mark("wake");
+    blinzel_core::bufpool::global().set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
+    unsafe {
+        // Painted while cloaked; not activated yet (costs ~20 ms).
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+    }
+    if opened {
+        start_uncloak_timer(hwnd, 400);
+        vec![]
+    } else {
+        let mut more = with_app(|a| a.render()).unwrap_or_default();
+        more.push(Action::Uncloak);
+        more
     }
 }
 
@@ -786,6 +933,8 @@ pub fn register_class(
         lpfnWndProc: Some(wndproc),
         hInstance: instance,
         hCursor: unsafe { LoadCursorW(None, IDC_ARROW)? },
+        hIcon: resident::app_icon(false),
+        hIconSm: resident::app_icon(true),
         // No background brush: nothing is painted before our first frame.
         lpszClassName: instance::WINDOW_CLASS,
         ..Default::default()

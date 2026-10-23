@@ -24,6 +24,8 @@ pub mod menu;
 #[cfg(windows)]
 pub mod platform;
 #[cfg(windows)]
+pub mod resident;
+#[cfg(windows)]
 pub mod run;
 #[cfg(windows)]
 pub mod settings_store;

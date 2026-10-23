@@ -19,6 +19,22 @@ pub fn from_wide(w: &[u16]) -> String {
     String::from_utf16_lossy(&w[..end])
 }
 
+/// Now as FILETIME ticks (100 ns since 1601, UTC).
+pub fn now_filetime() -> i64 {
+    let t = unsafe { windows::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime() };
+    ((t.dwHighDateTime as i64) << 32) | t.dwLowDateTime as i64
+}
+
+/// When this process was created, as FILETIME ticks.
+pub fn process_created() -> Option<i64> {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let mut t = [FILETIME::default(); 4];
+    let [c, e, k, u] = &mut t;
+    unsafe { GetProcessTimes(GetCurrentProcess(), c, e, k, u) }.ok()?;
+    Some(((t[0].dwHighDateTime as i64) << 32) | t[0].dwLowDateTime as i64)
+}
+
 /// Writes to the debugger output (visible in DebugView / WPA), never blocks.
 pub fn debug_log(msg: &str) {
     let w = wide(format!("[blinzel] {msg}\n"));

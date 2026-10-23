@@ -88,6 +88,12 @@ update_current = "amigo-blinzel {version} ist aktuell."
 update_ready = "Version {version} ist geladen und beim nächsten Start aktiv."
 update_failed = "Update fehlgeschlagen: {reason}"
 
+menu_settings = "Einstellungen"
+setting_resident = "Im Hintergrund bereithalten (schneller Start)"
+setting_auto_update = "Updates automatisch installieren"
+setting_single_instance = "Bilder im selben Fenster öffnen"
+tray_show = "amigo-blinzel anzeigen"
+
 [messages.images_count]
 one = "{n} Bild"
 other = "{n} Bilder"

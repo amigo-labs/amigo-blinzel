@@ -132,28 +132,57 @@ pub fn on_first_frame() {
         });
 }
 
-/// Starts the daily background check when enabled.
-pub fn schedule(enabled: bool) {
-    if !enabled || RELEASE_KEY.is_none() {
+/// Starts the daily background check. A resident instance runs for days,
+/// so it looks again every hour and reads the setting each time.
+pub fn schedule() {
+    if RELEASE_KEY.is_none() || installed_layout().is_none() {
         return;
     }
     let _ = std::thread::Builder::new()
         .name("blinzel-update".into())
         .spawn(|| {
             std::thread::sleep(Duration::from_secs(10));
-            let Some(layout) = installed_layout() else {
-                return;
-            };
-            let mut state = load_state(&layout);
-            if !core::check_due(state.last_check, now()) {
-                return;
-            }
-            state.last_check = Some(now());
-            save_state(&layout, &state);
-            if let Err(e) = check_and_install(&layout) {
-                debug_log(&format!("update: {e}"));
+            loop {
+                if crate::settings_store::load().auto_update {
+                    check_if_due();
+                }
+                std::thread::sleep(Duration::from_secs(3600));
             }
         });
+}
+
+fn check_if_due() {
+    let Some(layout) = installed_layout() else {
+        return;
+    };
+    let mut state = load_state(&layout);
+    if !core::check_due(state.last_check, now()) {
+        return;
+    }
+    state.last_check = Some(now());
+    save_state(&layout, &state);
+    if let Err(e) = check_and_install(&layout) {
+        debug_log(&format!("update: {e}"));
+    }
+}
+
+/// An update was installed while this process kept running the previous
+/// version (resident mode): it should hand over to the new executable.
+pub fn restart_pending() -> bool {
+    installed_layout().is_some_and(|l| {
+        load_state(&l)
+            .pending
+            .is_some_and(|p| p != running_version())
+    })
+}
+
+/// Starts the installed (updated) executable as the new resident instance.
+pub fn start_installed_resident() {
+    if let Some(layout) = Layout::user() {
+        let _ = std::process::Command::new(layout.exe())
+            .arg("--resident")
+            .spawn();
+    }
 }
 
 /// What a check found.

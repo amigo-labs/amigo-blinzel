@@ -95,10 +95,13 @@ pub struct BufPool {
     stats_misses: AtomicUsize,
 }
 
+/// Idle bytes the process-wide pool keeps by default.
+pub const DEFAULT_MAX_RETAINED: usize = 512 << 20;
+
 /// The process-wide pool.
 pub fn global() -> &'static BufPool {
     static POOL: OnceLock<BufPool> = OnceLock::new();
-    POOL.get_or_init(|| BufPool::new(512 << 20))
+    POOL.get_or_init(|| BufPool::new(DEFAULT_MAX_RETAINED))
 }
 
 /// Rounds `len` up to its size class.

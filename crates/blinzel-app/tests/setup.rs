@@ -39,12 +39,23 @@ fn installs_updates_and_uninstalls_in_a_sandbox() {
     install::install(&layout, &src, "9.9.10", "test").unwrap();
     assert_eq!(layout.installed_version().as_deref(), Some("9.9.10"));
 
+    // Resident mode starts the app hidden at sign-in.
+    install::set_autostart(&layout, Some(&layout.exe())).unwrap();
+    assert_eq!(
+        install::autostart(&layout),
+        Some(format!("\"{}\" --resident", layout.exe().display()))
+    );
+    install::set_autostart(&layout, None).unwrap();
+    assert_eq!(install::autostart(&layout), None);
+    install::set_autostart(&layout, Some(&layout.exe())).unwrap();
+
     install::uninstall(&layout).unwrap();
     assert!(!layout.dir.exists());
     assert!(!layout.shortcut().exists());
     assert_eq!(layout.installed_version(), None);
     assert!(!registry::value_exists(&open_with, install::PROG_ID));
     assert_eq!(registry::get_str(&command, ""), None);
+    assert_eq!(install::autostart(&layout), None);
 
     registry::delete_tree(&reg).unwrap();
     let _ = std::fs::remove_dir_all(&root);
