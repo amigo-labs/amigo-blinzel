@@ -35,7 +35,7 @@ use crate::gfx::{Gfx, Renderer, SwapChain};
 use crate::loader::{Job, Loader, Stage, WM_LOADED};
 use crate::platform::{io, threads, wide};
 use crate::window::{self, APP, run_actions, set_cloak, start_uncloak_timer};
-use crate::{bench, instance, settings_store};
+use crate::{bench, instance, settings_store, setup};
 
 #[derive(Debug, Default)]
 pub struct Args {
@@ -154,8 +154,21 @@ pub fn run() -> i32 {
         .and_then(blinzel_i18n::lang_from_code)
         .unwrap_or_else(system_language);
     set_lang(lang);
+    // The executable is its own installer (setup file name, --install,
+    // --uninstall).
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let exe = std::env::current_exe().unwrap_or_default();
+    if let Some(mode) = setup::mode(&raw, &exe) {
+        return setup::run(mode);
+    }
     if !crate::platform::os::is_supported() {
         return fatal(tr(Msg::ErrorOs));
+    }
+    unsafe {
+        // Groups the window with the Start menu shortcut on the taskbar.
+        let id = wide(setup::shortcut::APP_ID);
+        let _ =
+            windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(PCWSTR(id.as_ptr()));
     }
 
     if let Some(file) = &args.file
