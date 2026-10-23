@@ -1,7 +1,8 @@
 name: Website
 
 # Builds website/dist and deploys it to Cloudflare Workers (static assets)
-# when the secrets exist (docs/PLAN.md, section 14):
+# when the secrets exist (docs/PLAN.md, section 14). Not needed while
+# Cloudflare Workers Builds deploys the repository itself (wrangler.toml).
 #   secret CLOUDFLARE_API_TOKEN   (Workers: edit)
 #   secret CLOUDFLARE_ACCOUNT_ID
 
@@ -12,6 +13,7 @@ on:
       - "website/**"
       - "crates/blinzel-site/**"
       - "CHANGELOG.md"
+      - "wrangler.toml"
   release:
     types: [published]
   workflow_dispatch:
@@ -28,13 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install && rustup show active-toolchain
-      - run: cargo run --release -p blinzel-site -- website CHANGELOG.md
+      - run: sh website/build.sh
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        working-directory: website
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "Cloudflare secrets not set: built only, not deployed."

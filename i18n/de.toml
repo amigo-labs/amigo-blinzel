@@ -73,7 +73,7 @@ error_empty_folder = "Keine Bilder in diesem Ordner"
 
 app_description = "Schneller Bildbetrachter"
 setup_title = "amigo-blinzel installieren"
-setup_body = "Version {version} wird nur für dich installiert, nach\n{dir}\nAdministratorrechte sind nicht nötig."
+setup_body = "Version {version} wird nur für dich installiert, nach\n{dir}\nAdministratorrechte sind nicht nötig.\n\nNach Updates sucht amigo-blinzel höchstens einmal am Tag bei GitHub; abschalten unter Einstellungen → „Updates automatisch installieren“."
 setup_install = "Installieren"
 setup_cancel = "Abbrechen"
 setup_done_title = "amigo-blinzel ist installiert"

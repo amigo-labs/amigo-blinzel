@@ -8,6 +8,7 @@ name: Release
 #   secret   RELEASE_SIGNING_KEY       Ed25519 seed (blinzel-release keygen)
 #   secret   SIGNPATH_API_TOKEN        optional until SignPath is set up
 #   variable SIGNPATH_ORGANIZATION_ID  optional; signing runs only when set
+# SignPath project setup: packaging/signpath/README.md.
 
 on:
   push:
@@ -43,12 +44,16 @@ jobs:
       # Third-party actions are pinned to commits: this workflow handles the
       # signing secrets.
       - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+      - name: Crate version
+        id: version
+        shell: bash
+        run: echo "version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
       - name: Tag matches the crate version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
-        run: |
-          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          test "v$version" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v$version"; exit 1; }
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: test "v$VERSION" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v$VERSION"; exit 1; }
       - run: cargo build --release --locked --target ${{ matrix.target }} -p blinzel-app
       - name: Name the setup executable
         shell: bash
@@ -72,6 +77,10 @@ jobs:
           github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
           wait-for-completion: true
           output-artifact-directory: signed
+          # packaging/signpath/artifact-configuration.xml checks the
+          # product version against it.
+          parameters: |
+            version: ${{ toJSON(steps.version.outputs.version) }}
       - name: Keep the signed executable
         if: vars.SIGNPATH_ORGANIZATION_ID != ''
         shell: bash

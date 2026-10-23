@@ -4,6 +4,7 @@ description = "Static site generator for the amigo-blinzel website (M8): pages, 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dependencies]

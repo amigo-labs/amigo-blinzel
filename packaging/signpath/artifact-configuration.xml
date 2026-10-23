@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "exe" of project "amigo-blinzel".
+     The release workflow uploads one setup executable per architecture;
+     actions/upload-artifact wraps it in a ZIP. The workflow passes the crate
+     version, and the version resource must carry the same product name and
+     version (crates/blinzel-app/build.rs). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="amigo-blinzel-setup-*.exe" product-name="amigo-blinzel" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

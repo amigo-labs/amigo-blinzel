@@ -4,6 +4,7 @@ description = "Competitor benchmark: measures image viewers from the outside via
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dependencies]

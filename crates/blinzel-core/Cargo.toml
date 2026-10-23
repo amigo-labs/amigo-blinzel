@@ -4,6 +4,7 @@ description = "Platform-independent viewer core: decoding, layout, selection, sc
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [features]
