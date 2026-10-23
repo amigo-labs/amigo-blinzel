@@ -95,6 +95,7 @@ menu_settings = "Settings"
 setting_resident = "Keep ready in the background (faster start)"
 setting_auto_update = "Install updates automatically"
 setting_single_instance = "Open images in the same window"
+setting_color_management = "Use colour profiles (ICC)"
 tray_show = "Show amigo-blinzel"
 
 [messages.images_count]

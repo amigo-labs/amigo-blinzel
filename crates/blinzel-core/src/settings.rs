@@ -23,6 +23,9 @@ pub struct Settings {
     /// Stay running in the background (tray) after closing, and start at
     /// sign-in, so opening an image needs no process or GPU start.
     pub resident: bool,
+    /// Convert images with colour profiles (and all images on displays
+    /// with a non-sRGB profile) to the display's colours.
+    pub color_management: bool,
 }
 
 impl Default for Settings {
@@ -37,6 +40,7 @@ impl Default for Settings {
             background: [0x1E, 0x1E, 0x1E],
             auto_update: true,
             resident: false,
+            color_management: true,
         }
     }
 }
@@ -88,6 +92,9 @@ impl Settings {
                 }
                 "auto_update" => s.auto_update = value.parse().unwrap_or(s.auto_update),
                 "resident" => s.resident = value.parse().unwrap_or(s.resident),
+                "color_management" => {
+                    s.color_management = value.parse().unwrap_or(s.color_management)
+                }
                 _ => {}
             }
         }
@@ -115,7 +122,8 @@ impl Settings {
              prefetch_behind = {}\n\
              background = \"#{r:02X}{g:02X}{b:02X}\"\n\
              auto_update = {}\n\
-             resident = {}\n",
+             resident = {}\n\
+             color_management = {}\n",
             self.view.mode.key(),
             self.view.no_upscale,
             self.language.as_deref().unwrap_or("auto"),
@@ -125,6 +133,7 @@ impl Settings {
             self.prefetch_behind,
             self.auto_update,
             self.resident,
+            self.color_management,
         )
     }
 }
@@ -148,6 +157,7 @@ mod tests {
             background: [0x12, 0xAB, 0xFF],
             auto_update: false,
             resident: true,
+            color_management: false,
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
         assert_eq!(

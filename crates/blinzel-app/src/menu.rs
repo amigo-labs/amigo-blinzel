@@ -43,6 +43,7 @@ pub enum Cmd {
     ToggleResident,
     ToggleAutoUpdate,
     ToggleSingleInstance,
+    ToggleColorManagement,
     /// Tray: show the (hidden) window.
     ShowWindow,
     /// Tray: exit for good, also in resident mode.
@@ -84,6 +85,7 @@ impl Cmd {
             Cmd::ToggleSingleInstance => 27,
             Cmd::ShowWindow => 28,
             Cmd::Quit => 29,
+            Cmd::ToggleColorManagement => 30,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -104,7 +106,7 @@ impl Cmd {
     }
 }
 
-const ALL: [Cmd; 29] = [
+const ALL: [Cmd; 30] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -134,6 +136,7 @@ const ALL: [Cmd; 29] = [
     Cmd::ToggleSingleInstance,
     Cmd::ShowWindow,
     Cmd::Quit,
+    Cmd::ToggleColorManagement,
 ];
 
 /// State the menu reflects.
@@ -149,6 +152,7 @@ pub struct MenuState {
     pub resident: bool,
     pub auto_update: bool,
     pub single_instance: bool,
+    pub color_management: bool,
 }
 
 fn accel(keys: &[&str]) -> String {
@@ -401,6 +405,13 @@ fn build(s: &MenuState) -> Option<HMENU> {
         tr(Msg::SettingSingleInstance),
         None,
         s.single_instance,
+        true,
+    );
+    settings.item(
+        Cmd::ToggleColorManagement,
+        tr(Msg::SettingColorManagement),
+        None,
+        s.color_management,
         true,
     );
     settings.item(

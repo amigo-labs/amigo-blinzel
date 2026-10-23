@@ -120,6 +120,7 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
             &stage_to_client(&l, probe.orientation, full, stage),
             &content_in_stage(&l, probe.orientation, full, stage),
             bg,
+            None,
         );
         target.sync(&gfx.context).map_err(|e| e.message())?;
         let render_ms = ms(t);

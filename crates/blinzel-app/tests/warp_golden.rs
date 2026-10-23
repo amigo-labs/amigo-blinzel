@@ -5,13 +5,16 @@
 
 #![cfg(all(windows, feature = "turbojpeg"))]
 
-use blinzel_app::gfx::{Gfx, Offscreen, Renderer, Rgba, upload};
+use std::sync::Arc;
+
+use blinzel_app::gfx::{Gfx, Offscreen, Renderer, Rgba, upload, upload_lut};
 use blinzel_core::cpuref::{self, Frame, max_diff, psnr};
 use blinzel_core::decode::{self, Request};
 use blinzel_core::geom::{Orientation, PixelRect};
 use blinzel_core::layout::{
     ViewMode, ViewOptions, ViewState, compute, content_in_stage, stage_to_client,
 };
+use blinzel_core::lut::{self, Lut3d};
 use blinzel_core::pixel::Image;
 use blinzel_core::testimg;
 
@@ -25,6 +28,7 @@ struct Case<'a> {
     opts: ViewOptions,
     state: ViewState,
     tile: u32,
+    lut: Option<Arc<Lut3d>>,
 }
 
 fn run(gfx: &Gfx, renderer: &mut Renderer, c: &Case) {
@@ -44,7 +48,18 @@ fn run(gfx: &Gfx, renderer: &mut Renderer, c: &Case) {
     let target = Offscreen::new(&gfx.device, c.client).expect("offscreen");
     let bg = Rgba::from_u8(BG, 1.0);
     renderer.begin(&gfx.context, &target.rtv, c.client, bg);
-    renderer.draw_image(&gfx.context, &gpu_img, &xform, &content, bg);
+    let gpu_lut = c
+        .lut
+        .as_ref()
+        .map(|l| upload_lut(&gfx.device, l).expect("lut"));
+    renderer.draw_image(
+        &gfx.context,
+        &gpu_img,
+        &xform,
+        &content,
+        bg,
+        gpu_lut.as_ref(),
+    );
     let got = target.read_bgra(&gfx.context).expect("readback");
 
     let want = cpuref::render(
@@ -54,6 +69,7 @@ fn run(gfx: &Gfx, renderer: &mut Renderer, c: &Case) {
             stage_to_client: xform,
             content,
             background: BG,
+            lut: c.lut.clone(),
         },
     );
     let p = psnr(&got, &want);
@@ -157,6 +173,7 @@ fn ycc_subsamplings_with_tile_seams() {
                 opts: ACTUAL,
                 state: ViewState::default(),
                 tile: 72,
+                lut: None,
             },
         );
     }
@@ -178,6 +195,7 @@ fn all_orientations_minified() {
                 opts: FIT,
                 state: ViewState::default(),
                 tile: 96,
+                lut: None,
             },
         );
     }
@@ -202,6 +220,7 @@ fn zoom_crop_gray_and_alpha() {
                 crop: None,
             },
             tile: 64,
+            lut: None,
         },
     );
     run(
@@ -218,6 +237,7 @@ fn zoom_crop_gray_and_alpha() {
                 ..Default::default()
             },
             tile: 64,
+            lut: None,
         },
     );
     let gray = jpeg(133, 77, 420, true);
@@ -232,6 +252,7 @@ fn zoom_crop_gray_and_alpha() {
             opts: ACTUAL,
             state: ViewState::default(),
             tile: 64,
+            lut: None,
         },
     );
     let rgba = png_rgba(97, 61);
@@ -246,6 +267,7 @@ fn zoom_crop_gray_and_alpha() {
             opts: FIT,
             state: ViewState::default(),
             tile: 64,
+            lut: None,
         },
     );
 }
@@ -265,6 +287,7 @@ fn heavy_minification_uses_box_filter() {
             opts: FIT,
             state: ViewState::default(),
             tile: 4096,
+            lut: None,
         },
     );
 }
@@ -328,4 +351,37 @@ fn overlay_shapes_and_text_render() {
         px.as_chunks::<4>().0.iter().any(|p| p[0] > 200),
         "text produced no pixels"
     );
+}
+
+/// The colour transform (3D LUT) is applied after filtering, before the
+/// background shows through.
+#[test]
+fn colour_transform_lut() {
+    let (gfx, mut r) = setup();
+    // Channel mixing and curves, like a wide-gamut conversion.
+    let lut = Arc::new(Lut3d::from_fn(lut::SIZE, |c| {
+        [
+            (0.75 * c[0] + 0.25 * c[1]).powf(1.2),
+            (0.1 * c[0] + 0.9 * c[1]).sqrt(),
+            c[2] * c[2],
+        ]
+    }));
+    let ycc = jpeg(257, 173, 420, false);
+    let rgba = png_rgba(97, 61);
+    for (name, img, opts) in [("lut-ycc", &ycc, FIT), ("lut-alpha", &rgba, FIT)] {
+        run(
+            &gfx,
+            &mut r,
+            &Case {
+                name,
+                image: img,
+                orientation: Orientation::NORMAL,
+                client: (180, 140),
+                opts,
+                state: ViewState::default(),
+                tile: 64,
+                lut: Some(lut.clone()),
+            },
+        );
+    }
 }

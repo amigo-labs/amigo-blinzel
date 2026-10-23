@@ -92,6 +92,7 @@ menu_settings = "Einstellungen"
 setting_resident = "Im Hintergrund bereithalten (schneller Start)"
 setting_auto_update = "Updates automatisch installieren"
 setting_single_instance = "Bilder im selben Fenster öffnen"
+setting_color_management = "Farbprofile beachten (ICC)"
 tray_show = "amigo-blinzel anzeigen"
 
 [messages.images_count]

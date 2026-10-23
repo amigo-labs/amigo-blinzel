@@ -9,7 +9,37 @@
 use crate::cpuref::Frame;
 use crate::geom::Rect;
 use crate::layout::texels_per_pixel;
+use crate::lut::Lut3d;
 use crate::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
+
+/// Runs `f(y, row)` for every BGRA row of `out`; with a colour transform
+/// (about 4× the work) on several threads.
+fn rows(out: &mut [u8], width: usize, parallel: bool, f: impl Fn(usize, &mut [u8]) + Sync) {
+    let stride = width * 4;
+    let height = out.len() / stride.max(1);
+    let threads = if parallel {
+        std::thread::available_parallelism().map_or(1, |n| n.get().min(8))
+    } else {
+        1
+    };
+    if threads <= 1 || height < 2 * threads {
+        for (y, row) in out.chunks_exact_mut(stride).enumerate() {
+            f(y, row);
+        }
+        return;
+    }
+    let band = height.div_ceil(threads);
+    std::thread::scope(|s| {
+        for (b, chunk) in out.chunks_mut(band * stride).enumerate() {
+            let f = &f;
+            s.spawn(move || {
+                for (i, row) in chunk.chunks_exact_mut(stride).enumerate() {
+                    f(b * band + i, row);
+                }
+            });
+        }
+    });
+}
 
 /// Full-range BT.601 (JFIF) to RGB in 16.16 fixed point.
 #[inline(always)]
@@ -147,7 +177,7 @@ pub fn render(img: &Image, f: &Frame) -> Vec<u8> {
     } else {
         return render_general(img, f);
     };
-    let (cols, rows) = if swap {
+    let (cols, row_taps) = if swap {
         (
             axis(cw, (inv.d, inv.f), y_range, img.height, sub_v, q),
             axis(ch, (inv.b, inv.c), x_range, img.width, sub_h, q),
@@ -158,21 +188,23 @@ pub fn render(img: &Image, f: &Frame) -> Vec<u8> {
             axis(ch, (inv.e, inv.f), y_range, img.height, sub_v, q),
         )
     };
-    for (y, row) in out.chunks_exact_mut(cw * 4).enumerate() {
-        let Some(ry) = rows[y] else { continue };
+    let lut = f.lut.as_deref();
+    rows(&mut out, cw, lut.is_some(), |y, row| {
+        let Some(ry) = row_taps[y] else { return };
         for (x, px) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let Some(cx) = cols[x] else { continue };
             let (tx, ty) = if swap { (ry, cx) } else { (cx, ry) };
-            *px = shade(img, tx, ty, bg);
+            *px = shade(img, tx, ty, bg, lut);
         }
-    }
+    });
     out
 }
 
-/// The 2 × 2 box at stage texels (`tx`, `ty`), over the background, as
-/// BGRA.
+/// The 2 × 2 box at stage texels (`tx`, `ty`), colour transformed, over
+/// the background, as BGRA.
 #[inline(always)]
-fn shade(img: &Image, tx: Taps, ty: Taps, bg: [u8; 3]) -> [u8; 4] {
+fn shade(img: &Image, tx: Taps, ty: Taps, bg: [u8; 3], lut: Option<&Lut3d>) -> [u8; 4] {
+    let map = |c: [u8; 3]| lut.map_or(c, |l| l.apply_u8(c));
     let sum = |p: &Plane, xs: [usize; 2], ys: [usize; 2], bpp: usize, k: usize| -> u32 {
         let at = |x: usize, y: usize| p.data[y * p.stride + x * bpp + k] as u32;
         at(xs[0], ys[0]) + at(xs[1], ys[0]) + at(xs[0], ys[1]) + at(xs[1], ys[1])
@@ -182,7 +214,7 @@ fn shade(img: &Image, tx: Taps, ty: Taps, bg: [u8; 3]) -> [u8; 4] {
             let l = (sum(y, tx.luma, ty.luma, 1, 0) + 2) >> 2;
             let b = (sum(cb, tx.chroma, ty.chroma, 1, 0) + 2) >> 2;
             let r = (sum(cr, tx.chroma, ty.chroma, 1, 0) + 2) >> 2;
-            let [r, g, b] = ycc(l as i32, b as i32, r as i32);
+            let [r, g, b] = map(ycc(l as i32, b as i32, r as i32));
             [b, g, r, 255]
         }
         Pixels::Packed {
@@ -193,12 +225,15 @@ fn shade(img: &Image, tx: Taps, ty: Taps, bg: [u8; 3]) -> [u8; 4] {
             let (tx, ty) = (tx.luma, ty.luma);
             let rgba = match format {
                 PackedFormat::Gray8 => {
-                    let g = (sum(plane, tx, ty, 1, 0) + 2) >> 2;
-                    return [g as u8, g as u8, g as u8, 255];
+                    let g = ((sum(plane, tx, ty, 1, 0) + 2) >> 2) as u8;
+                    let [r, g, b] = map([g, g, g]);
+                    return [b, g, r, 255];
                 }
                 PackedFormat::Rgba8 => [0, 1, 2, 3].map(|k| (sum(plane, tx, ty, 4, k) + 2) >> 2),
                 PackedFormat::Bgra8 => [2, 1, 0, 3].map(|k| (sum(plane, tx, ty, 4, k) + 2) >> 2),
             };
+            let [r, g, b] = map([rgba[0] as u8, rgba[1] as u8, rgba[2] as u8]);
+            let rgba = [r as u32, g as u32, b as u32, rgba[3]];
             let a = if *alpha == Alpha::Opaque {
                 255
             } else {
@@ -250,8 +285,10 @@ fn render_general(img: &Image, f: &Frame) -> Vec<u8> {
                 }
                 let n = offs.len() as u32;
                 let a = acc[3] / n;
+                let c = [0, 1, 2].map(|k| (acc[k] / n) as u8);
+                let c = f.lut.as_ref().map_or(c, |l| l.apply_u8(c));
                 for k in 0..3 {
-                    rgb[k] = ((acc[k] / n * a + bg[k] as u32 * (255 - a) + 127) / 255) as u8;
+                    rgb[k] = ((c[k] as u32 * a + bg[k] as u32 * (255 - a) + 127) / 255) as u8;
                 }
             }
             *px = [rgb[2], rgb[1], rgb[0], 255];
@@ -288,6 +325,7 @@ mod tests {
             stage_to_client: stage_to_client(&l, o, full, (img.width, img.height)),
             content: content_in_stage(&l, o, full, (img.width, img.height)),
             background: [10, 20, 30],
+            lut: None,
         }
     }
 
@@ -349,6 +387,31 @@ mod tests {
             assert!(psnr > 26.0, "orientation {exif}: {psnr:.1} dB");
             // Corners are background (letterbox) in both.
             assert_eq!(&fast[..4], &exact[..4]);
+        }
+    }
+
+    /// A colour transform changes the image, not the letterbox, and the
+    /// parallel path renders what the exact renderer does.
+    #[test]
+    fn applies_the_colour_transform_to_the_image_only() {
+        let img = ycc_image(600, 400);
+        let lut = std::sync::Arc::new(crate::lut::Lut3d::from_fn(crate::lut::SIZE, |c| {
+            [c[1], c[2] * c[2], (c[0] + 0.2).min(1.0)]
+        }));
+        for exif in [1, 6] {
+            let plain = frame(&img, (320, 240), Orientation::from_exif(exif));
+            let f = Frame {
+                lut: Some(lut.clone()),
+                ..plain
+            };
+            let fast = render(&img, &f);
+            let psnr = cpuref::psnr(&fast, &cpuref::render(&img, &f));
+            assert!(psnr > 26.0, "orientation {exif}: {psnr:.1} dB");
+            let unchanged = render(&img, &frame(&img, (320, 240), Orientation::from_exif(exif)));
+            assert!(cpuref::psnr(&fast, &unchanged) < 20.0);
+            assert_eq!(&fast[..4], &unchanged[..4]);
+            let general = render_general(&img, &f);
+            assert!(cpuref::psnr(&fast, &general) > 30.0);
         }
     }
 

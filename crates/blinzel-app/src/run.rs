@@ -19,6 +19,7 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmExtendFrameIntoClientArea,
     DwmSetWindowAttribute,
 };
+use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::{
@@ -98,7 +99,7 @@ pub fn system_language() -> Lang {
     }
 }
 
-fn monitor_under_cursor() -> (RECT, RECT) {
+fn monitor_under_cursor() -> (HMONITOR, RECT, RECT) {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
     };
@@ -111,7 +112,7 @@ fn monitor_under_cursor() -> (RECT, RECT) {
             ..Default::default()
         };
         let _ = GetMonitorInfoW(m, &mut mi);
-        (mi.rcMonitor, mi.rcWork)
+        (m, mi.rcMonitor, mi.rcWork)
     }
 }
 
@@ -200,7 +201,21 @@ pub fn run() -> i32 {
     let io_threads = if drive.seek_penalty { 1 } else { 2 };
     let cpu_threads = cpu.performance.clamp(2, 6);
     let loader = Loader::new(io_threads, cpu_threads, cpu.performance);
-    let (monitor, work) = monitor_under_cursor();
+    let (hmonitor, monitor, work) = monitor_under_cursor();
+    // The display's colour target as remembered from the last start (see
+    // color); Windows is asked again after the first frame.
+    let color = crate::color::ColorManager::new(settings.color_management);
+    if settings.color_management {
+        let c = color.clone();
+        let m = hmonitor.0 as isize;
+        let _ = std::thread::Builder::new()
+            .name("blinzel-color".into())
+            .spawn(move || {
+                let remembered = crate::color::remembered_target(HMONITOR(m as *mut _));
+                c.set_target(remembered.flatten());
+            });
+    }
+    loader.set_color(color.clone());
     loader.set_screen_box((
         (monitor.right - monitor.left) as u32,
         (monitor.bottom - monitor.top) as u32,
@@ -349,7 +364,11 @@ pub fn run() -> i32 {
 
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let resident_mode = settings.resident;
-    let mut app = App::new(hwnd, gfx, renderer, swap, settings, loader, dpi, client);
+    let mut app = App::new(
+        hwnd, gfx, renderer, swap, settings, loader, color, dpi, client,
+    );
+    // The colour target was chosen for this monitor.
+    app.monitor = hmonitor.0 as isize;
     // The GDI first frame already made the window visible.
     app.cloaked = !crate::first_frame::shown();
     if args.exit_after_first_frame {

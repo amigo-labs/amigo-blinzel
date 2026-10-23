@@ -95,6 +95,7 @@ struct Shared {
     /// The first decoded image went to the window for the GDI first frame.
     first_frame_sent: AtomicBool,
     first_frame_target: Mutex<Option<crate::first_frame::Target>>,
+    color: Mutex<Option<Arc<crate::color::ColorManager>>>,
 }
 
 impl Shared {
@@ -151,6 +152,7 @@ impl Loader {
             decode_threads: decode_threads.max(1),
             first_frame_sent: AtomicBool::new(false),
             first_frame_target: Mutex::new(None),
+            color: Mutex::new(None),
         });
         let (s_io, s_cpu) = (shared.clone(), shared.clone());
         let sched = Scheduler::new(
@@ -176,6 +178,11 @@ impl Loader {
     /// Lets the loader render the GDI first frame itself (see first_frame).
     pub fn set_first_frame_target(&self, t: crate::first_frame::Target) {
         *self.shared.first_frame_target.lock().unwrap() = Some(t);
+    }
+
+    /// Colour management for the GDI first frame.
+    pub fn set_color(&self, color: Arc<crate::color::ColorManager>) {
+        *self.shared.color.lock().unwrap() = Some(color);
     }
 
     pub fn set_hwnd(&self, hwnd: HWND) {
@@ -276,6 +283,10 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
         Err(e) => return fail(e.to_string(), None),
     };
     let (sw, sh) = *shared.screen.lock().unwrap();
+    // A colour transform, if the image needs one, builds while it decodes.
+    if let Some(c) = &*shared.color.lock().unwrap() {
+        c.prepare(probe.icc.as_ref());
+    }
     let (ow, oh) = probe.oriented_size();
     let fit_scale = (sw as f64 / ow as f64).min(sh as f64 / oh as f64);
     // Stored-orientation size that covers the screen box.
@@ -298,6 +309,8 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
             // Rendered here, in parallel with the UI thread showing the
             // window, when the layout does not depend on the image size.
             let target = *shared.first_frame_target.lock().unwrap();
+            let color = shared.color.lock().unwrap().clone();
+            let lut = color.and_then(|c| c.lut(probe.icc.as_ref()));
             let rendered = target
                 .filter(|t| t.view.mode != blinzel_core::layout::ViewMode::FitWindowToImage)
                 .map(|t| {
@@ -307,6 +320,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
                         t.client,
                         &t.view,
                         t.background,
+                        lut.clone(),
                     );
                     (bits, t.client)
                 });
@@ -314,6 +328,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
                 image: img.clone(),
                 orientation: probe.orientation,
                 rendered,
+                lut,
             });
             let ptr = Box::into_raw(ff);
             blinzel_core::timing::mark("first_frame_posted");

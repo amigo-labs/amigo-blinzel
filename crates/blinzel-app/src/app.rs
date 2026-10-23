@@ -29,8 +29,9 @@ use windows::core::PCWSTR;
 
 use crate::chrome::{Button, Chrome};
 use crate::clipboard;
+use crate::color::ColorManager;
 use crate::gfx::text::Text;
-use crate::gfx::{Gfx, GpuImage, Renderer, Rgba, Shape, SwapChain};
+use crate::gfx::{Gfx, GpuImage, GpuLut, Renderer, Rgba, Shape, SwapChain};
 use crate::loader::{self, Job, Loaded, Loader, Stage};
 use crate::menu::{Cmd, MenuState};
 use crate::platform::{enumerate, io, wide};
@@ -110,6 +111,8 @@ enum DragState {
 /// Messages from helper threads to the UI thread.
 pub const WM_LIST: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
 pub const WM_DIR_CHANGED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 3;
+/// LPARAM: `Box<(isize, Option<Profile>)>`, a monitor and its colour target.
+pub const WM_COLOR_TARGET: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
 
 pub struct App {
     pub hwnd: HWND,
@@ -145,6 +148,14 @@ pub struct App {
     /// Benchmark of a resident instance (`--resident --json`): the timing
     /// marks of each wake go here.
     pub wake_report: Option<PathBuf>,
+    /// Colour management (shared with the loader) and the GPU copies of
+    /// its transforms, by transform.
+    pub color: Arc<ColorManager>,
+    gpu_luts: HashMap<usize, (Arc<blinzel_core::lut::Lut3d>, Option<GpuLut>)>,
+    /// The monitor the colour target was chosen for.
+    pub monitor: isize,
+    /// The remembered colour target was checked against Windows.
+    color_verified: bool,
     pub dpi: u32,
     pub client: (u32, u32),
     direction: isize,
@@ -165,6 +176,7 @@ impl App {
         swap: SwapChain,
         settings: Settings,
         loader: Loader,
+        color: Arc<ColorManager>,
         dpi: u32,
         client: (u32, u32),
     ) -> App {
@@ -198,6 +210,10 @@ impl App {
             hidden: false,
             activate_on_uncloak: false,
             wake_report: None,
+            color,
+            gpu_luts: HashMap::new(),
+            monitor: 0,
+            color_verified: false,
             dpi,
             client,
             direction: 1,
@@ -259,6 +275,7 @@ impl App {
     /// settings meanwhile.
     pub fn reload_settings(&mut self) {
         self.settings = settings_store::load();
+        self.color.set_enabled(self.settings.color_management);
         let lang = self
             .settings
             .language
@@ -309,8 +326,16 @@ impl App {
         let xform = stage_to_client(&l, Orientation::NORMAL, full, stage);
         let content = content_in_stage(&l, Orientation::NORMAL, full, stage);
         self.renderer.begin(&ctx, &rtv, self.swap.size, bg);
-        self.renderer.draw_image(&ctx, &gpu, &xform, &content, bg);
+        self.renderer
+            .draw_image(&ctx, &gpu, &xform, &content, bg, None);
         let _ = self.swap.present();
+        // The colour system (mscms) loads on first use: once now, with the
+        // profile most photos with one carry (phones: Display P3).
+        if self.settings.color_management {
+            use blinzel_core::icc::{Profile, Trc, colorants, matrix_profile};
+            let p3 = Profile::new(matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3"));
+            let _ = crate::color::build_lut(Some(&p3), None);
+        }
     }
 
     // ---------------------------------------------------------------- files
@@ -667,6 +692,88 @@ impl App {
         Some((img, o, l))
     }
 
+    /// Cache id of the image [`Self::displayed`] shows.
+    fn displayed_id(&self) -> Option<u64> {
+        let c = self.current.as_ref()?;
+        if self.failed.contains_key(&c.cache_id) || self.best_texture(c.cache_id).is_some() {
+            Some(c.cache_id)
+        } else {
+            self.shown.as_ref().map(|s| s.0)
+        }
+    }
+
+    /// The colour transform for image `cache_id` on the GPU, if it needs
+    /// one.
+    fn gpu_lut(&mut self, cache_id: u64) -> Option<GpuLut> {
+        let icc = self.probes.get(&cache_id).and_then(|p| p.icc.clone());
+        let lut = self.color.lut(icc.as_ref())?;
+        let key = Arc::as_ptr(&lut) as usize;
+        let device = &self.gfx.device;
+        self.gpu_luts
+            .entry(key)
+            .or_insert_with(|| {
+                let gpu = crate::gfx::upload_lut(device, &lut).ok();
+                (lut, gpu)
+            })
+            .1
+            .clone()
+    }
+
+    /// Asks Windows for the monitor's colour target in the background (the
+    /// start used the remembered one); the answer comes back as
+    /// [`WM_COLOR_TARGET`].
+    fn verify_color_target(&mut self) {
+        if self.color_verified || !self.settings.color_management {
+            return;
+        }
+        self.color_verified = true;
+        let (hwnd, monitor) = (self.hwnd.0 as isize, self.monitor);
+        let _ = std::thread::Builder::new()
+            .name("blinzel-color-target".into())
+            .spawn(move || {
+                use windows::Win32::Foundation::{LPARAM, WPARAM};
+                use windows::Win32::Graphics::Gdi::HMONITOR;
+                use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+                let target = crate::color::display_target(HMONITOR(monitor as *mut _));
+                let msg = Box::into_raw(Box::new((monitor, target)));
+                unsafe {
+                    if PostMessageW(
+                        Some(HWND(hwnd as *mut _)),
+                        WM_COLOR_TARGET,
+                        WPARAM(0),
+                        LPARAM(msg as isize),
+                    )
+                    .is_err()
+                    {
+                        drop(Box::from_raw(msg));
+                    }
+                }
+            });
+    }
+
+    /// The colour target Windows reported for `monitor`.
+    pub fn on_color_target(&mut self, monitor: isize, target: Option<blinzel_core::icc::Profile>) {
+        if monitor == self.monitor && self.color.set_target(target) {
+            self.gpu_luts.clear();
+            self.invalidate();
+        }
+    }
+
+    /// Re-targets colour management when the window moved to another
+    /// monitor (or the displays changed: `force`).
+    pub fn check_monitor(&mut self, force: bool) {
+        use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
+        let m = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
+        if !force && m.0 as isize == self.monitor {
+            return;
+        }
+        self.monitor = m.0 as isize;
+        if self.color.set_target(crate::color::display_target(m)) {
+            self.gpu_luts.clear();
+            self.invalidate();
+        }
+    }
+
     fn layout(&self) -> Option<Layout> {
         self.displayed().map(|d| d.2)
     }
@@ -721,7 +828,9 @@ impl App {
             let stage = (img.width, img.height);
             let xform = stage_to_client(&l, o, full, stage);
             let content = content_in_stage(&l, o, full, stage);
-            self.renderer.draw_image(&ctx, &img, &xform, &content, bg);
+            let lut = self.displayed_id().and_then(|id| self.gpu_lut(id));
+            self.renderer
+                .draw_image(&ctx, &img, &xform, &content, bg, lut.as_ref());
             if let Some(cur) = &self.current {
                 self.shown = Some((cur.cache_id, img.clone()));
                 showed_image = self.best_texture(cur.cache_id).is_some();
@@ -748,6 +857,9 @@ impl App {
         }
         let _ = self.swap.present();
 
+        // After the first frame: checking the remembered colour target
+        // loads the ICM subsystem.
+        self.verify_color_target();
         let mut actions = Vec::new();
         if showed_image && self.cloaked {
             actions.push(Action::Uncloak);
@@ -1157,6 +1269,7 @@ impl App {
             resident: self.settings.resident,
             auto_update: self.settings.auto_update,
             single_instance: self.settings.single_instance,
+            color_management: self.settings.color_management,
         }
     }
 
@@ -1280,6 +1393,14 @@ impl App {
             Cmd::ToggleAutoUpdate => {
                 self.settings.auto_update = !self.settings.auto_update;
                 settings_store::save(&self.settings);
+                vec![]
+            }
+            Cmd::ToggleColorManagement => {
+                self.settings.color_management = !self.settings.color_management;
+                settings_store::save(&self.settings);
+                self.color.set_enabled(self.settings.color_management);
+                self.gpu_luts.clear();
+                self.invalidate();
                 vec![]
             }
             Cmd::ToggleSingleInstance => {
