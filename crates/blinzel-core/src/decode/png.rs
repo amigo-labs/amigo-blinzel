@@ -7,6 +7,7 @@
 use std::io::Cursor;
 
 use super::{DecodeError, Result, check_size};
+use crate::kernels::{self, Level};
 use crate::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 
 /// Width and height from the IHDR chunk.
@@ -48,18 +49,25 @@ pub fn decode(data: &[u8]) -> Result<Image> {
         }
         png::ColorType::Rgb | png::ColorType::GrayscaleAlpha => {
             let src_bpp = if color == png::ColorType::Rgb { 3 } else { 2 };
+            let expand = |src: &[u8], dst: &mut [u8]| {
+                if src_bpp == 3 {
+                    kernels::rgb_to_rgba(Level::Baseline, src, dst);
+                } else {
+                    kernels::gray_alpha_to_rgba(Level::Baseline, src, dst);
+                }
+            };
             let mut p = Plane::new(w, h, 4);
             if interlaced {
                 let mut tmp = vec![0u8; w as usize * h as usize * src_bpp];
                 reader.next_frame(&mut tmp).map_err(err)?;
                 for (y, row) in tmp.chunks_exact(w as usize * src_bpp).enumerate() {
-                    expand(row, p.row_mut(y as u32), src_bpp);
+                    expand(row, p.row_mut(y as u32));
                 }
             } else {
                 let mut row = vec![0u8; w as usize * src_bpp];
                 for y in 0..h {
                     match reader.read_row(&mut row).map_err(err)? {
-                        Some(_) => expand(&row, p.row_mut(y), src_bpp),
+                        Some(_) => expand(&row, p.row_mut(y)),
                         None => break,
                     }
                 }
@@ -89,30 +97,6 @@ pub fn decode(data: &[u8]) -> Result<Image> {
         full_height: h,
         region: None,
     })
-}
-
-/// RGB or gray+alpha row → RGBA row.
-#[inline]
-fn expand(src: &[u8], dst: &mut [u8], src_bpp: usize) {
-    if src_bpp == 3 {
-        for (d, s) in dst
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(src.as_chunks::<3>().0.iter())
-        {
-            d.copy_from_slice(&[s[0], s[1], s[2], 255]);
-        }
-    } else {
-        for (d, s) in dst
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(src.as_chunks::<2>().0.iter())
-        {
-            d.copy_from_slice(&[s[0], s[0], s[0], s[1]]);
-        }
-    }
 }
 
 #[cfg(test)]

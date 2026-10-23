@@ -13,6 +13,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use crate::exif::{self, EmbeddedPreview};
 use crate::format::{self, Format};
 use crate::geom::{Orientation, PixelRect};
+use crate::kernels::{self, Level};
 use crate::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 
 /// Refuse images larger than this many pixels (decompression bombs).
@@ -204,16 +205,7 @@ pub fn crop_to_bgra(img: &Image, r: PixelRect) -> Result<Image> {
                 let dst = out.row_mut(y);
                 match format {
                     PackedFormat::Bgra8 => dst.copy_from_slice(src),
-                    PackedFormat::Rgba8 => {
-                        for (d, s) in dst
-                            .as_chunks_mut::<4>()
-                            .0
-                            .iter_mut()
-                            .zip(src.as_chunks::<4>().0.iter())
-                        {
-                            d.copy_from_slice(&[s[2], s[1], s[0], s[3]]);
-                        }
-                    }
+                    PackedFormat::Rgba8 => kernels::rgba_to_bgra(Level::Baseline, src, dst),
                     PackedFormat::Gray8 => {
                         for (d, &s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src) {
                             d.copy_from_slice(&[s, s, s, 255]);

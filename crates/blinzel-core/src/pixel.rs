@@ -2,6 +2,7 @@
 
 use crate::bufpool::PoolBuf;
 use crate::geom::PixelRect;
+use crate::kernels::{self, Level};
 
 /// Packed pixel layouts the renderer uploads without conversion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -156,42 +157,33 @@ impl Image {
                 for y in 0..h {
                     let src = plane.row(y as u32);
                     let dst = &mut out[y * w * 4..(y + 1) * w * 4];
-                    for x in 0..w {
-                        let d = &mut dst[x * 4..x * 4 + 4];
-                        match format {
-                            PackedFormat::Bgra8 => d.copy_from_slice(&src[x * 4..x * 4 + 4]),
-                            PackedFormat::Rgba8 => {
-                                d[0] = src[x * 4 + 2];
-                                d[1] = src[x * 4 + 1];
-                                d[2] = src[x * 4];
-                                d[3] = src[x * 4 + 3];
-                            }
-                            PackedFormat::Gray8 => {
-                                d[..3].fill(src[x]);
-                                d[3] = 255;
+                    match format {
+                        PackedFormat::Bgra8 => dst.copy_from_slice(&src[..w * 4]),
+                        PackedFormat::Rgba8 => kernels::rgba_to_bgra(Level::Baseline, src, dst),
+                        PackedFormat::Gray8 => {
+                            for (d, &g) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src) {
+                                *d = [g, g, g, 255];
                             }
                         }
-                        if *alpha == Alpha::Opaque {
+                    }
+                    if *alpha == Alpha::Opaque {
+                        for d in dst.as_chunks_mut::<4>().0 {
                             d[3] = 255;
                         }
                     }
                 }
             }
             Pixels::Ycc { y: yp, cb, cr, sub } => {
-                let scale = sub.uv_scale((yp.width, yp.height), (cb.width, cb.height));
                 for y in 0..h {
-                    for x in 0..w {
-                        let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
-                        let luma = yp.row(y as u32)[x] as f32 / 255.0;
-                        let b = sample_plane(cb, u * scale.0, v * scale.1);
-                        let r = sample_plane(cr, u * scale.0, v * scale.1);
-                        let rgb = ycc_to_rgb(luma, b, r);
-                        let d = &mut out[(y * w + x) * 4..(y * w + x) * 4 + 4];
-                        d[0] = to_u8(rgb[2]);
-                        d[1] = to_u8(rgb[1]);
-                        d[2] = to_u8(rgb[0]);
-                        d[3] = 255;
-                    }
+                    let dst = &mut out[y * w * 4..(y + 1) * w * 4];
+                    kernels::ycc_to_bgra_row(
+                        Level::Baseline,
+                        [yp, cb, cr],
+                        *sub,
+                        h as u32,
+                        y as u32,
+                        dst,
+                    );
                 }
             }
         }
@@ -218,6 +210,7 @@ pub fn to_u8(v: f32) -> u8 {
 
 /// Bilinear sample of a plane at normalized coordinates (texel centers at
 /// `(i + 0.5) / size`, clamped at the edges) — what the GPU sampler does.
+#[inline]
 pub fn sample_plane(p: &Plane, u: f32, v: f32) -> f32 {
     let (pw, ph) = (p.width as f32, p.height as f32);
     let tx = u * pw - 0.5;
