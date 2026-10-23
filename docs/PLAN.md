@@ -49,7 +49,7 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
 | Thumbnail-Skalierung | Windows-Thumbnail-Provider (`IShellItemImageFactory`) | DCT 1/8 + Flächenmittelung je YCbCr-Ebene | ✅ 200 12-MP-JPEGs, 16 Threads: 287/s statt 18/s |
 | Thumbnail-Speicher | Windows-Thumbnail-Cache (`thumbcache_*.db`) | eigene Pack-Datei | ✅ 200 aus dem Cache: 23,6 ms statt 432 ms (CPU-Seite, ohne Atlas-Upload) |
-| Verzeichnis | FindFirstFileExW | NtQueryDirectoryFileEx | ⬜ messen (10k-Ordner im App-Bench) |
+| Verzeichnis | FindFirstFileExW (`LARGE_FETCH`, `InfoBasic`) | `GetFileInformationByHandleEx(FileFullDirectoryInfo)` (was `NtQueryDirectoryFile` liefert) | ✅ gemessen, bleibt bei FindFirstFileExW: 10k Einträge 7,7–8,0 ms gegen 6,8–7,3 ms (64-KB-Puffer) bzw. −8 bis +18 % (256 KB), im Mittel unter 10 %; Sortieren 2,5 ms. Ziel ≤ 25 ms erfüllt. |
 | SIMD-Stufen | Basis x86-64-v2 | Laufzeit-Dispatch je Kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ gemessen: keine Stufe bringt ≥ 10 % auf einem Hot Path, daher kein Dispatch ([Abschnitt 15](#simd-stufen)) |
 
 **Erkenntnis aus den Messungen:** DCT-Skalierung bringt weniger als erwartet (24 MP: 1/8 = 74 ms, voll = 118 ms). Das Huffman-Decoding dominiert. Der **parallele Huffman-Decoder (M3)** ist deshalb der größte verbleibende Hebel; progressive JPEGs (ca. 320 ms) brauchen ihn besonders.
