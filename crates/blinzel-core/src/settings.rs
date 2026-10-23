@@ -26,6 +26,8 @@ pub struct Settings {
     /// Convert images with colour profiles (and all images on displays
     /// with a non-sRGB profile) to the display's colours.
     pub color_management: bool,
+    /// Thumbnails of the neighbours along the bottom.
+    pub filmstrip: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +43,7 @@ impl Default for Settings {
             auto_update: true,
             resident: false,
             color_management: true,
+            filmstrip: false,
         }
     }
 }
@@ -95,6 +98,7 @@ impl Settings {
                 "color_management" => {
                     s.color_management = value.parse().unwrap_or(s.color_management)
                 }
+                "filmstrip" => s.filmstrip = value.parse().unwrap_or(s.filmstrip),
                 _ => {}
             }
         }
@@ -123,7 +127,8 @@ impl Settings {
              background = \"#{r:02X}{g:02X}{b:02X}\"\n\
              auto_update = {}\n\
              resident = {}\n\
-             color_management = {}\n",
+             color_management = {}\n\
+             filmstrip = {}\n",
             self.view.mode.key(),
             self.view.no_upscale,
             self.language.as_deref().unwrap_or("auto"),
@@ -134,6 +139,7 @@ impl Settings {
             self.auto_update,
             self.resident,
             self.color_management,
+            self.filmstrip,
         )
     }
 }
@@ -158,6 +164,7 @@ mod tests {
             auto_update: false,
             resident: true,
             color_management: false,
+            filmstrip: true,
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
         assert_eq!(

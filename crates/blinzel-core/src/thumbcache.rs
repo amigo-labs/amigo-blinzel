@@ -18,7 +18,8 @@ use std::sync::Mutex;
 use crate::decode::{self, Request};
 use crate::filelist::Fnv;
 use crate::geom::Orientation;
-use crate::thumb::Thumb;
+use crate::pixel::Image;
+use crate::thumb::{Planes, Thumb};
 
 /// What a cached thumbnail belongs to: the file's path and the size and
 /// modification time it had.
@@ -163,6 +164,25 @@ impl ThumbCache {
 
     /// The cached thumbnail for `key`, if it is there and current.
     pub fn get(&self, key: &Key) -> Option<Thumb> {
+        let (r, img) = self.read(key)?;
+        Some(Thumb {
+            width: img.width,
+            height: img.height,
+            bgra: crate::thumb::to_bgra(&img, (img.width, img.height)),
+            orientation: Orientation::from_exif(r.orientation as u16),
+            full: r.full,
+        })
+    }
+
+    /// The cached thumbnail for `key` as atlas planes (no RGB conversion
+    /// for JPEG entries); alpha is composited over `background`.
+    pub fn get_planes(&self, key: &Key, background: [u8; 3]) -> Option<Planes> {
+        let (r, img) = self.read(key)?;
+        let o = Orientation::from_exif(r.orientation as u16);
+        Some(Planes::from_image(&img, o, r.full, background))
+    }
+
+    fn read(&self, key: &Key) -> Option<(Record, Image)> {
         let r = *self.index.lock().unwrap().get(&key.path_hash)?;
         if r.key != *key {
             return None; // the file changed since
@@ -176,16 +196,7 @@ impl ThumbCache {
             return None;
         }
         let img = decode::decode(&blob[BLOB_HEADER..], Request::Full).ok()?;
-        if (img.width, img.height) != (r.width as u32, r.height as u32) {
-            return None;
-        }
-        Some(Thumb {
-            width: img.width,
-            height: img.height,
-            bgra: crate::thumb::to_bgra(&img, (img.width, img.height)),
-            orientation: Orientation::from_exif(r.orientation as u16),
-            full: r.full,
-        })
+        ((img.width, img.height) == (r.width as u32, r.height as u32)).then_some((r, img))
     }
 
     /// Stores `thumb` for `key` (appends; a newer entry replaces older

@@ -27,6 +27,123 @@ impl Thumb {
     }
 }
 
+/// A thumbnail as the GPU atlas takes it: Y at full resolution and Cb/Cr
+/// interleaved at half resolution both ways (4:2:0), opaque. 1.5 bytes
+/// per pixel to upload instead of 4; the shader converts to RGB.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Planes {
+    pub width: u32,
+    pub height: u32,
+    /// `width × height`.
+    pub y: Vec<u8>,
+    /// `chroma_size()` pixels of (Cb, Cr).
+    pub cbcr: Vec<u8>,
+    pub orientation: Orientation,
+    pub full: (u32, u32),
+}
+
+impl Planes {
+    pub fn chroma_size(&self) -> (u32, u32) {
+        (self.width.div_ceil(2), self.height.div_ceil(2))
+    }
+
+    /// From a BGRA thumbnail; alpha is composited over `background` (RGB).
+    pub fn from_thumb(t: &Thumb, background: [u8; 3]) -> Planes {
+        let (w, h) = (t.width as usize, t.height as usize);
+        let rgb: Vec<[i32; 3]> = t
+            .bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| {
+                let a = p[3] as i32;
+                let mix = |c: u8, b: u8| (c as i32 * a + b as i32 * (255 - a) + 127) / 255;
+                [
+                    mix(p[2], background[0]),
+                    mix(p[1], background[1]),
+                    mix(p[0], background[2]),
+                ]
+            })
+            .collect();
+        let y = rgb
+            .iter()
+            .map(|&[r, g, b]| ((19_595 * r + 38_470 * g + 7_471 * b + 32_768) >> 16) as u8)
+            .collect();
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        let mut cbcr = Vec::with_capacity(cw * ch * 2);
+        for cy in 0..ch {
+            for cx in 0..cw {
+                // The 2 × 2 block's mean colour (fewer pixels at odd edges).
+                let mut sum = [0i32; 3];
+                let mut n = 0;
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (x, yy) = (2 * cx + dx, 2 * cy + dy);
+                    if x < w && yy < h {
+                        let p = rgb[yy * w + x];
+                        (0..3).for_each(|k| sum[k] += p[k]);
+                        n += 1;
+                    }
+                }
+                let [r, g, b] = sum.map(|v| (v + n / 2) / n);
+                let cb = (-11_059 * r - 21_709 * g + 32_768 * b + (128 << 16) + 32_768) >> 16;
+                let cr = (32_768 * r - 27_439 * g - 5_329 * b + (128 << 16) + 32_768) >> 16;
+                cbcr.extend([cb.clamp(0, 255) as u8, cr.clamp(0, 255) as u8]);
+            }
+        }
+        Planes {
+            width: t.width,
+            height: t.height,
+            y,
+            cbcr,
+            orientation: t.orientation,
+            full: t.full,
+        }
+    }
+
+    /// From a decoded thumbnail: 4:2:0 YCbCr (the cache's JPEGs) is taken
+    /// as it is, anything else goes through BGRA.
+    pub fn from_image(
+        img: &Image,
+        orientation: Orientation,
+        full: (u32, u32),
+        background: [u8; 3],
+    ) -> Planes {
+        let (w, h) = (img.width, img.height);
+        if let Pixels::Ycc { y, cb, cr, sub } = &img.pixels
+            && (sub.h, sub.v) == (2, 2)
+        {
+            let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+            let mut luma = Vec::with_capacity((w * h) as usize);
+            for row in 0..h {
+                luma.extend(&y.row(row)[..w as usize]);
+            }
+            let mut cbcr = Vec::with_capacity((cw * ch * 2) as usize);
+            for row in 0..ch {
+                let (b, r) = (cb.row(row), cr.row(row));
+                for x in 0..cw as usize {
+                    cbcr.extend([b[x], r[x]]);
+                }
+            }
+            return Planes {
+                width: w,
+                height: h,
+                y: luma,
+                cbcr,
+                orientation,
+                full,
+            };
+        }
+        let t = Thumb {
+            width: w,
+            height: h,
+            bgra: to_bgra(img, (w, h)),
+            orientation,
+            full,
+        };
+        Planes::from_thumb(&t, background)
+    }
+}
+
 /// `full` shrunk to fit `edge` × `edge`, keeping the aspect ratio; never
 /// enlarged, at least 1 px per side.
 pub fn fit(full: (u32, u32), edge: u32) -> (u32, u32) {
@@ -71,6 +188,25 @@ pub fn make(data: &[u8], probe: &Probe, edge: u32, decode: DecodeFn) -> Result<T
 /// the same up to clipping, since the conversion is linear.
 pub fn to_bgra(img: &Image, size: (u32, u32)) -> Vec<u8> {
     match &img.pixels {
+        // A cached thumbnail: no reduction, chroma from the nearest sample.
+        Pixels::Ycc { y, cb, cr, sub } if size == (img.width, img.height) => {
+            let (w, h) = (img.width as usize, img.height as usize);
+            let (sh, sv) = (sub.h as usize, sub.v as usize);
+            let mut out = Vec::with_capacity(w * h * 4);
+            for row in 0..h {
+                let (ly, crow) = (
+                    y.row(row as u32),
+                    (row / sv).min(cb.height as usize - 1) as u32,
+                );
+                let (lb, lr) = (cb.row(crow), cr.row(crow));
+                for (x, &l) in ly[..w].iter().enumerate() {
+                    let c = (x / sh).min(cb.width as usize - 1);
+                    let [r, g, b] = ycc_to_rgb_u8(l as i32, lb[c] as i32, lr[c] as i32);
+                    out.extend([b, g, r, 255]);
+                }
+            }
+            out
+        }
         Pixels::Ycc { y, cb, cr, .. } => {
             let (ly, lb, lr) = (
                 reduce_plane(y, (img.width, img.height), size),
@@ -234,6 +370,67 @@ mod tests {
                 .iter()
                 .all(|p| *p == [10, 200, 30, 255])
         );
+    }
+
+    #[test]
+    fn planes_round_trip() {
+        let (w, h) = (97, 61);
+        let rgb = crate::testimg::rgb(w, h);
+        let bgra: Vec<u8> = rgb
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let t = Thumb {
+            width: w,
+            height: h,
+            bgra: bgra.clone(),
+            orientation: Orientation::NORMAL,
+            full: (w, h),
+        };
+        let p = Planes::from_thumb(&t, [0, 0, 0]);
+        assert_eq!(p.chroma_size(), (49, 31));
+        assert_eq!((p.y.len(), p.cbcr.len()), (97 * 61, 49 * 31 * 2));
+        // Back through the 4:2:0 decode path: close to the original.
+        let mut y = Plane::new(w, h, 1);
+        y.data.copy_from_slice(&p.y);
+        let (mut cb, mut cr) = (Plane::new(49, 31, 1), Plane::new(49, 31, 1));
+        for (i, c) in p.cbcr.as_chunks::<2>().0.iter().enumerate() {
+            cb.data[i] = c[0];
+            cr.data[i] = c[1];
+        }
+        let img = Image {
+            pixels: Pixels::Ycc {
+                y,
+                cb,
+                cr,
+                sub: crate::pixel::ChromaSub { h: 2, v: 2 },
+            },
+            width: w,
+            height: h,
+            full_width: w,
+            full_height: h,
+            region: None,
+        };
+        let back = to_bgra(&img, (w, h));
+        let psnr = crate::cpuref::psnr(&back, &bgra);
+        assert!(psnr > 30.0, "{psnr:.1} dB");
+        // Taken as they are from a 4:2:0 image.
+        assert_eq!(
+            Planes::from_image(&img, Orientation::NORMAL, (w, h), [0; 3]),
+            p
+        );
+        // Transparent pixels show the background.
+        let clear = Thumb {
+            width: 2,
+            height: 2,
+            bgra: [0u8, 0, 0, 0].repeat(4),
+            orientation: Orientation::NORMAL,
+            full: (2, 2),
+        };
+        let p = Planes::from_thumb(&clear, [255, 255, 255]);
+        assert_eq!((p.y[0], p.cbcr[0], p.cbcr[1]), (255, 128, 128));
     }
 
     #[test]

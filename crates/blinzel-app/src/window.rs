@@ -342,7 +342,9 @@ fn handle(
         }
         WM_LBUTTONDBLCLK => {
             let p = point_from_lparam(lp);
-            if app.fullscreen || app.chrome().hit(p).is_none() {
+            if let Some(a) = app.double_click(p) {
+                actions.extend(a);
+            } else if app.fullscreen || app.chrome().hit(p).is_none() {
                 actions.push(Action::ToggleFullscreen);
             }
             done
@@ -372,7 +374,7 @@ fn handle(
             unsafe {
                 let _ = ScreenToClient(hwnd, &mut pt);
             }
-            app.wheel((pt.x as f64, pt.y as f64), hi_word(wp.0 as isize) as i16);
+            actions.extend(app.wheel((pt.x as f64, pt.y as f64), hi_word(wp.0 as isize) as i16));
             done
         }
         WM_SETCURSOR => {
@@ -436,6 +438,10 @@ fn handle(
         }
         WM_DIR_CHANGED => {
             app.on_dir_changed();
+            done
+        }
+        crate::thumbs::WM_THUMB => {
+            app.on_thumbs();
             done
         }
         WM_COLOR_TARGET => {

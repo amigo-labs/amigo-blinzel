@@ -12,6 +12,7 @@ pub mod export;
 pub mod filelist;
 pub mod format;
 pub mod geom;
+pub mod grid;
 pub mod icc;
 pub mod json;
 pub mod kernels;
