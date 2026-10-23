@@ -168,12 +168,13 @@ pub fn run() -> i32 {
     timing::mark("instance_checked");
 
     // Decode workers: P-cores only (at most what the prefetch window can
-    // use); one I/O thread on rotating disks.
+    // use); the visible image decodes on all P-cores. One I/O thread on
+    // rotating disks.
     let cpu = threads::cpu_info();
     let drive = args.file.as_deref().map(io::drive_info).unwrap_or_default();
     let io_threads = if drive.seek_penalty { 1 } else { 2 };
     let cpu_threads = cpu.performance.clamp(2, 6);
-    let loader = Loader::new(io_threads, cpu_threads);
+    let loader = Loader::new(io_threads, cpu_threads, cpu.performance);
     let (monitor, work) = monitor_under_cursor();
     loader.set_screen_box((
         (monitor.right - monitor.left) as u32,

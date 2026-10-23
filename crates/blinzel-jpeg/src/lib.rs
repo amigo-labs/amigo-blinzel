@@ -21,6 +21,7 @@ use std::ops::Range;
 pub use decoder::{
     PlaneLayout, SCALES, decode_planes, is_supported, plane_layouts, supported_scale,
 };
+pub use parallel::set_thread_init;
 
 /// Maximum number of components a frame may declare that we accept.
 pub const MAX_COMPONENTS: usize = 4;

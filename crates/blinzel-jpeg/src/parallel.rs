@@ -16,8 +16,8 @@
 //! marker before it. Anything inconsistent (truncated or corrupt data,
 //! no synchronization) falls back to the sequential decoder.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::scan::{Scan, State};
 use crate::{Error, MAX_COMPONENTS};
@@ -28,6 +28,20 @@ const MIN_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Bands per thread in pass C, for load balancing.
 const BANDS_PER_THREAD: usize = 4;
+
+static THREAD_INIT: OnceLock<fn()> = OnceLock::new();
+
+/// Runs `f` at the start of every decoder thread, e.g. to give it the
+/// priority and CPU sets of the caller's workers. The first call wins.
+pub fn set_thread_init(f: fn()) {
+    let _ = THREAD_INIT.set(f);
+}
+
+fn thread_init() {
+    if let Some(f) = THREAD_INIT.get() {
+        f();
+    }
+}
 
 /// Decodes `scan` into `planes` (indexed like the scan's components) with
 /// up to `threads` threads; returns the number of threads used.
@@ -250,7 +264,12 @@ impl McuStates {
 fn mcu_states(scan: &Scan, threads: usize) -> Option<McuStates> {
     let chunks: Vec<Chunk> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..threads)
-            .map(|i| s.spawn(move || pass_a(scan, i, threads)))
+            .map(|i| {
+                s.spawn(move || {
+                    thread_init();
+                    pass_a(scan, i, threads)
+                })
+            })
             .collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
@@ -270,7 +289,10 @@ fn mcu_states(scan: &Scan, threads: usize) -> Option<McuStates> {
             .windows(2)
             .map(|w| {
                 let (end, next) = (w[0].end, &w[1].recs);
-                s.spawn(move || sync(scan, end?, next))
+                s.spawn(move || {
+                    thread_init();
+                    sync(scan, end?, next)
+                })
             })
             .collect();
         handles
@@ -335,6 +357,7 @@ fn decode_bands(
     std::thread::scope(|s| {
         for _ in 0..threads {
             s.spawn(|| {
+                thread_init();
                 loop {
                     let b = next.fetch_add(1, Ordering::Relaxed);
                     let Some(slot) = work.get(b) else { break };

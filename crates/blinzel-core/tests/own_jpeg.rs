@@ -169,3 +169,23 @@ fn own_lossy(data: &[u8]) -> Option<usize> {
     let mut planes: Vec<&mut [u8]> = bufs.iter_mut().map(|b| b.as_mut_slice()).collect();
     blinzel_jpeg::decode_planes(data, 8, &mut planes, 4).ok()
 }
+
+/// The viewer's entry point picks blinzel-jpeg with several threads; the
+/// image must be the same as libjpeg-turbo's.
+#[test]
+fn decode_with_threads_matches_the_turbojpeg_path() {
+    let data = encode(2000, 1500, EncodeOptions::default());
+    for req in [
+        Request::Full,
+        Request::Fit { w: 500, h: 375 },
+        Request::Fit { w: 700, h: 500 },
+    ] {
+        let a = decode::decode(&data, req).unwrap();
+        let b = decode::decode_with(&data, req, 4).unwrap();
+        assert!(b.width >= a.width && b.height >= a.height, "{req:?}");
+        if (a.width, a.height) == (b.width, b.height) {
+            assert!(a.to_bgra() == b.to_bgra(), "{req:?}");
+        }
+        assert!(matches!(b.pixels, Pixels::Ycc { .. }));
+    }
+}

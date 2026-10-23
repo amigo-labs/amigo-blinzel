@@ -90,7 +90,9 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
             }
         };
         let t = Instant::now();
-        let img = wic::decode_any(&data, req).map_err(|e| e.to_string())?;
+        // Opening decodes the visible image on all P-cores, like the viewer.
+        let img = wic::decode_any_with(&data, req, threads::cpu_info().performance)
+            .map_err(|e| e.to_string())?;
         let decode_ms = ms(t);
         let t = Instant::now();
         let gpu = upload(
@@ -140,7 +142,7 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
 
     // 2. Navigation at 30 Hz key repeat with prefetching.
     let cpu = threads::cpu_info();
-    let loader = Loader::new(2, cpu.performance.clamp(2, 6));
+    let loader = Loader::new(2, cpu.performance.clamp(2, 6), cpu.performance);
     loader.set_device(gfx.device.clone(), gfx.max_texture_size());
     loader.set_screen_box(SCREEN);
     let mut ready: HashSet<u64> = HashSet::new();

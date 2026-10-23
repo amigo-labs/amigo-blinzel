@@ -188,7 +188,13 @@ pub fn decode(data: &[u8], req: Request) -> Result<Image> {
 /// Native decoding first, WIC for everything else (and for JPEGs the
 /// native path rejects, e.g. 12-bit).
 pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
-    match blinzel_core::decode::decode(data, req) {
+    decode_any_with(data, req, 1)
+}
+
+/// [`decode_any`] with up to `threads` threads for the native decoders that
+/// parallelize (JPEG); for the image the user waits for.
+pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
+    match blinzel_core::decode::decode_with(data, req, threads) {
         Err(DecodeError::Unsupported(_)) => blinzel_core::decode::guard(|| decode(data, req)),
         r => r,
     }

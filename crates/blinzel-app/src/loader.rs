@@ -90,6 +90,8 @@ struct Shared {
     tile: Mutex<u32>,
     results: Mutex<Sender<Loaded>>,
     hwnd: AtomicIsize,
+    /// Threads for decoding the image the user waits for (priority 0).
+    decode_threads: usize,
 }
 
 impl Shared {
@@ -130,7 +132,11 @@ pub struct Loader {
 pub const CLASS_VIEW: u8 = 0;
 
 impl Loader {
-    pub fn new(io_threads: usize, cpu_threads: usize) -> Loader {
+    /// `decode_threads`: how many threads may decode the visible image;
+    /// prefetch decodes stay on their worker.
+    pub fn new(io_threads: usize, cpu_threads: usize, decode_threads: usize) -> Loader {
+        // blinzel-jpeg's helper threads run like the workers.
+        blinzel_jpeg::set_thread_init(|| threads::tune_current_thread(Kind::Latency));
         let (tx, rx) = channel();
         let shared = Arc::new(Shared {
             jobs: Mutex::new(HashMap::new()),
@@ -139,6 +145,7 @@ impl Loader {
             tile: Mutex::new(DEFAULT_TILE),
             results: Mutex::new(tx),
             hwnd: AtomicIsize::new(0),
+            decode_threads: decode_threads.max(1),
         });
         let (s_io, s_cpu) = (shared.clone(), shared.clone());
         let sched = Scheduler::new(
@@ -320,7 +327,12 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
         _ => Request::Fit { w: fit.0, h: fit.1 },
     };
     let t = Instant::now();
-    match wic::decode_any(data, req) {
+    let decode_threads = if job.priority == 0 {
+        shared.decode_threads
+    } else {
+        1
+    };
+    match wic::decode_any_with(data, req, decode_threads) {
         Ok(img) => {
             deliver(job.stage, img, t.elapsed().as_secs_f64() * 1e3);
         }
