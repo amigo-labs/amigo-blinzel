@@ -74,6 +74,19 @@ Reihenfolge der Stufen:
 - DC-only
 - progressive
 
+**Entwurf (2026-10-23):**
+- **Referenz:** Die Ausgabe ist byte-identisch mit libjpeg-turbo (islow-IDCT, für 1/2, 1/4, 1/8 die reduzierten IDCTs aus `jidctred.c`). Tests vergleichen jede Plane 1:1 mit turbo.
+- **Ausgabe:** YCbCr-Planes ohne Upsampling, direkt in vom Aufrufer gestellte Puffer (Pufferpool). Jede Plane ist auf ganze MCUs gepolstert, damit Blöcke ohne Randfälle geschrieben werden.
+- **Entropie-Daten:** Ein Vorlauf entfernt das Byte-Stuffing (`FF 00`) und merkt sich die Restart-Marker. Danach ist jede Bitposition eine einfache Zahl, und der Bitleser braucht im heißen Pfad keine Markerprüfung.
+- **Huffman:** 10-Bit-Lookup; für AC zusätzlich eine kombinierte Tabelle (Code + Zusatzbits → Lauf, Wert, Länge).
+- **Parallel ohne Restart-Marker** (Weißenberger & Schmidt):
+  1. Spekulativ: Jeder Thread decodiert seinen Abschnitt ab einer geratenen Position und notiert an jedem MCU-Anfang Bitposition und DC-Summen.
+  2. Synchronisieren: Jeder Thread decodiert über sein Ende hinaus, bis er auf einen notierten Zustand des Nachfolgers trifft. Ab dort sind beide identisch.
+  3. Präfixsummen ergeben die absolute MCU-Nummer und die DC-Prädiktoren an jedem notierten MCU-Anfang.
+  4. Endgültig: Die Threads decodieren MCU-Zeilenbänder ab dem bekannten Zustand und schreiben direkt in ihr eigenes Band der Planes (sicheres Rust, `split_at_mut`).
+- **Mit Restart-Markern** ist Schritt 1 exakt, und Schritt 2 entfällt.
+- **Rückfall:** Arithmetische Kodierung, 12 Bit, verlustfrei und CMYK bleiben bei libjpeg-turbo.
+
 ## 4. Architektur
 
 | Crate | Inhalt | Stand |

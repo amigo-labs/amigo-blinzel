@@ -54,3 +54,13 @@ opt-level = 3
 
 [profile.test.package."*"]
 opt-level = 3
+
+# The decoder is unusable unoptimized, and its integer IDCT wraps on corrupt
+# input exactly like libjpeg's C code instead of panicking.
+[profile.dev.package.blinzel-jpeg]
+opt-level = 3
+overflow-checks = false
+
+[profile.test.package.blinzel-jpeg]
+opt-level = 3
+overflow-checks = false

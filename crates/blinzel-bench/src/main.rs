@@ -29,6 +29,7 @@ fn main() {
         Some("run") => run(&args[1..]),
         Some("compare") => compare::compare(&args[1..]),
         Some("simd-child") => simd::child(&args[1..]),
+        Some("jpeg-ab") => jpeg_ab(&args[1..]),
         _ => Err(usage()),
     };
     if let Err(e) = result {
@@ -282,6 +283,16 @@ fn run(args: &[String]) -> Result<(), String> {
                         std::hint::black_box(decode::decode(&data, Request::Full).unwrap());
                     }),
                 );
+                if blinzel_jpeg::is_supported(&info) {
+                    push(
+                        "jpeg-full",
+                        "blinzel-jpeg YCbCr planes",
+                        mp,
+                        time(iters, || {
+                            std::hint::black_box(own_jpeg(&data, 8));
+                        }),
+                    );
+                }
                 push(
                     "jpeg-full",
                     "zune-jpeg RGBA",
@@ -303,6 +314,16 @@ fn run(args: &[String]) -> Result<(), String> {
                             std::hint::black_box(decode::decode(&data, req).unwrap());
                         }),
                     );
+                    if blinzel_jpeg::is_supported(&info) {
+                        push(
+                            "jpeg-scaled",
+                            &format!("blinzel-jpeg YCbCr {label}"),
+                            mp,
+                            time(iters, || {
+                                std::hint::black_box(own_jpeg(&data, 8 / div));
+                            }),
+                        );
+                    }
                 }
                 // Typical screen: fit a 2560×1440 monitor.
                 let s = (2560.0 / info.width as f64)
@@ -476,6 +497,66 @@ fn check(results: &[Result_]) -> Result<(), String> {
             failures.join("\n")
         ))
     }
+}
+
+/// `blinzel-bench jpeg-ab <file> [scale] [rounds]`: libjpeg-turbo and
+/// blinzel-jpeg alternately in one process, so machine noise hits both
+/// alike. For development; not part of `run`.
+fn jpeg_ab(args: &[String]) -> Result<(), String> {
+    let file = args
+        .first()
+        .ok_or("usage: blinzel-bench jpeg-ab <file> [scale] [rounds]")?;
+    let scale: u32 = args
+        .get(1)
+        .map_or(Ok(8), |s| s.parse())
+        .map_err(|e| format!("{e}"))?;
+    let rounds: usize = args
+        .get(2)
+        .map_or(Ok(15), |s| s.parse())
+        .map_err(|e| format!("{e}"))?;
+    let data = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+    let info = blinzel_jpeg::parse(&data).map_err(|e| e.to_string())?;
+    let req = Request::Fit {
+        w: blinzel_jpeg::scaled(info.width, scale),
+        h: blinzel_jpeg::scaled(info.height, scale),
+    };
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for i in 0..=rounds {
+        let t = Instant::now();
+        std::hint::black_box(decode::decode(&data, req).unwrap());
+        let ta = t.elapsed().as_secs_f64() * 1e3;
+        let t = Instant::now();
+        std::hint::black_box(own_jpeg(&data, scale));
+        let tb = t.elapsed().as_secs_f64() * 1e3;
+        // The first round warms caches and the pool.
+        if i > 0 {
+            a.push(ta);
+            b.push(tb);
+        }
+    }
+    let (a, b) = (Stats::of(&a).unwrap(), Stats::of(&b).unwrap());
+    println!(
+        "{file} {scale}/8: turbojpeg median {:.2} min {:.2} | blinzel-jpeg median {:.2} min {:.2} | ratio {:.2}x (min {:.2}x)",
+        a.median,
+        a.min,
+        b.median,
+        b.min,
+        a.median / b.median,
+        a.min / b.min
+    );
+    Ok(())
+}
+
+/// blinzel-jpeg into pooled planes, like the viewer would.
+fn own_jpeg(data: &[u8], scale: u32) -> Vec<PoolBuf> {
+    let info = blinzel_jpeg::parse(data).expect("jpeg header");
+    let mut bufs: Vec<PoolBuf> = blinzel_jpeg::plane_layouts(&info, scale)
+        .iter()
+        .map(|l| PoolBuf::new(l.len()))
+        .collect();
+    let mut planes: Vec<&mut [u8]> = bufs.iter_mut().map(|b| &mut b[..]).collect();
+    blinzel_jpeg::decode_planes(data, scale, &mut planes).expect("blinzel-jpeg");
+    bufs
 }
 
 fn zune_decode(data: &[u8]) -> Vec<u8> {
