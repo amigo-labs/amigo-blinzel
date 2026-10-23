@@ -19,12 +19,15 @@ pub const COLORS: [[u8; 3]; 6] = [
 /// Per-channel distance under which a sample counts as the base colour:
 /// texture amplitude plus JPEG and scaling error, well below the gaps
 /// between colours.
+#[cfg_attr(not(windows), allow(dead_code))] // used by the Windows capture
 pub const TOLERANCE: i32 = 56;
 
 /// Grid samples that must match before a signature counts as visible.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const MIN_MATCHES: usize = 12;
 
 /// Which signature, if any, a set of RGB samples shows.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn classify(samples: &[[u8; 3]]) -> Option<usize> {
     let mut counts = [0usize; COLORS.len()];
     for s in samples {
