@@ -5,6 +5,7 @@ pub mod bmp;
 pub mod gif;
 #[cfg(feature = "turbojpeg")]
 pub mod jpeg;
+pub mod own_jpeg;
 pub mod png;
 
 use std::fmt;
@@ -137,21 +138,47 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
     })
 }
 
-/// Decodes `data` (a whole file) as requested. Panics inside decoders are
-/// caught and reported as [`DecodeError::Panicked`].
+/// Decodes `data` (a whole file) as requested on the calling thread.
+/// Panics inside decoders are caught and reported as
+/// [`DecodeError::Panicked`].
 pub fn decode(data: &[u8], req: Request) -> Result<Image> {
-    guard(|| decode_inner(data, req))
+    decode_with(data, req, 1)
 }
 
-fn decode_inner(data: &[u8], req: Request) -> Result<Image> {
+/// Like [`decode`], with up to `threads` threads for formats that decode in
+/// parallel (JPEG). Use it for the image the user waits for.
+pub fn decode_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
+    guard(|| decode_inner(data, req, threads))
+}
+
+fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
     match format::detect(data) {
-        #[cfg(feature = "turbojpeg")]
-        Format::Jpeg => jpeg::decode(data, req),
+        Format::Jpeg => {
+            // Benchmark gate: blinzel-jpeg wins with several threads,
+            // libjpeg-turbo on one thread and for regions (it skips the
+            // rest of the image).
+            let own =
+                !cfg!(feature = "turbojpeg") || (threads > 1 && !matches!(req, Request::Region(_)));
+            if own && let Some(img) = own_jpeg::decode(data, req, threads) {
+                return finish(img, req);
+            }
+            decode_jpeg_fallback(data, req)
+        }
         Format::Png => finish(png::decode(data)?, req),
         Format::Gif => finish(gif::decode(data)?, req),
         Format::Bmp => finish(bmp::decode(data)?, req),
         other => Err(DecodeError::Unsupported(other)),
     }
+}
+
+#[cfg(feature = "turbojpeg")]
+fn decode_jpeg_fallback(data: &[u8], req: Request) -> Result<Image> {
+    jpeg::decode(data, req)
+}
+
+#[cfg(not(feature = "turbojpeg"))]
+fn decode_jpeg_fallback(_: &[u8], _: Request) -> Result<Image> {
+    Err(DecodeError::Unsupported(Format::Jpeg))
 }
 
 /// Decodes an embedded preview and labels it as a reduced stage of the main

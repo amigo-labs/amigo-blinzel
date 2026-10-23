@@ -43,7 +43,7 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 
 | Heißer Pfad | Messlatte | Eigenbau-Hebel | Stand |
 |---|---|---|---|
-| JPEG-Decode | libjpeg-turbo, zune-jpeg | eigener paralleler Decoder (M3) | turbojpeg aktiv; zune-jpeg überall langsamer |
+| JPEG-Decode | libjpeg-turbo, zune-jpeg | eigener paralleler Decoder (M3) | ✅ `blinzel-jpeg` für das sichtbare Bild: sequentiell 4,1×, progressive 1,7× turbo (16 Threads), byte-identisch; ein Thread und Regionen bleiben bei turbo |
 | Weg zur GPU | RGBA vom Decoder | YCbCr-Planes, Farbkonvertierung im Shader | ✅ gemessen: 24 MP 118 statt 147 ms, 45 MP 190 statt 410 ms |
 | PNG | zune-png, png | `png` + eigene fusionierte RGBA-Expansion | ✅ 1,9× (Foto) bzw. 3,2× (Screenshot) schneller als zune-png |
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
@@ -74,12 +74,25 @@ Reihenfolge der Stufen:
 - DC-only
 - progressive
 
+**Entwurf (2026-10-23):**
+- **Referenz:** Die Ausgabe ist byte-identisch mit libjpeg-turbo (islow-IDCT, für 1/2, 1/4, 1/8 die reduzierten IDCTs aus `jidctred.c`). Tests vergleichen jede Plane 1:1 mit turbo.
+- **Ausgabe:** YCbCr-Planes ohne Upsampling, direkt in vom Aufrufer gestellte Puffer (Pufferpool). Jede Plane ist auf ganze MCUs gepolstert, damit Blöcke ohne Randfälle geschrieben werden.
+- **Entropie-Daten:** Ein Vorlauf entfernt das Byte-Stuffing (`FF 00`) und merkt sich die Restart-Marker. Danach ist jede Bitposition eine einfache Zahl, und der Bitleser braucht im heißen Pfad keine Markerprüfung.
+- **Huffman:** 10-Bit-Lookup; für AC zusätzlich eine kombinierte Tabelle (Code + Zusatzbits → Lauf, Wert, Länge).
+- **Parallel ohne Restart-Marker** (Weißenberger & Schmidt):
+  1. Spekulativ: Jeder Thread decodiert seinen Abschnitt ab einer geratenen Position und notiert an jedem MCU-Anfang Bitposition und DC-Summen.
+  2. Synchronisieren: Jeder Thread decodiert über sein Ende hinaus, bis er auf einen notierten Zustand des Nachfolgers trifft. Ab dort sind beide identisch.
+  3. Präfixsummen ergeben die absolute MCU-Nummer und die DC-Prädiktoren an jedem notierten MCU-Anfang.
+  4. Endgültig: Die Threads decodieren MCU-Zeilenbänder ab dem bekannten Zustand und schreiben direkt in ihr eigenes Band der Planes (sicheres Rust, `split_at_mut`).
+- **Mit Restart-Markern** ist Schritt 1 exakt, und Schritt 2 entfällt.
+- **Rückfall:** Arithmetische Kodierung, 12 Bit, verlustfrei und CMYK bleiben bei libjpeg-turbo.
+
 ## 4. Architektur
 
 | Crate | Inhalt | Stand |
 |---|---|---|
 | `blinzel-core` | Pixelpuffer, Pufferpool, Formaterkennung, Decoder (JPEG/turbojpeg, PNG, GIF, eigener BMP), EXIF/MPF, Layout, Auswahl, natsort, Dateiliste, Scheduler, LRU, CPU-Referenz-Renderer, Timing, Settings, Export | 🟡 (auf Linux getestet) |
-| `blinzel-jpeg` | strenger Marker-Parser; Basis für M3 | 🟡 |
+| `blinzel-jpeg` | strenger Marker-Parser; paralleler Decoder (Huffman, 8 Bit, sequentiell und progressive) in YCbCr-Planes, byte-identisch mit libjpeg-turbo | 🟡 |
 | `blinzel-i18n` | `i18n/*.toml` → statische Tabellen (DE/EN) | 🟡 |
 | `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |
 | `blinzel-app` | `blinzel.exe`: Fenster, Chrome, Menü, D3D11-Renderer, Loader, WIC, Zwischenablage, Dialoge, `--bench` | 🟡 |
@@ -263,7 +276,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M0** | Workspace, CI (Linux + Windows), Korpus, Bench-Harness | Baseline-JSON im CI | 🟡 |
 | **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
-| **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | ⬜ |
+| **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | ⬜ |
@@ -390,20 +403,40 @@ Das bestätigt die lokale Messung. Bei 1/8 bringt SIMD libjpeg-turbo auf dem Run
 ## 16. Übergabe: nächste Schritte
 
 **Stand (2026-10-23):**
-- PR #1 (M0–M2), PR #2 (libjpeg-turbo optimiert unter MSVC) und PR #3 (Übergabe) sind gemergt.
-- SIMD-Stufen sind gemessen (PR #4, Branch `simd-levels`):
-  - Basis x86-64-v2 in `.cargo/config.toml`.
-  - Kernel-Modul `blinzel_core::kernels` mit Laufzeit-Dispatch je Stufe; `png.rs`, `pixel.rs` und `crop_to_bgra` nutzen es mit `Level::Baseline`. Ein Test prüft, dass alle Stufen byte-identisch sind.
-  - Bench-Gruppe `simd`, `blinzel-bench compare`, CPU-Name und Features im JSON, x86-64-v3-Lauf im CI.
-  - Ergebnis: kein Dispatch, siehe [SIMD-Stufen](#simd-stufen).
+- PR #1–#3 sind gemergt.
+- PR #4 (`simd-levels`): SIMD-Stufen gemessen, kein Dispatch ([SIMD-Stufen](#simd-stufen)). Wartet auf Merge.
+- PR #5 (`m3-jpeg`, auf #4 gestapelt): eigener JPEG-Decoder.
+  - Sequentiell (Baseline und Extended, 8 Bit, jede Unterabtastung, Restart-Marker, mehrere Scans), Skalen 8/8, 4/8, 2/8, 1/8.
+  - Parallel: exakt mit Restart-Markern, sonst spekulativ mit Selbstsynchronisation. Ein Rateversuch, der auf einen ungültigen Code läuft, startet ein Bit später neu.
+  - Byte-identisch mit libjpeg-turbo; geprüft in `blinzel-core/tests/own_jpeg.rs` und mit `blinzel-bench run --check` über den ganzen Korpus.
+  - Eingebunden über `decode::decode_with(data, req, threads)`: Das sichtbare Bild läuft auf allen P-Kernen über `blinzel-jpeg`, Prefetch, Regionen und Fehlerfälle bei libjpeg-turbo.
+  - `blinzel-bench jpeg-ab <datei> [skala] [threads]` misst turbo und `blinzel-jpeg` abwechselnd im selben Prozess.
 
-Die Zahlen des Windows-Runners bestätigen das Ergebnis.
+**Messwerte M3** (Ryzen 7 PRO 6850H, 8 Kerne / 16 Threads, A/B abwechselnd, Mediane):
 
-**Als Nächstes: M3** (eigener paralleler JPEG-Decoder). Die Zahlen bestätigen den Hebel:
-- 1/8 kostet noch 75 % der vollen Decodezeit, weil der Huffman-Teil dominiert.
-- SIMD bringt libjpeg-turbo bei 1/8 nichts mehr; nur Parallelität im Entropie-Decode hilft.
-- Progressive JPEGs sind mit ca. 250–300 ms der langsamste Fall.
+| Datei | turbo | blinzel-jpeg, 1 Thread | 16 Threads | Faktor |
+|---|---|---|---|---|
+| 24 MP 4:2:0 voll | 77 ms | 90 ms | 20 ms | 3,9× |
+| 24 MP 4:2:0 1/2 | 66 ms | 78 ms | 19 ms | 3,5× |
+| 24 MP 4:2:0 1/8 | 57 ms | 57 ms | 16 ms | 3,6× |
+| 24 MP 4:4:4 voll | 102 ms | 109 ms | 26 ms | 3,9× |
+| 45 MP 4:2:0 voll | 151 ms | 206 ms | 38 ms | 4,0× |
+| 12 MP 4:2:0 voll | 37 ms | 45 ms | 12 ms | 3,1× |
 
-Reihenfolge der Stufen siehe [Abschnitt 3](#eigener-jpeg-decoder-blinzel-jpeg-m3). AVX2-IDCT und Farbumrechnung kommen als Kernels in `kernels.rs` und werden mit der Bench-Gruppe `simd` gemessen.
+App-Benchmark mit echter GPU (Radeon 680M): 24-MP-JPEG öffnen 28,7 ms gesamt (Decode 19,9 ms auf 3000 × 2000).
 
-M7/M8 warten auf die Punkte in Abschnitt 14.
+**Progressive** (seit diesem Stand): Alle Scans werden vorab gelesen; mit mehreren Threads läuft jeder Scan in einem eigenen Thread, zeilenweise hinter den Scans, von denen er abhängt (gleiche Komponente, überlappendes Band). Koeffizienten liegen in Blockzeilen hinter Mutexen, werden erst beim ersten Zugriff angelegt und während der parallelen IDCT freigegeben. Verfeinerungsscans führen je Block eine Maske der Nicht-Null-Koeffizienten.
+
+| 24 MP 4:2:0 progressive | turbo | blinzel-jpeg, 1 Thread | 16 Threads |
+|---|---|---|---|
+| voll | 244 ms | 330 ms | 142 ms (1,7×) |
+| 1/8 | 238 ms | 312 ms | 138 ms (1,7×) |
+
+Grenze: Der letzte Y-Verfeinerungsscan (3,7 MB) läuft allein ca. 100 ms. Ohne Kenntnis der Blocknummer lässt er sich nicht spekulativ teilen; schneller wird er nur durch einen schnelleren sequentiellen Decoder.
+
+Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichauf mit turbo (1,01×), mit 16 Threads 4,1×.
+
+**Als Nächstes, in dieser Reihenfolge:**
+1. CI-Ergebnis von PR #5 prüfen (`blinzel-bench run --check` auf dem Runner) und M3 auf ✅ setzen.
+2. M7 (Setup-Exe, Release-Workflow, Self-Updater). Teile ohne Secrets zuerst: Installation, Deinstallation, Updater mit Ed25519-Prüfung, Release-Workflow mit SignPath-Schritt hinter einer Bedingung.
+3. M8, M4, M5, M6 wie in Abschnitt 12. M7/M8 brauchen für den Abschluss die Punkte aus Abschnitt 14.

@@ -1,15 +1,29 @@
 //! Own JPEG code for amigo-blinzel.
 //!
-//! Today this is the marker parser: it reads everything up to the first scan
-//! without touching entropy-coded data, which is all the viewer needs to size
-//! the window, pick a DCT scale and find embedded previews (EXIF, MPF) before
-//! a single pixel is decoded. The parallel decoder (milestone M3) builds on
-//! the same structures.
+//! The marker parser reads everything up to the first scan without touching
+//! entropy-coded data, which is all the viewer needs to size the window,
+//! pick a DCT scale and find embedded previews (EXIF, MPF) before a single
+//! pixel is decoded. The decoder (milestone M3) turns 8-bit Huffman JPEGs,
+//! sequential and progressive, into YCbCr planes, byte-identical with
+//! libjpeg-turbo.
 
 #![forbid(unsafe_code)]
 
+mod bits;
+mod decoder;
+mod huffman;
+mod idct;
+mod parallel;
+mod progressive;
+mod scan;
+
 use std::fmt;
 use std::ops::Range;
+
+pub use decoder::{
+    PlaneLayout, SCALES, decode_planes, is_supported, plane_layouts, supported_scale,
+};
+pub use parallel::set_thread_init;
 
 /// Maximum number of components a frame may declare that we accept.
 pub const MAX_COMPONENTS: usize = 4;
@@ -185,6 +199,10 @@ pub enum Error {
     UnsupportedFrame(u8),
     NoFrame,
     ZeroSize,
+    /// Valid JPEG the decoder does not handle (another decoder may).
+    Unsupported(&'static str),
+    /// Broken entropy-coded data or tables.
+    Corrupt(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -196,6 +214,8 @@ impl fmt::Display for Error {
             Error::UnsupportedFrame(m) => write!(f, "unsupported frame type 0xFF{m:02X}"),
             Error::NoFrame => f.write_str("no frame header before the first scan"),
             Error::ZeroSize => f.write_str("image has zero width or height"),
+            Error::Unsupported(what) => write!(f, "unsupported JPEG: {what}"),
+            Error::Corrupt(what) => write!(f, "corrupt JPEG: {what}"),
         }
     }
 }
@@ -233,6 +253,16 @@ impl<'a> Segments<'a> {
             pos: 2,
             done: !ok,
             error: if ok { None } else { Some(Error::NotJpeg) },
+        }
+    }
+
+    /// Continues at `pos`, e.g. after a scan's entropy-coded data.
+    pub fn at(data: &'a [u8], pos: usize) -> Self {
+        Segments {
+            data,
+            pos,
+            done: false,
+            error: None,
         }
     }
 
