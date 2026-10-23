@@ -17,4 +17,10 @@ turbojpeg-sys = { workspace = true, optional = true }
 png.workspace = true
 gif.workspace = true
 image-webp.workspace = true
+jxl-oxide.workspace = true
+jxl-render.workspace = true
 ed25519-compact.workspace = true
+
+[dev-dependencies]
+zune-jpegxl.workspace = true
+zune-core.workspace = true

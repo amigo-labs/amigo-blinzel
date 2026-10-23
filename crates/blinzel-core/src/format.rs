@@ -28,7 +28,7 @@ impl Format {
     pub fn is_native(self) -> bool {
         matches!(
             self,
-            Format::Jpeg | Format::Png | Format::Gif | Format::Bmp | Format::WebP
+            Format::Jpeg | Format::Png | Format::Gif | Format::Bmp | Format::WebP | Format::Jxl
         )
     }
 }
