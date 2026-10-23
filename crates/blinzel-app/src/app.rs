@@ -607,11 +607,14 @@ impl App {
                 priority: 0,
             });
         }
-        let is_gif = self
-            .probes
-            .get(&cur.cache_id)
-            .is_some_and(|p| p.format == blinzel_core::format::Format::Gif);
-        if is_gif && !self.animations.contains_key(&cur.cache_id) {
+        // Animated formats; the Anim stage reports still files as such.
+        let may_animate = self.probes.get(&cur.cache_id).is_some_and(|p| {
+            matches!(
+                p.format,
+                blinzel_core::format::Format::Gif | blinzel_core::format::Format::WebP
+            )
+        });
+        if may_animate && !self.animations.contains_key(&cur.cache_id) {
             jobs.push(Job {
                 path: cur.path.clone(),
                 cache_id: cur.cache_id,

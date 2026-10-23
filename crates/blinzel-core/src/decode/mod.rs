@@ -156,6 +156,10 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
             let h = bmp::Header::parse(data)?;
             (h.width, h.height, Orientation::NORMAL, Vec::new(), None)
         }
+        Format::WebP => {
+            let ((w, h), orientation, icc) = webp::info(data)?;
+            (w, h, orientation, Vec::new(), icc)
+        }
         other => return Err(DecodeError::Unsupported(other)),
     };
     check_size(width as u64, height as u64)?;
@@ -198,6 +202,7 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::Png => finish(png::decode(data)?, req),
         Format::Gif => finish(gif::decode(data)?, req),
         Format::Bmp => finish(bmp::decode(data)?, req),
+        Format::WebP => finish(webp::decode(data)?, req),
         other => Err(DecodeError::Unsupported(other)),
     }
 }

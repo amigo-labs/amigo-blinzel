@@ -26,7 +26,10 @@ impl Format {
     /// Decoded by `blinzel-core` itself; everything else goes to the
     /// platform fallback (WIC on Windows).
     pub fn is_native(self) -> bool {
-        matches!(self, Format::Jpeg | Format::Png | Format::Gif | Format::Bmp)
+        matches!(
+            self,
+            Format::Jpeg | Format::Png | Format::Gif | Format::Bmp | Format::WebP
+        )
     }
 }
 
