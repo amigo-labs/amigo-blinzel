@@ -91,9 +91,21 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
             }
         };
         let t = Instant::now();
-        // Opening decodes the visible image on all P-cores, like the viewer.
-        let img = wic::decode_any_with(&data, req, threads::cpu_info().performance)
-            .map_err(|e| e.to_string())?;
+        // Opening decodes the visible image on all P-cores, like the viewer;
+        // a raw shows its embedded preview where that covers the screen.
+        let img = match loader::covering_raw_preview(&probe, need) {
+            Some(p) => blinzel_core::decode::decode_preview(
+                &data,
+                p,
+                (probe.width, probe.height),
+                Request::Fit {
+                    w: need.0.min(p.width),
+                    h: need.1.min(p.height),
+                },
+            ),
+            None => wic::decode_any_with(&data, req, threads::cpu_info().performance),
+        }
+        .map_err(|e| e.to_string())?;
         let decode_ms = ms(t);
         let t = Instant::now();
         let gpu = upload(

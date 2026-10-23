@@ -7,13 +7,24 @@ use std::ops::Range;
 use crate::geom::Orientation;
 
 #[derive(Clone, Copy)]
-struct Tiff<'a> {
+pub(crate) struct Tiff<'a> {
     d: &'a [u8],
     le: bool,
 }
 
 impl<'a> Tiff<'a> {
-    fn new(d: &'a [u8]) -> Option<Self> {
+    /// TIFF structure behind any magic number (Olympus `IIRO`, Panasonic
+    /// `IIU\0`, ...): only the byte order mark counts.
+    pub(crate) fn new_any_magic(d: &'a [u8]) -> Option<Self> {
+        let le = match d.get(..2)? {
+            b"II" => true,
+            b"MM" => false,
+            _ => return None,
+        };
+        Some(Tiff { d, le })
+    }
+
+    pub(crate) fn new(d: &'a [u8]) -> Option<Self> {
         let le = match d.get(..4)? {
             b"II*\0" => true,
             b"MM\0*" => false,
@@ -22,7 +33,7 @@ impl<'a> Tiff<'a> {
         Some(Tiff { d, le })
     }
 
-    fn u16(&self, at: usize) -> Option<u16> {
+    pub(crate) fn u16(&self, at: usize) -> Option<u16> {
         let b: [u8; 2] = self.d.get(at..at + 2)?.try_into().ok()?;
         Some(if self.le {
             u16::from_le_bytes(b)
@@ -31,7 +42,7 @@ impl<'a> Tiff<'a> {
         })
     }
 
-    fn u32(&self, at: usize) -> Option<u32> {
+    pub(crate) fn u32(&self, at: usize) -> Option<u32> {
         let b: [u8; 4] = self.d.get(at..at + 4)?.try_into().ok()?;
         Some(if self.le {
             u32::from_le_bytes(b)
@@ -40,12 +51,12 @@ impl<'a> Tiff<'a> {
         })
     }
 
-    fn first_ifd(&self) -> Option<usize> {
+    pub(crate) fn first_ifd(&self) -> Option<usize> {
         self.u32(4).map(|o| o as usize)
     }
 
     /// Entries of the IFD at `off` and the offset of the next IFD.
-    fn ifd(&self, off: usize) -> Option<(Vec<Entry>, usize)> {
+    pub(crate) fn ifd(&self, off: usize) -> Option<(Vec<Entry>, usize)> {
         let n = self.u16(off)? as usize;
         if n > 1000 {
             return None;
@@ -65,21 +76,21 @@ impl<'a> Tiff<'a> {
     }
 
     /// First value of an entry as an integer (SHORT or LONG).
-    fn int(&self, e: &Entry) -> Option<u32> {
+    pub(crate) fn int(&self, e: &Entry) -> Option<u32> {
         match e.typ {
             3 => self.u16(e.value_at).map(u32::from),
-            4 | 9 => self.u32(e.value_at),
+            4 | 9 | 13 => self.u32(e.value_at),
             1 | 7 => self.d.get(e.value_at).map(|&b| b as u32),
             _ => None,
         }
     }
 
     /// Byte range of an entry's payload (inline or at its offset).
-    fn payload(&self, e: &Entry) -> Option<Range<usize>> {
+    pub(crate) fn payload(&self, e: &Entry) -> Option<Range<usize>> {
         let size = match e.typ {
             1 | 2 | 6 | 7 => 1usize,
             3 | 8 => 2,
-            4 | 9 | 11 => 4,
+            4 | 9 | 11 | 13 => 4,
             5 | 10 | 12 => 8,
             _ => return None,
         }
@@ -94,11 +105,11 @@ impl<'a> Tiff<'a> {
     }
 }
 
-struct Entry {
-    tag: u16,
-    typ: u16,
-    count: u32,
-    value_at: usize,
+pub(crate) struct Entry {
+    pub(crate) tag: u16,
+    pub(crate) typ: u16,
+    pub(crate) count: u32,
+    pub(crate) value_at: usize,
 }
 
 /// EXIF orientation from a TIFF block (the APP1 payload after `Exif\0\0`).
@@ -219,11 +230,17 @@ pub fn jpeg_meta(data: &[u8], info: &blinzel_jpeg::JpegInfo) -> JpegMeta {
     meta
 }
 
-fn push_preview(out: &mut Vec<EmbeddedPreview>, data: &[u8], range: Range<usize>) {
+/// Adds `range` if it holds a JPEG the decoders show: 8-bit, not lossless
+/// (raws keep sensor data as lossless JPEG).
+pub(crate) fn push_preview(out: &mut Vec<EmbeddedPreview>, data: &[u8], range: Range<usize>) {
     let Some(bytes) = data.get(range.clone()) else {
         return;
     };
-    if let Ok(i) = blinzel_jpeg::parse(bytes) {
+    if let Ok(i) = blinzel_jpeg::parse(bytes)
+        && i.precision == 8
+        && i.process != blinzel_jpeg::Process::Lossless
+        && !out.iter().any(|p| p.range == range)
+    {
         out.push(EmbeddedPreview {
             range,
             width: i.width,

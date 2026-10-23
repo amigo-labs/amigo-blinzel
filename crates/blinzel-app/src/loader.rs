@@ -314,84 +314,112 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     let fit = needed_decode_size((probe.width, probe.height), fit_scale);
     let tile = *shared.tile.lock().unwrap();
 
-    let deliver = |stage: Stage, img: blinzel_core::pixel::Image, decode_ms: f64| -> bool {
-        if cancel.is_cancelled() {
-            return false;
-        }
-        let img = Arc::new(img);
-        // The device is still starting: the window shows this image through
-        // GDI meanwhile (see first_frame).
-        let hwnd = shared.hwnd.load(Ordering::Relaxed);
-        if job.priority == 0
-            && hwnd != 0
-            && shared.device.device.lock().unwrap().is_none()
-            && !shared.first_frame_sent.swap(true, Ordering::Relaxed)
-        {
-            // Rendered here, in parallel with the UI thread showing the
-            // window, when the layout does not depend on the image size.
-            let target = *shared.first_frame_target.lock().unwrap();
-            let color = shared.color.lock().unwrap().clone();
-            let lut = color.and_then(|c| c.lut(probe.icc.as_ref()));
-            let rendered = target
-                .filter(|t| t.view.mode != blinzel_core::layout::ViewMode::FitWindowToImage)
-                .map(|t| {
-                    let bits = crate::first_frame::render(
-                        &img,
-                        probe.orientation,
-                        t.client,
-                        &t.view,
-                        t.background,
-                        lut.clone(),
-                    );
-                    (bits, t.client)
+    let deliver =
+        |stage: Stage, img: blinzel_core::pixel::Image, decode_ms: f64, probe: &Probe| -> bool {
+            if cancel.is_cancelled() {
+                return false;
+            }
+            let img = Arc::new(img);
+            // The device is still starting: the window shows this image through
+            // GDI meanwhile (see first_frame).
+            let hwnd = shared.hwnd.load(Ordering::Relaxed);
+            if job.priority == 0
+                && hwnd != 0
+                && shared.device.device.lock().unwrap().is_none()
+                && !shared.first_frame_sent.swap(true, Ordering::Relaxed)
+            {
+                // Rendered here, in parallel with the UI thread showing the
+                // window, when the layout does not depend on the image size.
+                let target = *shared.first_frame_target.lock().unwrap();
+                let color = shared.color.lock().unwrap().clone();
+                let lut = color.and_then(|c| c.lut(probe.icc.as_ref()));
+                let rendered = target
+                    .filter(|t| t.view.mode != blinzel_core::layout::ViewMode::FitWindowToImage)
+                    .map(|t| {
+                        let bits = crate::first_frame::render(
+                            &img,
+                            probe.orientation,
+                            t.client,
+                            &t.view,
+                            t.background,
+                            lut.clone(),
+                        );
+                        (bits, t.client)
+                    });
+                let ff = Box::new(crate::first_frame::FirstFrame {
+                    image: img.clone(),
+                    orientation: probe.orientation,
+                    rendered,
+                    lut,
                 });
-            let ff = Box::new(crate::first_frame::FirstFrame {
-                image: img.clone(),
-                orientation: probe.orientation,
-                rendered,
-                lut,
-            });
-            let ptr = Box::into_raw(ff);
-            blinzel_core::timing::mark("first_frame_posted");
-            unsafe {
-                if PostMessageW(
-                    Some(HWND(hwnd as *mut _)),
-                    crate::first_frame::WM_FIRST_FRAME,
-                    WPARAM(0),
-                    LPARAM(ptr as isize),
-                )
-                .is_err()
-                {
-                    drop(Box::from_raw(ptr));
+                let ptr = Box::into_raw(ff);
+                blinzel_core::timing::mark("first_frame_posted");
+                unsafe {
+                    if PostMessageW(
+                        Some(HWND(hwnd as *mut _)),
+                        crate::first_frame::WM_FIRST_FRAME,
+                        WPARAM(0),
+                        LPARAM(ptr as isize),
+                    )
+                    .is_err()
+                    {
+                        drop(Box::from_raw(ptr));
+                    }
                 }
             }
-        }
-        let Some(device) = shared.wait_device(cancel) else {
-            return false;
+            let Some(device) = shared.wait_device(cancel) else {
+                return false;
+            };
+            let t = Instant::now();
+            let gpu = upload(&device, &img, probe.orientation, tile);
+            let upload_ms = t.elapsed().as_secs_f64() * 1e3;
+            drop(img); // back to the buffer pool before signalling
+            shared.send(Loaded {
+                cache_id: job.cache_id,
+                stage,
+                probe: Some(probe.clone()),
+                image: gpu.map(Arc::new).map_err(|e| e.message()),
+                animation: None,
+                read_ms: input.read_ms,
+                decode_ms,
+                upload_ms,
+            });
+            true
         };
-        let t = Instant::now();
-        let gpu = upload(&device, &img, probe.orientation, tile);
-        let upload_ms = t.elapsed().as_secs_f64() * 1e3;
-        drop(img); // back to the buffer pool before signalling
-        shared.send(Loaded {
-            cache_id: job.cache_id,
-            stage,
-            probe: Some(probe.clone()),
-            image: gpu.map(Arc::new).map_err(|e| e.message()),
-            animation: None,
-            read_ms: input.read_ms,
-            decode_ms,
-            upload_ms,
-        });
-        true
+
+    // 0. Raws: WIC develops the sensor data in seconds, so an embedded
+    //    preview that covers what the stage needs (the screen box, for Full
+    //    the whole image, 1 % tolerance) is the stage.
+    let need = match job.stage {
+        Stage::Full => (probe.width, probe.height),
+        _ => fit,
     };
+    if let Some(p) = covering_raw_preview(&probe, need) {
+        let t = Instant::now();
+        let req = match job.stage {
+            Stage::Full => Request::Full,
+            _ => Request::Fit {
+                w: fit.0.min(p.width),
+                h: fit.1.min(p.height),
+            },
+        };
+        match blinzel_core::decode::decode_preview(data, p, (probe.width, probe.height), req) {
+            Ok(img) => {
+                deliver(job.stage, img, t.elapsed().as_secs_f64() * 1e3, &probe);
+                return;
+            }
+            Err(e) => debug_log(&format!("raw preview: {e}")),
+        }
+    }
 
     // 1. Embedded preview: only worth it if it covers half the screen box
-    //    and is much smaller than what the main stage decodes.
+    //    and is much smaller than what the main stage decodes (or that is
+    //    a raw).
     if job.with_preview
         && let Some(p) = probe.previews.first()
         && (p.width >= fit.0 / 2 || p.height >= fit.1 / 2)
-        && (p.width as u64 * p.height as u64) * 3 < probe.width as u64 * probe.height as u64
+        && (probe.is_raw()
+            || (p.width as u64 * p.height as u64) * 3 < probe.width as u64 * probe.height as u64)
     {
         let t = Instant::now();
         let req = Request::Fit {
@@ -400,7 +428,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
         };
         match blinzel_core::decode::decode_preview(data, p, (probe.width, probe.height), req) {
             Ok(img) => {
-                if !deliver(Stage::Preview, img, t.elapsed().as_secs_f64() * 1e3) {
+                if !deliver(Stage::Preview, img, t.elapsed().as_secs_f64() * 1e3, &probe) {
                     return;
                 }
             }
@@ -425,10 +453,32 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     };
     match wic::decode_any_with(data, req, decode_threads) {
         Ok(img) => {
-            deliver(job.stage, img, t.elapsed().as_secs_f64() * 1e3);
+            // A raw's probe estimates the developed size; WIC knows it.
+            let probe = if probe.is_raw() {
+                Probe {
+                    width: img.full_width,
+                    height: img.full_height,
+                    ..probe.clone()
+                }
+            } else {
+                probe.clone()
+            };
+            deliver(job.stage, img, t.elapsed().as_secs_f64() * 1e3, &probe);
         }
         Err(e) => fail(e.to_string(), Some(probe.clone())),
     }
+}
+
+/// A raw's largest embedded preview, if it covers `need` (stored
+/// orientation, 1 % tolerance): WIC develops the sensor data in seconds,
+/// so such a preview stands in for the image.
+pub fn covering_raw_preview(
+    probe: &Probe,
+    need: (u32, u32),
+) -> Option<&blinzel_core::exif::EmbeddedPreview> {
+    let p = probe.previews.first().filter(|_| probe.is_raw())?;
+    (p.width as u64 * 100 >= need.0 as u64 * 99 && p.height as u64 * 100 >= need.1 as u64 * 99)
+        .then_some(p)
 }
 
 /// Decodes every frame of an animated image and uploads them.
