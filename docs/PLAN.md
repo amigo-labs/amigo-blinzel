@@ -370,19 +370,34 @@ Die gepackten Kernels sind speichergebunden. Gewinnt AVX2 dort 0,5–1,5 ms, sin
 
 **Obergrenze „alles mit AVX2“** (x86-64-v3-Build, damit auch die Crates `png` und `fdeflate`): Drei abwechselnde Läufe ergeben für PNG 2–5 % (Minima); JPEG bleibt gleich, weil der C-Teil von `RUSTFLAGS` unberührt bleibt. Ein einzelner Vergleich hintereinander hatte 24 % gezeigt, der Baseline-Lauf war aber gedrosselt.
 
-**Ergebnis nach dem Kriterium (≥ 10 % auf einem Hot Path):** Keine Stufe erreicht es. Deshalb gibt es keinen Laufzeit-Dispatch; die Kernels laufen mit `Level::Baseline`, die Basis bleibt x86-64-v2. Kernel-Modul und Bench-Gruppe `simd` bleiben als Werkzeug für M3 (AVX2-IDCT, Farbumrechnung im eigenen Decoder). Die Zahlen vom Windows-Runner (Step-Summary „Compare with x86-64-v3“) kommen mit dem PR dazu.
+**Ergebnis nach dem Kriterium (≥ 10 % auf einem Hot Path):** Keine Stufe erreicht es. Deshalb gibt es keinen Laufzeit-Dispatch; die Kernels laufen mit `Level::Baseline`, die Basis bleibt x86-64-v2. Kernel-Modul und Bench-Gruppe `simd` bleiben als Werkzeug für M3 (AVX2-IDCT, Farbumrechnung im eigenen Decoder).
+
+**Windows-CI** (PR #4, `windows-2025`, AMD EPYC 7763, AVX2; die Läufe sind ruhig, das Minimum liegt beim Median):
+
+| Messung | Ergebnis |
+|---|---|
+| libjpeg-turbo YCbCr voll: ohne SIMD / SSE2 / AVX2 | 159 / 100 / 95 ms |
+| libjpeg-turbo BGRA voll: ohne SIMD / SSE2 / AVX2 | 253 / 122 / 111 ms |
+| libjpeg-turbo 1/8: ohne SIMD / SSE2 / AVX2 | jeweils 72 ms |
+| Kernel RGB → RGBA: Baseline / AVX2 | 4,4 / 3,4 ms (1,28×, ≈ 1 % des 12-MP-PNG-Decodes von 113 ms) |
+| Kernel Grau+Alpha → RGBA, RGBA → BGRA: Baseline / AVX2 | 3,0 / 2,6 ms; 3,8 / 3,5 ms |
+| Kernel YCbCr → BGRA, alle Stufen | 604–636 ms, kein Unterschied |
+| x86-64-v3 gegenüber v2: PNG (RGB, RGBA, Screenshot) | 1,02× / 1,02× / 1,06× |
+| x86-64-v3 gegenüber v2: JPEG (C-Code unverändert) | 1,01–1,03× |
+
+Das bestätigt die lokale Messung. Bei 1/8 bringt SIMD libjpeg-turbo auf dem Runner gar nichts mehr.
 
 ## 16. Übergabe: nächste Schritte
 
 **Stand (2026-10-23):**
 - PR #1 (M0–M2), PR #2 (libjpeg-turbo optimiert unter MSVC) und PR #3 (Übergabe) sind gemergt.
-- SIMD-Stufen sind gemessen (Branch `simd-levels`):
+- SIMD-Stufen sind gemessen (PR #4, Branch `simd-levels`):
   - Basis x86-64-v2 in `.cargo/config.toml`.
   - Kernel-Modul `blinzel_core::kernels` mit Laufzeit-Dispatch je Stufe; `png.rs`, `pixel.rs` und `crop_to_bgra` nutzen es mit `Level::Baseline`. Ein Test prüft, dass alle Stufen byte-identisch sind.
   - Bench-Gruppe `simd`, `blinzel-bench compare`, CPU-Name und Features im JSON, x86-64-v3-Lauf im CI.
   - Ergebnis: kein Dispatch, siehe [SIMD-Stufen](#simd-stufen).
 
-**Offen aus diesem Schritt:** die Zahlen des Windows-Runners aus der Step-Summary in [SIMD-Stufen](#simd-stufen) nachtragen. Ändern sie das Ergebnis (≥ 10 % auf einem Hot Path), entscheidet der Nutzer über den Dispatch.
+Die Zahlen des Windows-Runners bestätigen das Ergebnis.
 
 **Als Nächstes: M3** (eigener paralleler JPEG-Decoder). Die Zahlen bestätigen den Hebel:
 - 1/8 kostet noch 75 % der vollen Decodezeit, weil der Huffman-Teil dominiert.
