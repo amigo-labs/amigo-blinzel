@@ -49,7 +49,7 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
 | Thumbnail-Skalierung | Windows-Thumbnail-Provider (`IShellItemImageFactory`) | DCT 1/8 + Flächenmittelung je YCbCr-Ebene | ✅ 200 12-MP-JPEGs, 16 Threads: 287/s statt 18/s |
 | Thumbnail-Speicher | Windows-Thumbnail-Cache (`thumbcache_*.db`) | eigene Pack-Datei | ✅ 200 aus dem Cache: 23,6 ms statt 432 ms (CPU-Seite, ohne Atlas-Upload) |
-| Verzeichnis | FindFirstFileExW | NtQueryDirectoryFileEx | ⬜ messen (10k-Ordner im App-Bench) |
+| Verzeichnis | FindFirstFileExW (`LARGE_FETCH`, `InfoBasic`) | `GetFileInformationByHandleEx(FileFullDirectoryInfo)` (was `NtQueryDirectoryFile` liefert) | ✅ gemessen, bleibt bei FindFirstFileExW: 10k Einträge 7,7–8,0 ms gegen 6,8–7,3 ms (64-KB-Puffer) bzw. −8 bis +18 % (256 KB), im Mittel unter 10 %; Sortieren 2,5 ms. Ziel ≤ 25 ms erfüllt. |
 | SIMD-Stufen | Basis x86-64-v2 | Laufzeit-Dispatch je Kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ gemessen: keine Stufe bringt ≥ 10 % auf einem Hot Path, daher kein Dispatch ([Abschnitt 15](#simd-stufen)) |
 
 **Erkenntnis aus den Messungen:** DCT-Skalierung bringt weniger als erwartet (24 MP: 1/8 = 74 ms, voll = 118 ms). Das Huffman-Decoding dominiert. Der **parallele Huffman-Decoder (M3)** ist deshalb der größte verbleibende Hebel; progressive JPEGs (ca. 320 ms) brauchen ihn besonders.
@@ -179,7 +179,7 @@ Reihenfolge der Stufen:
 - **Stand (Ryzen 7 PRO 6850H, 16 Threads):** kalt 287/s (1 Thread: 26/s), Speichern 1,1–1,3 ms je Thumbnail (12,6 KB), warm 200 in 23,6 ms (1 Thread: 0,9 ms je Thumbnail). Erst die Umrechnung je Ebene auf Zielgröße brachte das: `Image::to_bgra` (exakt, Float, bilineare Chroma) kostete 1,8 ms je 256er-Thumbnail und 15 ms je 1/8-Decode.
 - Zum Vergleich auf denselben Dateien der Windows-Thumbnail-Provider und -Cache: kalt 18/s, warm 432–446 ms für 200.
 - **Ende zu Ende in der App** (`blinzel --bench`, `thumb_grid_200`: Cache öffnen, 200 lesen und decodieren, in den Atlas laden, Raster zeichnen, GPU fertig): **16 ms** im Median (Ziel ≤ 30 ms). Mit BGRA-Atlas waren es 37–69 ms; das Hochladen und die Umrechnung nach RGB machten den Unterschied.
-- ⬜ Fensterposition und -größe merken.
+- 🟡 Fensterposition und -größe merken: beim Schließen (und Verstecken) `GetWindowPlacement` in die Einstellungen, beim Start `SetWindowPlacement`, solange dort noch ein Monitor ist; ein maximiertes Fenster wird noch verhüllt maximiert, damit das erste Bild für die echte Größe gerechnet wird. Sichtprüfung offen.
 
 ## 7. Auswahl, Kopieren, Ausschneiden, Speichern
 

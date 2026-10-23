@@ -28,6 +28,10 @@ pub struct Settings {
     pub color_management: bool,
     /// Thumbnails of the neighbours along the bottom.
     pub filmstrip: bool,
+    /// The window's last normal (not maximized) rect, left, top, right,
+    /// bottom in workspace coordinates (`GetWindowPlacement`).
+    pub window: Option<[i32; 4]>,
+    pub maximized: bool,
 }
 
 impl Default for Settings {
@@ -44,8 +48,20 @@ impl Default for Settings {
             resident: false,
             color_management: true,
             filmstrip: false,
+            window: None,
+            maximized: false,
         }
     }
+}
+
+/// `left,top,right,bottom` with a positive size.
+fn parse_rect(v: &str) -> Option<[i32; 4]> {
+    let n: Vec<i32> = v
+        .split(',')
+        .map(|x| x.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    let r: [i32; 4] = n.try_into().ok()?;
+    (r[2] > r[0] && r[3] > r[1]).then_some(r)
 }
 
 fn unquote(v: &str) -> Option<&str> {
@@ -99,6 +115,8 @@ impl Settings {
                     s.color_management = value.parse().unwrap_or(s.color_management)
                 }
                 "filmstrip" => s.filmstrip = value.parse().unwrap_or(s.filmstrip),
+                "window" => s.window = parse_rect(value).or(s.window),
+                "maximized" => s.maximized = value.parse().unwrap_or(s.maximized),
                 _ => {}
             }
         }
@@ -115,6 +133,10 @@ impl Settings {
 
     pub fn to_text(&self) -> String {
         let [r, g, b] = self.background;
+        let window = match self.window {
+            Some([l, t, r, b]) => format!("window = {l},{t},{r},{b}\n"),
+            None => String::new(),
+        };
         format!(
             "# amigo-blinzel settings\n\
              view_mode = \"{}\"\n\
@@ -128,7 +150,9 @@ impl Settings {
              auto_update = {}\n\
              resident = {}\n\
              color_management = {}\n\
-             filmstrip = {}\n",
+             filmstrip = {}\n\
+             maximized = {}\n\
+             {window}",
             self.view.mode.key(),
             self.view.no_upscale,
             self.language.as_deref().unwrap_or("auto"),
@@ -140,6 +164,7 @@ impl Settings {
             self.resident,
             self.color_management,
             self.filmstrip,
+            self.maximized,
         )
     }
 }
@@ -165,8 +190,14 @@ mod tests {
             resident: true,
             color_management: false,
             filmstrip: true,
+            window: Some([-1900, 30, 200, 1000]),
+            maximized: true,
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
+        // Broken rects are ignored.
+        for bad in ["1,2,3", "10,10,5,20", "a,b,c,d"] {
+            assert_eq!(Settings::parse(&format!("window = {bad}")).window, None);
+        }
         assert_eq!(
             Settings::parse(&Settings::default().to_text()),
             Settings::default()
