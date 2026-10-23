@@ -304,8 +304,9 @@ Umsetzung:
   - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz, Code-Signing-Policy (für SignPath).
   - Charts werden beim Build als Inline-SVG aus den Benchmark-JSONs erzeugt; keine Chart-Library im Browser.
   - Der Download-Link zeigt auf `releases/latest/download/amigo-blinzel-setup-x64.exe` (stabile URL).
-- 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml`), per GitHub Action (`cloudflare/wrangler-action`) bei Änderungen an `website/` und bei jedem Release.
-  - Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (bei dir).
+- 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml` im Repo-Wurzelverzeichnis).
+  - Cloudflare Workers Builds ist mit dem Repo verbunden (Root-Verzeichnis `/`, Standard-Deploy-Befehl). Wrangler führt vor jedem Deploy `website/build.sh` aus: Das installiert die fehlende Rust-Toolchain im Build-Image und erzeugt `website/dist` mit `blinzel-site`.
+  - Alternativ deployt `.github/workflows/website.yml`, sobald die Secrets `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` gesetzt sind; mit Workers Builds ist das nicht nötig.
   - Zunächst die `workers.dev`-Subdomain; eine eigene Domain kann jederzeit dazukommen.
 
 ### Wettbewerbs-Benchmark `blinzel-race`
@@ -397,7 +398,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - ⬜ Lizenz wählen (Voraussetzung für die SignPath Foundation).
 - ⬜ SignPath-Foundation-Antrag sowie `SIGNPATH_API_TOKEN` (Secret) und die Org-ID (Variable `SIGNPATH_ORGANIZATION_ID`).
 - ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-app/src/update.rs`.
-- ⬜ Cloudflare-Konto: `CLOUDFLARE_API_TOKEN` (Workers bearbeiten) und `CLOUDFLARE_ACCOUNT_ID` als Repo-Secrets; optional eine Domain.
+- 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
 - ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
 - ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
