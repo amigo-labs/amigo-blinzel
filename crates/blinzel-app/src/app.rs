@@ -33,7 +33,7 @@ use crate::clipboard;
 use crate::color::ColorManager;
 use crate::gfx::text::Text;
 use crate::gfx::{Gfx, GpuImage, GpuLut, Renderer, Rgba, Shape, SwapChain};
-use crate::loader::{self, Job, Loaded, Loader, Stage};
+use crate::loader::{self, GpuAnimation, Job, Loaded, Loader, Stage};
 use crate::menu::{Cmd, MenuState};
 use crate::platform::{enumerate, io, wide};
 use crate::settings_store;
@@ -112,6 +112,9 @@ enum DragState {
 /// Messages from helper threads to the UI thread.
 pub const WM_LIST: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
 pub const WM_DIR_CHANGED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 3;
+/// Timer that advances an animation (window.rs dispatches it).
+pub const TIMER_ANIM: usize = 3;
+
 /// LPARAM: `Box<(isize, Option<Profile>)>`, a monitor and its colour target.
 pub const WM_COLOR_TARGET: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
 
@@ -159,6 +162,11 @@ pub struct App {
     color_verified: bool,
     /// Grid browser and filmstrip.
     pub browse: Browse,
+    /// The current image's animation (`None`: it is a still image).
+    animations: HashMap<u64, Option<Arc<GpuAnimation>>>,
+    /// Frame shown and complete plays so far.
+    anim_frame: usize,
+    anim_plays: u32,
     pub dpi: u32,
     pub client: (u32, u32),
     direction: isize,
@@ -218,6 +226,9 @@ impl App {
             monitor: 0,
             color_verified: false,
             browse: Browse::default(),
+            animations: HashMap::new(),
+            anim_frame: 0,
+            anim_plays: 0,
             dpi,
             client,
             direction: 1,
@@ -271,6 +282,8 @@ impl App {
         self.cloaked = true;
         self.activate_on_uncloak = false;
         self.browse.reset();
+        self.stop_animation();
+        self.drop_animations(None);
         self.gfx.trim();
         // Also what prefetch jobs still in flight give back later.
         blinzel_core::bufpool::global().set_max_retained(0);
@@ -467,7 +480,69 @@ impl App {
         self.drag = None;
     }
 
+    fn stop_animation(&mut self) {
+        self.anim_frame = 0;
+        self.anim_plays = 0;
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(self.hwnd), TIMER_ANIM);
+        }
+    }
+
+    /// Forgets the animations of every image but `keep` (the loader may
+    /// decode them again).
+    fn drop_animations(&mut self, keep: Option<u64>) {
+        let gone: Vec<u64> = self
+            .animations
+            .keys()
+            .copied()
+            .filter(|&k| Some(k) != keep)
+            .collect();
+        for id in gone {
+            self.animations.remove(&id);
+            self.loader.forget([loader::key(id, Stage::Anim)]);
+        }
+    }
+
+    fn schedule_frame(&self, ms: u32) {
+        unsafe {
+            windows::Win32::UI::WindowsAndMessaging::SetTimer(
+                Some(self.hwnd),
+                TIMER_ANIM,
+                ms.max(10),
+                None,
+            );
+        }
+    }
+
+    /// The current image's animation, if it has one.
+    fn animation(&self) -> Option<Arc<GpuAnimation>> {
+        let c = self.current.as_ref()?;
+        self.animations.get(&c.cache_id)?.clone()
+    }
+
+    /// The animation timer: next frame; at the end of the last play the
+    /// last frame stays.
+    pub fn on_anim_timer(&mut self) {
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(self.hwnd), TIMER_ANIM);
+        }
+        let Some(a) = self.animation() else { return };
+        let next = self.anim_frame + 1;
+        if next == a.frames.len() {
+            self.anim_plays += 1;
+            if a.plays.is_some_and(|p| self.anim_plays >= p) {
+                return;
+            }
+        }
+        self.anim_frame = next % a.frames.len();
+        self.schedule_frame(a.frames[self.anim_frame].1);
+        self.invalidate();
+    }
+
     fn after_navigation(&mut self) -> Vec<Action> {
+        self.stop_animation();
+        let keep = self.current.as_ref().map(|c| c.cache_id);
+        self.drop_animations(keep);
         self.update_title();
         self.update_wanted();
         self.invalidate();
@@ -530,6 +605,19 @@ impl App {
                     .textures
                     .contains(&loader::key(cur.cache_id, Stage::Preview)),
                 priority: 0,
+            });
+        }
+        let is_gif = self
+            .probes
+            .get(&cur.cache_id)
+            .is_some_and(|p| p.format == blinzel_core::format::Format::Gif);
+        if is_gif && !self.animations.contains_key(&cur.cache_id) {
+            jobs.push(Job {
+                path: cur.path.clone(),
+                cache_id: cur.cache_id,
+                stage: Stage::Anim,
+                with_preview: false,
+                priority: 1,
             });
         }
         let neighbour_stage = if self.settings.view.mode == ViewMode::ActualSize {
@@ -595,12 +683,25 @@ impl App {
                 stage,
                 probe,
                 image,
+                animation,
                 read_ms,
                 decode_ms,
                 upload_ms,
             } = l;
             if let Some(p) = probe {
                 self.probes.insert(cache_id, p);
+            }
+            if stage == Stage::Anim {
+                if Some(cache_id) == current_id {
+                    if let Some(a) = &animation {
+                        self.anim_frame = 0;
+                        self.anim_plays = 0;
+                        self.schedule_frame(a.frames[0].1);
+                    }
+                    self.animations.insert(cache_id, animation);
+                    changed_current = true;
+                }
+                continue;
             }
             match image {
                 Ok(img) => {
@@ -678,7 +779,11 @@ impl App {
 
     /// Image to display and its layout.
     fn displayed(&self) -> Option<(Arc<GpuImage>, Orientation, Layout)> {
+        let frame = self
+            .animation()
+            .and_then(|a| a.frames.get(self.anim_frame).map(|f| f.0.clone()));
         let img = match &self.current {
+            Some(_) if frame.is_some() => frame,
             // A broken file shows its error, not the previous image.
             Some(c) if self.failed.contains_key(&c.cache_id) => self.best_texture(c.cache_id),
             Some(c) => self
