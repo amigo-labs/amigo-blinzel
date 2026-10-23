@@ -1,0 +1,13 @@
+# Cloudflare Workers static assets: the generated site, no worker code.
+# Workers Builds (repository root, default deploy command) and the website
+# workflow both deploy from here; the build step generates website/dist.
+name = "amigo-blinzel"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "sh website/build.sh"
+
+[assets]
+directory = "./website/dist"
+not_found_handling = "404-page"
+html_handling = "auto-trailing-slash"
