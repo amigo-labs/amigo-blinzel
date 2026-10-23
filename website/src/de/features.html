@@ -1,0 +1,31 @@
+<!-- title: Funktionen -->
+<h2>Bedienung</h2>
+<p>Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben Minimieren, Maximieren und Schließen. Alles andere steckt im Menü oder liegt auf einer Taste.</p>
+<table>
+<thead><tr><th>Taste / Maus</th><th>Aktion</th></tr></thead>
+<tbody>
+<tr><td>→ / Leertaste, ← / Rück</td><td>nächstes / vorheriges Bild</td></tr>
+<tr><td>Pos1 / Ende</td><td>erstes / letztes Bild</td></tr>
+<tr><td>1 / 2 / 3</td><td>Fenster an Bild anpassen / Bild an Fenster anpassen / 100 %</td></tr>
+<tr><td>Mausrad, + / −, 0</td><td>Zoom um den Cursor, zurücksetzen</td></tr>
+<tr><td>Strg+C / Strg+X</td><td>Auswahl kopieren / Ansicht zuschneiden</td></tr>
+<tr><td>Strg+S</td><td>Ausschnitt speichern unter (JPEG verlustfrei, wo möglich)</td></tr>
+<tr><td>R / L</td><td>drehen (nur Ansicht)</td></tr>
+<tr><td>F11, Doppelklick</td><td>Vollbild</td></tr>
+<tr><td>Entf</td><td>in den Papierkorb</td></tr>
+</tbody>
+</table>
+<h2>Bilddateien bleiben unberührt</h2>
+<p>amigo-blinzel verändert keine Bilddatei. Ausschnitte werden nur über „Speichern unter“ als neue Datei geschrieben. Bei JPEG-Quellen werden die Daten dabei, wenn möglich, verlustfrei übernommen statt neu kodiert.</p>
+<h2>Formate</h2>
+<p>JPEG, PNG, GIF und BMP mit eigenen Decodern; TIFF, HEIC, AVIF, WebP, JPEG XL und RAW über die Codecs von Windows, soweit installiert.</p>
+<h2>Woher die Geschwindigkeit kommt</h2>
+<ul>
+<li>Decodieren in Bildschirmauflösung: JPEGs werden per DCT-Skalierung direkt in YCbCr-Ebenen decodiert; Farbumrechnung und Skalierung übernimmt die Grafikkarte.</li>
+<li>Ein eigener JPEG-Decoder verteilt das Huffman-Decoding auf alle Kerne, auch ohne Restart-Marker.</li>
+<li>Prefetch in Blätterrichtung, mit Prioritäten und Abbruch.</li>
+<li>Paralleler Start: Fenster, Grafikkarte und Decoder starten gleichzeitig.</li>
+<li>Win32 und Direct3D 11 mit vorkompilierten Shadern; eine einzige Exe von etwa 3 MB, keine Runtime.</li>
+</ul>
+<h2>Installation und Updates</h2>
+<p>Die Exe installiert sich selbst, nur für dich und ohne Administratorrechte. Updates kommen still im Hintergrund, werden dreifach geprüft und sind beim nächsten Start aktiv.</p>

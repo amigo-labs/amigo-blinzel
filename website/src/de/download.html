@@ -1,0 +1,13 @@
+<!-- title: Download -->
+<p>Version {{version}} · Windows 11 ab Version 24H2</p>
+<div class="cta">
+<a class="button" href="{{download:x64}}">x64</a>
+<a class="button secondary" href="{{download:arm64}}">ARM64</a>
+</div>
+<h2>Installation</h2>
+<p>Die heruntergeladene Datei ist Viewer und Installer zugleich. Sie installiert sich nur für dich nach <code>%LOCALAPPDATA%\Programs\amigo-blinzel</code>, ohne Administratorrechte. Als Standard-App für Bilder legst du amigo-blinzel danach in den Windows-Einstellungen fest; das Setup öffnet die Seite auf Wunsch.</p>
+<p>Deinstallieren: Einstellungen → Apps → Installierte Apps.</p>
+<h2>Prüfen</h2>
+<p>Die Prüfsummen stehen in <a href="{{download:sums}}">SHA256SUMS</a>, signiert mit dem Release-Schlüssel des Projekts. Unter Windows: <code>Get-FileHash amigo-blinzel-setup-x64.exe</code>.</p>
+<h2>Updates</h2>
+<p>amigo-blinzel prüft höchstens einmal am Tag bei GitHub, ob es eine neue Version gibt, und installiert sie still; aktiv wird sie beim nächsten Start. Abschalten: <code>auto_update = false</code> in <code>%APPDATA%\amigo-blinzel\settings.toml</code>.</p>

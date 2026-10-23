@@ -1,0 +1,20 @@
+<!-- title: Method -->
+<p>Every viewer is measured with the same tool, from the outside and without touching the programs. The tool is part of the source code (<code>crates/blinzel-race</code>); every measurement can be reproduced.</p>
+<h2>Test images</h2>
+<p>24 JPEGs of 24 megapixels and about 8 MB each, as from a typical camera. Every image has its own base colour; consecutive images always differ.</p>
+<h2>Detection</h2>
+<p>Through the Windows Desktop Duplication API the tool sees every frame that reaches the screen, with its presentation time. A grid of sample points recognizes from the base colour which image is visible, on every monitor.</p>
+<h2>Measurements</h2>
+<ul>
+<li><strong>Opening:</strong> from process start until the first image is visible. Warm: program and image are in the file cache. Cold: the file cache is emptied first.</li>
+<li><strong>Next image:</strong> after 1.5 seconds of rest, one arrow key press until the next image is visible.</li>
+<li><strong>Key repeat:</strong> 20 presses at 30 Hz, like a held key. Counted: how many images actually appear.</li>
+</ul>
+<h2>Fairness</h2>
+<ul>
+<li>Same machine, same files, every viewer with default settings; the versions are part of the results.</li>
+<li>Several repetitions; reported are the median and the 95th percentile, the raw data is published.</li>
+<li>A first, uncounted start loads every program into the cache.</li>
+</ul>
+<h2>Measure yourself</h2>
+<p><code>blinzel-race corpus images</code> creates the images, <code>blinzel-race run images --json result.json</code> measures every viewer found. Cold starts need administrator rights (<code>--cold</code>).</p>
