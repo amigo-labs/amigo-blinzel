@@ -73,42 +73,73 @@ fn find_ff(s: &[u8]) -> Option<usize> {
 }
 
 /// MSB-first bit reader over unstuffed data; reads past the end yield
-/// zeros, as in libjpeg.
+/// zeros, as in libjpeg. Bits are kept left-aligned in a 64-bit
+/// accumulator that is refilled eight bytes at a time without branches.
 #[derive(Clone, Copy)]
 pub(crate) struct Bits<'a> {
     data: &'a [u8],
-    /// Position in bits.
-    pub pos: usize,
+    /// Next byte to load.
+    next: usize,
+    /// Valid bits, left-aligned; everything below them is zero.
+    buf: u64,
+    /// Number of valid bits in `buf`.
+    n: u32,
 }
 
 impl<'a> Bits<'a> {
     pub fn new(data: &'a [u8], pos: usize) -> Self {
-        Bits { data, pos }
+        let mut b = Bits {
+            data,
+            next: pos >> 3,
+            buf: 0,
+            n: 0,
+        };
+        b.refill();
+        b.skip((pos & 7) as u32);
+        b
     }
 
-    /// The next 57 or more bits, left-aligned.
+    /// Position in bits.
     #[inline(always)]
-    pub fn peek(&self) -> u64 {
-        let i = self.pos >> 3;
-        match self.data.get(i..i + 8) {
-            Some(b) => u64::from_be_bytes(b.try_into().unwrap()) << (self.pos & 7),
-            None => self.peek_tail(),
-        }
+    pub fn pos(&self) -> usize {
+        self.next * 8 - self.n as usize
+    }
+
+    #[inline(always)]
+    fn refill(&mut self) {
+        let w = match self.data.get(self.next..self.next + 8) {
+            Some(b) => u64::from_be_bytes(b.try_into().unwrap()),
+            None => self.load_tail(),
+        };
+        self.buf |= w >> self.n;
+        let bytes = (63 - self.n) >> 3;
+        self.next += bytes as usize;
+        self.n += bytes * 8;
     }
 
     #[cold]
-    fn peek_tail(&self) -> u64 {
-        let i = self.pos >> 3;
+    fn load_tail(&self) -> u64 {
         let mut b = [0u8; 8];
-        if let Some(rest) = self.data.get(i..) {
+        if let Some(rest) = self.data.get(self.next..) {
             b[..rest.len()].copy_from_slice(rest);
         }
-        u64::from_be_bytes(b) << (self.pos & 7)
+        u64::from_be_bytes(b)
     }
 
+    /// The next 32 or more bits, left-aligned.
+    #[inline(always)]
+    pub fn peek(&mut self) -> u64 {
+        if self.n < 32 {
+            self.refill();
+        }
+        self.buf
+    }
+
+    /// Consumes `n` bits; at most what the last `peek` returned.
     #[inline(always)]
     pub fn skip(&mut self, n: u32) {
-        self.pos += n as usize;
+        self.buf <<= n;
+        self.n -= n;
     }
 
     /// Reads `n` bits (0 ≤ n ≤ 16).
@@ -116,7 +147,7 @@ impl<'a> Bits<'a> {
     pub fn get(&mut self, n: u32) -> u32 {
         // Two shifts so that n = 0 yields 0.
         let v = ((self.peek() >> 1) >> (63 - n)) as u32;
-        self.pos += n as usize;
+        self.skip(n);
         v
     }
 }
@@ -172,12 +203,35 @@ mod tests {
         assert_eq!(b.get(1), 1);
         assert_eq!(b.get(2), 0b01);
         assert_eq!(b.get(13), 0b0_0000_1111_1111);
-        assert_eq!(b.pos, 16);
+        assert_eq!(b.pos(), 16);
         assert_eq!(b.get(8), 0x0F);
         // Past the end: zeros.
         let mut b = Bits::new(&data[..3], 20);
         assert_eq!(b.get(4), 0xF);
         assert_eq!(b.get(16), 0);
+        assert_eq!(b.get(16), 0);
+        assert_eq!(b.pos(), 56);
+    }
+
+    #[test]
+    fn long_runs_of_small_reads_track_position() {
+        let data: Vec<u8> = (0..64u8).map(|i| i.wrapping_mul(37)).collect();
+        let mut b = Bits::new(&data, 3);
+        let mut pos = 3;
+        for i in 0..200u32 {
+            let n = i % 17;
+            let want = {
+                // Reference: bit by bit.
+                (0..n).fold(0u32, |acc, j| {
+                    let p = pos + j as usize;
+                    let bit = data.get(p / 8).map_or(0, |&byte| (byte >> (7 - p % 8)) & 1);
+                    (acc << 1) | bit as u32
+                })
+            };
+            assert_eq!(b.get(n), want, "read {i}");
+            pos += n as usize;
+            assert_eq!(b.pos(), pos);
+        }
     }
 
     #[test]

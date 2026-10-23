@@ -160,7 +160,7 @@ mod tests {
         for want in [7, 8, 9, 10, 7] {
             assert_eq!(h.decode(&mut b).unwrap(), want);
         }
-        assert_eq!(b.pos, 23);
+        assert_eq!(b.pos(), 23);
         // An unassigned 16-bit prefix is an error.
         let bad = encode(&[(0xFFFF, 16)]);
         assert!(h.decode(&mut Bits::new(&bad, 0)).is_err());
@@ -184,7 +184,7 @@ mod tests {
         // with symbol decoding plus extra bits.
         for prefix in 0..FAST_SIZE as u32 {
             let data = encode(&[(prefix, 10)]);
-            let b = Bits::new(&data, 0);
+            let mut b = Bits::new(&data, 0);
             let f = h.ac_fast(b.peek());
             if f == 0 {
                 continue;
@@ -195,7 +195,7 @@ mod tests {
             let v = extend(b2.get(s), s);
             assert_eq!(f >> 16, v);
             assert_eq!((f >> 8) & 0xFF, (rs >> 4) as i32);
-            assert_eq!((f & 0xFF) as usize, b2.pos);
+            assert_eq!((f & 0xFF) as usize, b2.pos());
         }
     }
 }

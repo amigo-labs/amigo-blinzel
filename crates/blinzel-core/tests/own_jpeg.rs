@@ -140,17 +140,35 @@ fn parallel_decoding_matches_turbojpeg() {
 }
 
 #[test]
-fn rejects_progressive_as_unsupported() {
-    let data = encode(
-        64,
-        64,
-        EncodeOptions {
-            progressive: true,
-            ..Default::default()
-        },
-    );
-    let info = blinzel_jpeg::parse(&data).unwrap();
-    assert!(!blinzel_jpeg::is_supported(&info));
+fn matches_turbojpeg_for_progressive() {
+    for (w, h) in [(333, 217), (17, 9), (1200, 900)] {
+        for sub in [444, 422, 420] {
+            let opts = EncodeOptions {
+                quality: 90,
+                subsampling: sub,
+                progressive: true,
+                ..Default::default()
+            };
+            let data = encode(w, h, opts);
+            check(&format!("progressive {w}x{h} {sub}"), &data);
+            if h >= 900 {
+                // The IDCT runs in bands of MCU rows.
+                check_threads(&format!("progressive {w}x{h} {sub} threads 4"), &data, 4);
+            }
+        }
+    }
+    let opts = EncodeOptions {
+        gray: true,
+        progressive: true,
+        ..Default::default()
+    };
+    check("progressive gray", &encode(320, 240, opts));
+    let opts = EncodeOptions {
+        progressive: true,
+        restart_rows: 2,
+        ..Default::default()
+    };
+    check("progressive restart", &encode(640, 480, opts));
 }
 
 #[test]

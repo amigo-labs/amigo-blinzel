@@ -37,7 +37,7 @@ pub fn set_thread_init(f: fn()) {
     let _ = THREAD_INIT.set(f);
 }
 
-fn thread_init() {
+pub(crate) fn thread_init() {
     if let Some(f) = THREAD_INIT.get() {
         f();
     }

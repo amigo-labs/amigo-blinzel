@@ -1,10 +1,12 @@
-//! Sequential Huffman JPEG decoding into YCbCr planes (milestone M3). The
+//! Huffman JPEG decoding into YCbCr planes (milestone M3): frame setup and
+//! the sequential scan loop; progressive files go to `progressive`. The
 //! output is byte-identical with libjpeg-turbo's
 //! `tj3DecompressToYUVPlanes8` at the same DCT scale.
 
 use crate::bits::unstuff;
 use crate::huffman::Huffman;
 use crate::parallel;
+use crate::progressive;
 use crate::scan::{Scan, ScanComp};
 use crate::{Coding, Error, JpegInfo, MAX_COMPONENTS, Process, Segments, parse};
 
@@ -46,16 +48,16 @@ pub fn is_supported(info: &JpegInfo) -> bool {
         && info.coding == Coding::Huffman
         && matches!(
             info.process,
-            Process::Baseline | Process::ExtendedSequential
+            Process::Baseline | Process::ExtendedSequential | Process::Progressive
         )
 }
 
 /// Frame geometry: MCU grid and per-component sizes.
-struct Geometry {
-    mcus_x: u32,
-    mcus_y: u32,
+pub(crate) struct Geometry {
+    pub mcus_x: u32,
+    pub mcus_y: u32,
     /// Per component: sampling factors and size in samples.
-    comps: Vec<(u32, u32, u32, u32)>,
+    pub comps: Vec<(u32, u32, u32, u32)>,
 }
 
 impl Geometry {
@@ -100,16 +102,16 @@ pub fn plane_layouts(info: &JpegInfo, scale: u32) -> Vec<PlaneLayout> {
 }
 
 #[derive(Default)]
-struct Tables {
+pub(crate) struct Tables {
     /// Quantization tables in zigzag order.
-    quant: [Option<[i32; 64]>; 4],
-    dc: [Option<Box<Huffman>>; 4],
-    ac: [Option<Box<Huffman>>; 4],
-    restart_interval: u32,
+    pub quant: [Option<[i32; 64]>; 4],
+    pub dc: [Option<Box<Huffman>>; 4],
+    pub ac: [Option<Box<Huffman>>; 4],
+    pub restart_interval: u32,
 }
 
 impl Tables {
-    fn read_dqt(&mut self, mut p: &[u8]) -> Result<(), Error> {
+    pub fn read_dqt(&mut self, mut p: &[u8]) -> Result<(), Error> {
         while let Some((&pq_tq, rest)) = p.split_first() {
             let (wide, id) = (pq_tq >> 4 != 0, (pq_tq & 15) as usize);
             let n = if wide { 128 } else { 64 };
@@ -130,7 +132,7 @@ impl Tables {
         Ok(())
     }
 
-    fn read_dht(&mut self, mut p: &[u8]) -> Result<(), Error> {
+    pub fn read_dht(&mut self, mut p: &[u8]) -> Result<(), Error> {
         while p.len() >= 17 {
             let (class, id) = (p[0] >> 4, (p[0] & 15) as usize);
             let counts: [u8; 16] = p[1..17].try_into().unwrap();
@@ -151,11 +153,11 @@ impl Tables {
 }
 
 /// What a scan is resolved against.
-struct Frame<'a> {
-    info: &'a JpegInfo,
-    geo: &'a Geometry,
-    layouts: &'a [PlaneLayout],
-    scale: u32,
+pub(crate) struct Frame<'a> {
+    pub info: &'a JpegInfo,
+    pub geo: &'a Geometry,
+    pub layouts: &'a [PlaneLayout],
+    pub scale: u32,
 }
 
 /// Resolves a sequential scan header (payload `p`, entropy-coded data from
@@ -246,7 +248,7 @@ pub fn decode_planes(
 ) -> Result<usize, Error> {
     let info = parse(data)?;
     if !is_supported(&info) {
-        return Err(Error::Unsupported("not 8-bit sequential Huffman"));
+        return Err(Error::Unsupported("not 8-bit Huffman"));
     }
     if !SCALES.contains(&scale) {
         return Err(Error::Unsupported("DCT scale"));
@@ -264,6 +266,9 @@ pub fn decode_planes(
         layouts: &layouts,
         scale,
     };
+    if info.process == Process::Progressive {
+        return progressive::decode(data, &frame, planes, threads);
+    }
     let mut tables = Tables::default();
     let mut pos = 0;
     let mut scans = 0;

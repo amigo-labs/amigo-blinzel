@@ -3,8 +3,9 @@
 //! The marker parser reads everything up to the first scan without touching
 //! entropy-coded data, which is all the viewer needs to size the window,
 //! pick a DCT scale and find embedded previews (EXIF, MPF) before a single
-//! pixel is decoded. The decoder (milestone M3) turns sequential Huffman
-//! JPEGs into YCbCr planes, byte-identical with libjpeg-turbo.
+//! pixel is decoded. The decoder (milestone M3) turns 8-bit Huffman JPEGs,
+//! sequential and progressive, into YCbCr planes, byte-identical with
+//! libjpeg-turbo.
 
 #![forbid(unsafe_code)]
 
@@ -13,6 +14,7 @@ mod decoder;
 mod huffman;
 mod idct;
 mod parallel;
+mod progressive;
 mod scan;
 
 use std::fmt;
