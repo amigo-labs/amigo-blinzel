@@ -611,7 +611,9 @@ impl App {
         let may_animate = self.probes.get(&cur.cache_id).is_some_and(|p| {
             matches!(
                 p.format,
-                blinzel_core::format::Format::Gif | blinzel_core::format::Format::WebP
+                blinzel_core::format::Format::Gif
+                    | blinzel_core::format::Format::WebP
+                    | blinzel_core::format::Format::Jxl
             )
         });
         if may_animate && !self.animations.contains_key(&cur.cache_id) {
