@@ -21,6 +21,7 @@ pub mod lut;
 pub mod natsort;
 pub mod pixel;
 pub mod preview;
+pub mod raw;
 pub mod sched;
 pub mod selection;
 pub mod settings;

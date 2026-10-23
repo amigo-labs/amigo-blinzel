@@ -8,6 +8,7 @@ pub mod jpeg;
 pub mod jxl;
 pub mod own_jpeg;
 pub mod png;
+pub mod tiff;
 pub mod webp;
 
 use std::fmt;
@@ -101,6 +102,12 @@ impl Probe {
     pub fn oriented_size(&self) -> (u32, u32) {
         self.orientation.oriented_size(self.width, self.height)
     }
+
+    /// A camera raw with embedded previews: its pixels need the platform
+    /// decoder, which develops it in seconds.
+    pub fn is_raw(&self) -> bool {
+        matches!(self.format, Format::Tiff | Format::Raw) && !self.previews.is_empty()
+    }
 }
 
 /// Validates dimensions reported by an external decoder.
@@ -165,6 +172,12 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
             let ((w, h), orientation, icc) = jxl::info(data)?;
             (w, h, orientation, Vec::new(), icc)
         }
+        Format::Tiff => match tiff::info(data) {
+            Ok(((w, h), orientation, icc)) => (w, h, orientation, Vec::new(), icc),
+            Err(DecodeError::Unsupported(_)) => raw_probe(data, format)?,
+            Err(e) => return Err(e),
+        },
+        Format::Raw => raw_probe(data, format)?,
         other => return Err(DecodeError::Unsupported(other)),
     };
     check_size(width as u64, height as u64)?;
@@ -176,6 +189,24 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
         previews,
         icc,
     })
+}
+
+/// Width, height, orientation, previews and profile, as probes read them.
+type Header = (
+    u32,
+    u32,
+    Orientation,
+    Vec<EmbeddedPreview>,
+    Option<crate::icc::Profile>,
+);
+
+/// Camera raws: size, orientation and embedded previews read natively; the
+/// sensor data stays with the platform decoder. Without previews the
+/// platform probes too.
+fn raw_probe(data: &[u8], format: Format) -> Result<Header> {
+    let info = crate::raw::probe(data).ok_or(DecodeError::Unsupported(format))?;
+    let (w, h) = info.image_size().ok_or(DecodeError::Unsupported(format))?;
+    Ok((w, h, info.orientation, info.previews, None))
 }
 
 /// Decodes `data` (a whole file) as requested on the calling thread.
@@ -209,6 +240,7 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::Bmp => finish(bmp::decode(data)?, req),
         Format::WebP => finish(webp::decode(data)?, req),
         Format::Jxl => finish(jxl::decode(data, threads)?, req),
+        Format::Tiff => finish(tiff::decode(data, threads)?, req),
         other => Err(DecodeError::Unsupported(other)),
     }
 }

@@ -20,6 +20,7 @@ gif.workspace = true
 image-webp.workspace = true
 jxl-oxide.workspace = true
 jxl-render.workspace = true
+tiff.workspace = true
 ed25519-compact.workspace = true
 
 [dev-dependencies]
