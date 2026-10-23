@@ -3,6 +3,8 @@
 //! output is byte-identical with libjpeg-turbo's
 //! `tj3DecompressToYUVPlanes8` at the same DCT scale.
 
+use std::sync::Arc;
+
 use crate::bits::unstuff;
 use crate::huffman::Huffman;
 use crate::parallel;
@@ -105,8 +107,10 @@ pub fn plane_layouts(info: &JpegInfo, scale: u32) -> Vec<PlaneLayout> {
 pub(crate) struct Tables {
     /// Quantization tables in zigzag order.
     pub quant: [Option<[i32; 64]>; 4],
-    pub dc: [Option<Box<Huffman>>; 4],
-    pub ac: [Option<Box<Huffman>>; 4],
+    /// Shared so progressive scans can keep tables that later DHT
+    /// segments replace.
+    pub dc: [Option<Arc<Huffman>>; 4],
+    pub ac: [Option<Arc<Huffman>>; 4],
     pub restart_interval: u32,
 }
 
@@ -140,7 +144,7 @@ impl Tables {
             if class > 1 || id > 3 || p.len() < 17 + total {
                 return Err(Error::BadSegment(0xC4));
             }
-            let table = Huffman::new(&counts, &p[17..17 + total])?;
+            let table = Arc::from(Huffman::new(&counts, &p[17..17 + total])?);
             if class == 0 {
                 self.dc[id] = Some(table);
             } else {
