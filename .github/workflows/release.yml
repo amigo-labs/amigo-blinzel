@@ -1,0 +1,108 @@
+name: Release
+
+# A tag v<version> builds both architectures on GitHub-hosted runners (SignPath
+# checks the build origin), signs them with SignPath when configured, writes
+# SHA256SUMS signed with our own Ed25519 key and creates a draft release.
+#
+# Needed (docs/PLAN.md, section 14):
+#   secret   RELEASE_SIGNING_KEY       Ed25519 seed (blinzel-release keygen)
+#   secret   SIGNPATH_API_TOKEN        optional until SignPath is set up
+#   variable SIGNPATH_ORGANIZATION_ID  optional; signing runs only when set
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: windows-2025
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: ilammy/setup-nasm@v1
+      - name: Tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v$version"; exit 1; }
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p blinzel-app
+      - name: Name the setup executable
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/${{ matrix.target }}/release/blinzel.exe dist/amigo-blinzel-setup-${{ matrix.arch }}.exe
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: unsigned-${{ matrix.arch }}
+          path: dist/amigo-blinzel-setup-${{ matrix.arch }}.exe
+      - name: Sign with SignPath
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: amigo-blinzel
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+      - name: Keep the signed executable
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: bash
+        run: cp signed/amigo-blinzel-setup-${{ matrix.arch }}.exe dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup-${{ matrix.arch }}
+          path: dist/amigo-blinzel-setup-${{ matrix.arch }}.exe
+
+  publish:
+    name: Checksums and draft release
+    needs: build
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: setup-*
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        shell: bash
+        working-directory: dist
+        run: sha256sum amigo-blinzel-setup-*.exe > SHA256SUMS && cat SHA256SUMS
+      - name: Sign SHA256SUMS
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY secret is missing"; exit 1; }
+          cargo run --release -p blinzel-release -- sign dist/SHA256SUMS dist/SHA256SUMS.sig
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --draft --title "amigo-blinzel ${GITHUB_REF_NAME#v}" \
+            --generate-notes dist/amigo-blinzel-setup-*.exe dist/SHA256SUMS dist/SHA256SUMS.sig

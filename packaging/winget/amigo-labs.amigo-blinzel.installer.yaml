@@ -1,0 +1,45 @@
+# Installer manifest: the setup executable is the viewer itself and
+# installs per user without admin rights.
+PackageIdentifier: amigo-labs.amigo-blinzel
+PackageVersion: "{{VERSION}}"
+MinimumOSVersion: 10.0.26100.0
+InstallerType: exe
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+InstallerSwitches:
+  Silent: --install --silent
+  SilentWithProgress: --install --silent
+UpgradeBehavior: install
+# The "Installed apps" entry the setup writes (HKCU\...\Uninstall\amigo-blinzel).
+ProductCode: amigo-blinzel
+AppsAndFeaturesEntries:
+  - DisplayName: amigo-blinzel
+    Publisher: amigo-labs
+    ProductCode: amigo-blinzel
+FileExtensions:
+  - jpg
+  - jpeg
+  - jpe
+  - jfif
+  - png
+  - gif
+  - bmp
+  - tif
+  - tiff
+  - webp
+  - heic
+  - heif
+  - avif
+  - jxl
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/amigo-labs/amigo-blinzel/releases/download/v{{VERSION}}/amigo-blinzel-setup-x64.exe
+    InstallerSha256: "{{SHA256_X64}}"
+  - Architecture: arm64
+    InstallerUrl: https://github.com/amigo-labs/amigo-blinzel/releases/download/v{{VERSION}}/amigo-blinzel-setup-arm64.exe
+    InstallerSha256: "{{SHA256_ARM64}}"
+ManifestType: installer
+ManifestVersion: 1.9.0

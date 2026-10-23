@@ -580,6 +580,30 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             }
             vec![]
         }
+        Action::CheckUpdates => {
+            crate::update::check_now(hwnd, WM_NOTICE);
+            vec![]
+        }
+        Action::About => {
+            use blinzel_i18n::{Msg, tr, trf};
+            let text = crate::platform::wide(trf(
+                Msg::AboutBody,
+                &[
+                    ("version", &crate::setup::version()),
+                    ("url", &crate::setup::install::URL),
+                ],
+            ));
+            let caption = crate::platform::wide(tr(Msg::MenuAbout));
+            unsafe {
+                MessageBoxW(
+                    Some(hwnd),
+                    windows::core::PCWSTR(text.as_ptr()),
+                    windows::core::PCWSTR(caption.as_ptr()),
+                    MB_ICONINFORMATION | MB_OK,
+                );
+            }
+            vec![]
+        }
         Action::Close => {
             let clip = with_app(|a| {
                 crate::settings_store::save(&a.settings);

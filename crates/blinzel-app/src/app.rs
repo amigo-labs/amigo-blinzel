@@ -55,6 +55,8 @@ pub enum Action {
     Recycle(PathBuf),
     /// Ask for a file name, then save the cutout in the background.
     SaveCutout(SaveJob),
+    CheckUpdates,
+    About,
     Close,
     Activate,
     Uncloak,
@@ -626,6 +628,7 @@ impl App {
         if showed_image && !self.first_image_shown {
             self.first_image_shown = true;
             timing::mark("first_present");
+            crate::update::on_first_frame();
             if self.cloaked {
                 actions.push(Action::Uncloak);
             }
@@ -1139,6 +1142,8 @@ impl App {
                 vec![]
             }
             Cmd::Exit => vec![Action::Close],
+            Cmd::CheckUpdates => vec![Action::CheckUpdates],
+            Cmd::About => vec![Action::About],
             Cmd::SaveCutout => match self.save_job() {
                 Some(job) => vec![Action::SaveCutout(job)],
                 None => vec![],

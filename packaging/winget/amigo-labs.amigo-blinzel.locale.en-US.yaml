@@ -1,0 +1,16 @@
+PackageIdentifier: amigo-labs.amigo-blinzel
+PackageVersion: "{{VERSION}}"
+PackageLocale: en-US
+Publisher: amigo-labs
+PublisherUrl: https://github.com/amigo-labs
+PackageName: amigo-blinzel
+PackageUrl: https://github.com/amigo-labs/amigo-blinzel
+License: "{{LICENSE}}"
+ShortDescription: Fast image viewer for Windows 11
+Description: Opens and pages through images faster than the alternatives; frameless, no toolbars, everything in one menu.
+Tags:
+  - image-viewer
+  - jpeg
+  - photo
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0
