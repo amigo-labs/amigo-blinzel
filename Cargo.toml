@@ -24,6 +24,7 @@ gif = "0.14"
 image-webp = "0.2.4"
 jxl-oxide = "0.12.6"
 jxl-render = "0.12.4"
+tiff = { version = "0.11.3", default-features = false, features = ["deflate", "lzw"] }
 zune-jpegxl = "0.5.2"
 # Verifies our own signature of release checksums (self-updater).
 ed25519-compact = { version = "2.1", default-features = false }

@@ -218,9 +218,17 @@ fn webp_via_wic(data: &[u8]) -> bool {
     }
 }
 
+/// Benchmark gate for TIFF: native decoding wins only by decoding strips
+/// in parallel; with one thread or one strip WIC is as fast or faster.
+fn tiff_via_wic(data: &[u8], threads: usize) -> bool {
+    use blinzel_core::format::{Format, detect};
+    detect(data) == Format::Tiff && (threads < 2 || blinzel_core::decode::tiff::strips(data) < 2)
+}
+
 /// Native decoding first, WIC for everything else (and for JPEGs the
-/// native path rejects, e.g. 12-bit). Lossy WebP stills go to WIC once
-/// its codec is loaded (benchmark gate, see `WEBP_CODEC`).
+/// native path rejects, e.g. 12-bit). Where WIC won the benchmark gate it
+/// goes first: lossy WebP stills once its codec is loaded (`WEBP_CODEC`),
+/// TIFFs that cannot decode in parallel.
 pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
     decode_any_with(data, req, 1)
 }
@@ -228,13 +236,16 @@ pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
 /// [`decode_any`] with up to `threads` threads for the native decoders that
 /// parallelize (JPEG); for the image the user waits for.
 pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
-    if webp_via_wic(data)
-        && let Ok(img) = blinzel_core::decode::guard(|| decode(data, req))
-    {
-        return Ok(img);
+    let wic = || blinzel_core::decode::guard(|| decode(data, req));
+    if webp_via_wic(data) || tiff_via_wic(data, threads) {
+        return match wic() {
+            Ok(img) => Ok(img),
+            // Native as the fallback; WIC's error if both fail.
+            Err(e) => blinzel_core::decode::decode_with(data, req, threads).map_err(|_| e),
+        };
     }
     match blinzel_core::decode::decode_with(data, req, threads) {
-        Err(DecodeError::Unsupported(_)) => blinzel_core::decode::guard(|| decode(data, req)),
+        Err(DecodeError::Unsupported(_)) => wic(),
         r => r,
     }
 }
