@@ -1,5 +1,6 @@
 //! Direct3D 11 rendering.
 
+pub mod atlas;
 pub mod device;
 pub mod renderer;
 pub mod target;

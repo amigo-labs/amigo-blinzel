@@ -47,8 +47,8 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Weg zur GPU | RGBA vom Decoder | YCbCr-Planes, Farbkonvertierung im Shader | ✅ gemessen: 24 MP 118 statt 147 ms, 45 MP 190 statt 410 ms |
 | PNG | zune-png, png | `png` + eigene fusionierte RGBA-Expansion | ✅ 1,9× (Foto) bzw. 3,2× (Screenshot) schneller als zune-png |
 | Speicher | System-Allocator | committed Pufferpool | ✅ 96 MB: 0,6 ms statt 40 ms |
-| Thumbnail-Skalierung | fast_image_resize | DCT 1/8 + SIMD-Reducer / GPU | ⬜ M4 |
-| Thumbnail-Speicher | SQLite | eigene Pack-Datei | ⬜ M4 |
+| Thumbnail-Skalierung | Windows-Thumbnail-Provider (`IShellItemImageFactory`) | DCT 1/8 + Flächenmittelung je YCbCr-Ebene | ✅ 200 12-MP-JPEGs, 16 Threads: 287/s statt 18/s |
+| Thumbnail-Speicher | Windows-Thumbnail-Cache (`thumbcache_*.db`) | eigene Pack-Datei | ✅ 200 aus dem Cache: 23,6 ms statt 432 ms (CPU-Seite, ohne Atlas-Upload) |
 | Verzeichnis | FindFirstFileExW | NtQueryDirectoryFileEx | ⬜ messen (10k-Ordner im App-Bench) |
 | SIMD-Stufen | Basis x86-64-v2 | Laufzeit-Dispatch je Kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ gemessen: keine Stufe bringt ≥ 10 % auf einem Hot Path, daher kein Dispatch ([Abschnitt 15](#simd-stufen)) |
 
@@ -157,7 +157,28 @@ Reihenfolge der Stufen:
 - 🟡 **Ansichtsmodi** (1/2/3), Zoom um den Cursor (Rad, +/−, 0), Pan (Maus, Pfeile bei Überlauf), Vollbild (F11, Eingabe, Doppelklick), Drehen nur in der Ansicht (R/L).
 - 🟡 Modus 1 („Originalgröße“): Das Fenster folgt jedem Bild, begrenzt auf den Arbeitsbereich und um die Mitte zentriert.
 - 🟡 Leerer Start zeigt einen Hinweis; Drag & Drop, Strg+O, Entf (Papierkorb), Maus-Zurück/Vor.
-- ⬜ Filmstreifen und Raster (M4).
+- 🟡 Filmstreifen (T) und Raster (G), siehe unten.
+
+### Thumbnails (M4)
+
+- **Erzeugung** (`blinzel_core::thumb`): Kante 256 px (Explorer-Größe; bei 150 % Skalierung reicht das für 160-px-Kacheln).
+  - Quelle ist die kleinste, die die Kachel abdeckt: eingebettete Vorschau (EXIF/MPF), wenn sie groß genug ist und das Seitenverhältnis stimmt (EXIF-Thumbnails haben oft Balken), sonst das Bild selbst mit DCT-Skalierung (JPEG bis 1/8).
+  - Ein Thread je Bild, viele Bilder parallel auf dem Hintergrund-Pool; die Ansicht hat Vorrang.
+  - Verkleinern mit exakter Flächenmittelung (separabler Box-Filter mit Bruchteilgewichten), Ausgabe BGRA; die EXIF-Orientierung wird beim Zeichnen angewandt.
+- **Cache** (Benchmark-Gate gegen den Windows-Thumbnail-Cache `IShellItemImageFactory`): eigene Pack-Datei unter `%LOCALAPPDATA%migo-blinzel	humbs\`.
+  - `thumbs.pack`: angehängte Einträge (JPEG, Qualität 85, ca. 10–15 KB je Thumbnail).
+  - `thumbs.idx`: Log fester Datensätze (Pfad-Hash, Größe und Änderungszeit der Datei, Offset, Länge, Maße, Orientierung), beim ersten Zugriff in eine Hash-Tabelle geladen.
+  - Ein veralteter Eintrag (Größe oder Zeit geändert) wird neu erzeugt. Über 1 GB beginnt eine neue Generation (Pack und Index werden ersetzt).
+  - Mehrere Instanzen: Anhängen unter einem benannten Mutex; was eine andere Instanz geschrieben hat, sieht man erst beim nächsten Laden (Doppelte schaden nicht).
+- **GPU:** Atlas-Seiten mit 64 Slots für 256er-Thumbnails in YCbCr 4:2:0 (2048² R8 für Y, 1024² R8G8 für Cb/Cr, 6 MB je Seite, höchstens 8 Seiten), LRU; der Shader rechnet nach RGB um. Thumbnails aus dem Cache (JPEG) kommen ohne RGB-Umweg als Ebenen in den Atlas, 1,5 statt 4 Byte je Pixel. Ein Raster mit 200 Kacheln sind 200 kleine Draws.
+- **Oberfläche** (beide standardmäßig aus, im Menü „Ansicht“ und per Taste):
+  - Filmstreifen (T, Einstellung) unten mit den Nachbarn des aktuellen Bildes; das Bild bekommt die Fläche darüber. Klick öffnet, Rad blättert.
+  - Raster (G) über das ganze Fenster für den Ordner: Klick wählt, Doppelklick, Eingabe oder Leertaste öffnet, Pfeile/Bild auf/ab/Pos1/Ende bewegen die Auswahl, Rad scrollt, Esc oder G schließt.
+  - Angefordert wird, was sichtbar ist, dann die nächste und die vorige Seite; der Pool läuft mit normaler Priorität, das angezeigte Bild decodiert darüber.
+- **Messung** (`blinzel-bench thumbs <dir> [--count N] [--threads T]`): kalt (ohne Cache) Thumbnails pro Sekunde über einen Ordner mit 12-MP-JPEGs mit Sensorrauschen (ca. 4 MB je Datei), warm 200 Kacheln aus dem Cache. Ziele aus Abschnitt 12: kalt ≥ 150/s, 200 aus dem Cache ≤ 30 ms.
+- **Stand (Ryzen 7 PRO 6850H, 16 Threads):** kalt 287/s (1 Thread: 26/s), Speichern 1,1–1,3 ms je Thumbnail (12,6 KB), warm 200 in 23,6 ms (1 Thread: 0,9 ms je Thumbnail). Erst die Umrechnung je Ebene auf Zielgröße brachte das: `Image::to_bgra` (exakt, Float, bilineare Chroma) kostete 1,8 ms je 256er-Thumbnail und 15 ms je 1/8-Decode.
+- Zum Vergleich auf denselben Dateien der Windows-Thumbnail-Provider und -Cache: kalt 18/s, warm 432–446 ms für 200.
+- **Ende zu Ende in der App** (`blinzel --bench`, `thumb_grid_200`: Cache öffnen, 200 lesen und decodieren, in den Atlas laden, Raster zeichnen, GPU fertig): **16 ms** im Median (Ziel ≤ 30 ms). Mit BGRA-Atlas waren es 37–69 ms; das Hochladen und die Umrechnung nach RGB machten den Unterschied.
 - ⬜ Fensterposition und -größe merken.
 
 ## 7. Auswahl, Kopieren, Ausschneiden, Speichern
@@ -316,7 +337,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
   - Rohdaten, Versionen und Methodik werden veröffentlicht.
   - Damit sachlich, nachprüfbar und relevant, wie es vergleichende Werbung (UWG §6) verlangt.
 - ⬜ **Zahlen:** Referenzwerte von einer definierten Referenzmaschine (Hardware wird angegeben). CI-Werte nur als Trend.
-- ⬜ **Vergleichstabelle der Funktionen:** Formate, Startzeit, Speicherbedarf, Größe der Installation, Lizenz, Werbung/Telemetrie, ARM64-nativ.
+- 🟡 **Vergleichstabelle der Funktionen** (`compare.html`, DE/EN): Lizenz, Firmennutzung, Werbung, Telemetrie, ARM64, Downloadgröße, Farbprofile, HEIC/AVIF/JPEG XL/WebP/RAW für IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv und Windows Fotos. Stand 23.10.2026, jede Zelle verlinkt ihre Quelle; Unbelegtes steht als „nicht belegt“. Vor der Veröffentlichung einmal von Hand gegenlesen. Startzeit und Speicher kommen aus der Referenzmessung.
 
 ## 12. Meilensteine
 
@@ -326,11 +347,11 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
-| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
+| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
-| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug und Website fertig; offen: Referenzmessung, Funktionstabelle mit Quellen, Cloudflare-Secrets |
+| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |
 
 **Reihenfolge:**
 1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
@@ -516,5 +537,5 @@ Speicher der versteckten Instanz: 50 MB privat nach dem Start, nach Benutzung ca
 **Als Nächstes, in dieser Reihenfolge:**
 1. Bei entsperrtem Bildschirm: Sichtprüfung des GDI-Übergangs, Tray-Menü und Aufwecken ansehen, `blinzel-race` mit Kaltstart und Resident messen.
 2. M6 abschließen: Sichtprüfung von Tray, Aufwecken und Farbmanagement auf einem Monitor mit Wide-Gamut-Profil.
-3. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
-4. M4, M5 wie in Abschnitt 12.
+3. M4: Sichtprüfung von Raster und Filmstreifen; danach Dateinamen unter den Kacheln und ein Raster-Szenario in `blinzel-race`.
+4. M5 wie in Abschnitt 12.

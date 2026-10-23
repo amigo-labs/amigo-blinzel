@@ -27,6 +27,7 @@ use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::SetWindowTextW;
 use windows::core::PCWSTR;
 
+use crate::browse::{Browse, strip_height};
 use crate::chrome::{Button, Chrome};
 use crate::clipboard;
 use crate::color::ColorManager;
@@ -156,6 +157,8 @@ pub struct App {
     pub monitor: isize,
     /// The remembered colour target was checked against Windows.
     color_verified: bool,
+    /// Grid browser and filmstrip.
+    pub browse: Browse,
     pub dpi: u32,
     pub client: (u32, u32),
     direction: isize,
@@ -214,6 +217,7 @@ impl App {
             gpu_luts: HashMap::new(),
             monitor: 0,
             color_verified: false,
+            browse: Browse::default(),
             dpi,
             client,
             direction: 1,
@@ -266,6 +270,7 @@ impl App {
         self.hidden = true;
         self.cloaked = true;
         self.activate_on_uncloak = false;
+        self.browse.reset();
         self.gfx.trim();
         // Also what prefetch jobs still in flight give back later.
         blinzel_core::bufpool::global().set_max_retained(0);
@@ -683,13 +688,29 @@ impl App {
         }?;
         let o = self.orientation_of(&img);
         let oriented = o.oriented_size(img.full_width, img.full_height);
-        let l = compute(
-            oriented,
-            (self.client.0 as f64, self.client.1 as f64),
-            &self.settings.view,
-            &self.view,
-        );
+        let l = compute(oriented, self.view_area(), &self.settings.view, &self.view);
         Some((img, o, l))
+    }
+
+    fn filmstrip_shown(&self) -> bool {
+        self.settings.filmstrip && self.browse.grid.is_none()
+    }
+
+    fn client_f(&self) -> (f64, f64) {
+        (self.client.0 as f64, self.client.1 as f64)
+    }
+
+    /// Where the image is laid out: the client area above the filmstrip.
+    fn view_area(&self) -> (f64, f64) {
+        let strip = if self.filmstrip_shown() {
+            strip_height(self.scale())
+        } else {
+            0.0
+        };
+        (
+            self.client.0 as f64,
+            (self.client.1 as f64 - strip).max(1.0),
+        )
     }
 
     /// Cache id of the image [`Self::displayed`] shows.
@@ -809,7 +830,14 @@ impl App {
             Some(c) => (c.w, c.h),
             None => size,
         };
-        vec![Action::FitWindow { client: size }]
+        let strip = if self.filmstrip_shown() {
+            strip_height(self.scale()) as u32
+        } else {
+            0
+        };
+        vec![Action::FitWindow {
+            client: (size.0, size.1 + strip),
+        }]
     }
 
     // ------------------------------------------------------------ rendering
@@ -823,7 +851,20 @@ impl App {
         self.renderer.begin(&ctx, &rtv, self.swap.size, bg);
         let mut shapes: Vec<Shape> = Vec::new();
         let mut showed_image = false;
-        if let Some((img, o, l)) = self.displayed() {
+        let in_grid = self.browse.grid.is_some();
+        if in_grid {
+            let (client, scale) = (self.client_f(), self.scale());
+            let background = self.settings.background;
+            self.browse.draw_grid(
+                &self.renderer,
+                &ctx,
+                self.hwnd,
+                &self.list,
+                client,
+                scale,
+                background,
+            );
+        } else if let Some((img, o, l)) = self.displayed() {
             let full = (img.full_width, img.full_height);
             let stage = (img.width, img.height);
             let xform = stage_to_client(&l, o, full, stage);
@@ -841,12 +882,27 @@ impl App {
         }
         self.renderer.draw_shapes(&ctx, &shapes);
         if let Some(sel) = self.selection
+            && !in_grid
             && let Some(l) = self.layout()
         {
             self.draw_selection_label(&l, &sel);
         }
-        if !showed_image {
+        if !showed_image && !in_grid {
             self.draw_message();
+        }
+        if self.filmstrip_shown() {
+            let current = self.current.as_ref().and_then(|c| c.index);
+            let (client, scale) = (self.client_f(), self.scale());
+            self.browse.draw_strip(
+                &self.renderer,
+                &ctx,
+                self.hwnd,
+                &self.list,
+                current,
+                client,
+                scale,
+                self.settings.background,
+            );
         }
         self.draw_notice();
         if !self.fullscreen {
@@ -1040,6 +1096,9 @@ impl App {
             }
             return vec![Action::ShowMenu { x: pt.x, y: pt.y }];
         }
+        if let Some(handled) = self.browse_click(p) {
+            return handled;
+        }
         let Some(l) = self.layout() else {
             return vec![];
         };
@@ -1066,7 +1125,78 @@ impl App {
         vec![]
     }
 
+    /// Clicks on the grid (selects) and the filmstrip (opens). `None`
+    /// when `p` is on neither.
+    fn browse_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
+        let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
+        if let Some(state) = &mut self.browse.grid {
+            if let Some(i) = Browse::grid_layout(count, client, scale).hit(p, state.scroll) {
+                state.selected = i;
+                self.invalidate();
+            }
+            return Some(vec![]);
+        }
+        if self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale) {
+            let current = self.current.as_ref().and_then(|c| c.index)?;
+            return Some(
+                match self.browse.hit_strip(p, count, current, client, scale) {
+                    Some(i) if i != current => self.go_to_index(i),
+                    _ => vec![],
+                },
+            );
+        }
+        None
+    }
+
+    /// Double click: opens a grid item; on the filmstrip it does nothing.
+    /// `None` leaves it to the window (full screen).
+    pub fn double_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
+        let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
+        if self.browse.grid.is_some() {
+            return Some(match self.browse.hit_grid(p, count, client, scale) {
+                Some(i) => self.open_from_grid(i),
+                None => vec![],
+            });
+        }
+        (self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale)).then(Vec::new)
+    }
+
+    fn open_from_grid(&mut self, i: usize) -> Vec<Action> {
+        self.browse.grid = None;
+        self.browse.hover = None;
+        let mut actions = self.go_to_index(i);
+        actions.extend(self.fit_window_actions());
+        self.invalidate();
+        actions
+    }
+
+    /// Thumbnails arrived (WM_THUMB).
+    pub fn on_thumbs(&mut self) {
+        if self.browse.on_thumbs(&self.gfx.device, &self.gfx.context) {
+            self.invalidate();
+        }
+    }
+
+    fn update_browse_hover(&mut self, p: (f64, f64)) {
+        let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
+        let hover = if self.browse.grid.is_some() {
+            self.browse.hit_grid(p, count, client, scale)
+        } else if self.filmstrip_shown() {
+            self.current
+                .as_ref()
+                .and_then(|c| c.index)
+                .and_then(|cur| self.browse.hit_strip(p, count, cur, client, scale))
+        } else {
+            None
+        };
+        if hover != self.browse.hover {
+            self.browse.hover = hover;
+            self.invalidate();
+        }
+    }
+
     pub fn mouse_move(&mut self, p: (f64, f64)) {
+        self.update_browse_hover(p);
         let hover = if self.fullscreen {
             None
         } else {
@@ -1121,7 +1251,10 @@ impl App {
 
     /// Cursor shape for a client point.
     pub fn cursor_at(&self, p: (f64, f64), shift: bool) -> CursorKind {
-        if !self.fullscreen && self.chrome().hit(p).is_some() {
+        if self.browse.grid.is_some()
+            || (!self.fullscreen && self.chrome().hit(p).is_some())
+            || (self.filmstrip_shown() && p.1 >= self.view_area().1)
+        {
             return CursorKind::Arrow;
         }
         if let Some(DragState::Pan { .. }) = self.drag {
@@ -1156,7 +1289,24 @@ impl App {
         }
     }
 
-    pub fn wheel(&mut self, p: (f64, f64), delta: i16) {
+    pub fn wheel(&mut self, p: (f64, f64), delta: i16) -> Vec<Action> {
+        let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
+        if let Some(state) = &mut self.browse.grid {
+            let g = Browse::grid_layout(count, client, scale);
+            let rows = -(delta as f64) / 120.0;
+            state.scroll =
+                (state.scroll + rows * (g.cell + g.gap)).clamp(0.0, g.max_scroll(client.1));
+            self.invalidate();
+            return vec![];
+        }
+        if self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale) {
+            return self.step(if delta > 0 { -1 } else { 1 });
+        }
+        self.zoom_wheel(p, delta);
+        vec![]
+    }
+
+    fn zoom_wheel(&mut self, p: (f64, f64), delta: i16) {
         let Some(l) = self.layout() else { return };
         let factor = 1.2f64.powf(delta as f64 / 120.0);
         zoom_at(&mut self.view, &l, p, l.scale * factor);
@@ -1171,6 +1321,14 @@ impl App {
     /// Keyboard. Returns None for keys we do not handle.
     pub fn key(&mut self, vk: u16, ctrl: bool, shift: bool) -> Option<Vec<Action>> {
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
+        if let Some(a) = self.grid_key(vk) {
+            return Some(a);
+        }
+        match VIRTUAL_KEY(vk) {
+            VK_G if !ctrl => return Some(self.command(Cmd::ToggleGrid)),
+            VK_T if !ctrl => return Some(self.command(Cmd::ToggleFilmstrip)),
+            _ => {}
+        }
         let overflow = self.layout().map(|l| l.overflows).unwrap_or(false);
         let pan = |app: &mut App, dx: f64, dy: f64| {
             if let Some(l) = app.layout() {
@@ -1232,6 +1390,35 @@ impl App {
         Some(a)
     }
 
+    /// Keys in the grid: moving the selection, opening, leaving.
+    fn grid_key(&mut self, vk: u16) -> Option<Vec<Action>> {
+        use windows::Win32::UI::Input::KeyboardAndMouse::*;
+        let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
+        let state = self.browse.grid.as_mut()?;
+        let g = Browse::grid_layout(count, client, scale);
+        let page = g.page_rows(client.1) as isize;
+        let i = state.selected;
+        let to = match VIRTUAL_KEY(vk) {
+            VK_LEFT => g.step(i, -1, 0),
+            VK_RIGHT => g.step(i, 1, 0),
+            VK_UP => g.step(i, 0, -1),
+            VK_DOWN => g.step(i, 0, 1),
+            VK_PRIOR => g.step(i, 0, -page),
+            VK_NEXT => g.step(i, 0, page),
+            VK_HOME => 0,
+            VK_END => count.saturating_sub(1),
+            VK_RETURN | VK_SPACE => return Some(self.open_from_grid(i)),
+            VK_ESCAPE | VK_G => {
+                return Some(self.command(Cmd::ToggleGrid));
+            }
+            _ => return None,
+        };
+        state.selected = to;
+        state.scroll = g.reveal(to, state.scroll, client.1);
+        self.invalidate();
+        Some(vec![])
+    }
+
     fn escape(&mut self) -> Vec<Action> {
         if self.drag.take().is_some() {
             self.invalidate();
@@ -1270,6 +1457,8 @@ impl App {
             auto_update: self.settings.auto_update,
             single_instance: self.settings.single_instance,
             color_management: self.settings.color_management,
+            filmstrip: self.settings.filmstrip,
+            grid: self.browse.grid.is_some(),
         }
     }
 
@@ -1394,6 +1583,28 @@ impl App {
                 self.settings.auto_update = !self.settings.auto_update;
                 settings_store::save(&self.settings);
                 vec![]
+            }
+            Cmd::ToggleGrid => {
+                if self.browse.grid.is_some() {
+                    self.browse.grid = None;
+                    self.browse.hover = None;
+                } else {
+                    let current = self.current.as_ref().and_then(|c| c.index).unwrap_or(0);
+                    let (client, scale) = (self.client_f(), self.scale());
+                    self.browse
+                        .open_grid(self.list.len(), current, client, scale);
+                }
+                self.invalidate();
+                vec![]
+            }
+            Cmd::ToggleFilmstrip => {
+                self.settings.filmstrip = !self.settings.filmstrip;
+                settings_store::save(&self.settings);
+                // The image area changed; the window grows or shrinks by the
+                // strip in "fit window to image".
+                self.sized_for = None;
+                self.invalidate();
+                self.fit_window_actions()
             }
             Cmd::ToggleColorManagement => {
                 self.settings.color_management = !self.settings.color_management;

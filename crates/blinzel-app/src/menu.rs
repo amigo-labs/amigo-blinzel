@@ -44,6 +44,8 @@ pub enum Cmd {
     ToggleAutoUpdate,
     ToggleSingleInstance,
     ToggleColorManagement,
+    ToggleFilmstrip,
+    ToggleGrid,
     /// Tray: show the (hidden) window.
     ShowWindow,
     /// Tray: exit for good, also in resident mode.
@@ -86,6 +88,8 @@ impl Cmd {
             Cmd::ShowWindow => 28,
             Cmd::Quit => 29,
             Cmd::ToggleColorManagement => 30,
+            Cmd::ToggleFilmstrip => 31,
+            Cmd::ToggleGrid => 32,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -106,7 +110,7 @@ impl Cmd {
     }
 }
 
-const ALL: [Cmd; 30] = [
+const ALL: [Cmd; 32] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -137,6 +141,8 @@ const ALL: [Cmd; 30] = [
     Cmd::ShowWindow,
     Cmd::Quit,
     Cmd::ToggleColorManagement,
+    Cmd::ToggleFilmstrip,
+    Cmd::ToggleGrid,
 ];
 
 /// State the menu reflects.
@@ -153,6 +159,8 @@ pub struct MenuState {
     pub auto_update: bool,
     pub single_instance: bool,
     pub color_management: bool,
+    pub filmstrip: bool,
+    pub grid: bool,
 }
 
 fn accel(keys: &[&str]) -> String {
@@ -248,6 +256,21 @@ fn build(s: &MenuState) -> Option<HMENU> {
         None,
         s.no_upscale,
         s.mode == ViewMode::FitImageToWindow,
+    );
+    view.separator();
+    view.item(
+        Cmd::ToggleFilmstrip,
+        tr(Msg::ViewFilmstrip),
+        Some("T".into()),
+        s.filmstrip,
+        true,
+    );
+    view.item(
+        Cmd::ToggleGrid,
+        tr(Msg::ViewGrid),
+        Some("G".into()),
+        s.grid,
+        true,
     );
     m.submenu(tr(Msg::MenuView), view);
 

@@ -1,6 +1,7 @@
 //! `blinzel.exe --bench <dir> [--warp] [--json out.json]`: headless timing
 //! of the real pipeline (read → decode → upload → render), of prefetched
-//! navigation at key-repeat speed, and of listing a 10k-file folder.
+//! navigation at key-repeat speed, of listing a 10k-file folder, and of a
+//! grid of 200 thumbnails from the cache.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -217,8 +218,12 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
     }
     let enum_stats = Stats::of(&enum_ms).unwrap();
 
+    // 4. Grid of 200 thumbnails from the cache: read, decode, atlas
+    //    upload, draw, GPU done.
+    let grid = thumb_grid(&gfx, &mut renderer, &target, &list)?;
+
     Ok(format!(
-        "{{\n  \"warp\": {warp},\n  \"device_ms\": {},\n  \"screen\": [{}, {}],\n  \"open\": [\n{}\n  ],\n  \"navigation\": {{\"presses\": {}, \"prefetch_hits\": {}, \"latency\": {}}},\n  \"list_10k\": {}\n}}",
+        "{{\n  \"warp\": {warp},\n  \"device_ms\": {},\n  \"screen\": [{}, {}],\n  \"open\": [\n{}\n  ],\n  \"navigation\": {{\"presses\": {}, \"prefetch_hits\": {}, \"latency\": {}}},\n  \"list_10k\": {},\n  \"thumb_grid_200\": {}\n}}",
         json_num(device_ms),
         SCREEN.0,
         SCREEN.1,
@@ -226,6 +231,82 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
         presses,
         hits,
         nav.json(),
-        enum_stats.json()
+        enum_stats.json(),
+        grid.json()
     ))
+}
+
+/// 200 thumbnails (one image's, under 200 keys) through a freshly opened
+/// cache into the atlas and onto the screen, five times after a warm-up.
+/// The atlas lives on like the app's (its pages exist); each run uploads
+/// under new ids.
+fn thumb_grid(
+    gfx: &Gfx,
+    renderer: &mut Renderer,
+    target: &Offscreen,
+    list: &FileList,
+) -> Result<Stats, String> {
+    use blinzel_core::grid::{Grid, fit_in};
+    use blinzel_core::thumb::{self, EDGE};
+    use blinzel_core::thumbcache::{Key, ThumbCache};
+    const N: usize = 200;
+    let path = list.path(0).ok_or("empty folder")?;
+    let data = io::read_file(&path).map_err(|e| e.to_string())?;
+    let probe = wic::probe_any(&data).map_err(|e| e.to_string())?;
+    let t = thumb::make(&data, &probe, EDGE, &wic::decode_any).map_err(|e| e.to_string())?;
+    let dir = std::env::temp_dir().join(format!("blinzel-bench-grid-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let keys: Vec<Key> = (0..N)
+        .map(|i| Key::new(Path::new(&format!("{i}.jpg")), 1, 1))
+        .collect();
+    {
+        let cache = ThumbCache::open(&dir, 1 << 30).map_err(|e| e.to_string())?;
+        for k in &keys {
+            cache.put(k, &t).map_err(|e| e.to_string())?;
+        }
+    }
+    let threads = threads::cpu_info().performance.max(2);
+    let mut atlas = crate::gfx::atlas::Atlas::new(8);
+    let mut runs = Vec::new();
+    for run in 0..6 {
+        let start = Instant::now();
+        let cache = ThumbCache::open(&dir, 1 << 30).map_err(|e| e.to_string())?;
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let got = std::sync::Mutex::new(vec![None; N]);
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(k) = keys.get(i) else { break };
+                        let th = cache.get_planes(k, [0; 3]);
+                        got.lock().unwrap()[i] = th;
+                    }
+                });
+            }
+        });
+        atlas.begin_frame();
+        let id = |i: usize| (run * N + i) as u64;
+        for (i, th) in got.into_inner().unwrap().into_iter().enumerate() {
+            let th = th.ok_or("cache miss")?;
+            atlas
+                .insert(&gfx.device, &gfx.context, id(i), &th)
+                .map_err(|e| e.message())?;
+        }
+        renderer.begin(&gfx.context, &target.rtv, SCREEN, Rgba(0.1, 0.1, 0.1, 1.0));
+        let g = Grid::new(N, SCREEN.0 as f64, 176.0, 12.0);
+        for i in 0..N {
+            let p = atlas.get(id(i)).ok_or("not in atlas")?;
+            let size = p
+                .orientation
+                .oriented_size(p.size.0 as f64, p.size.1 as f64);
+            renderer.draw_thumb(&gfx.context, &p, &fit_in(&g.cell_rect(i, 0.0), size), 1.0);
+        }
+        target.sync(&gfx.context).map_err(|e| e.message())?;
+        if run > 0 {
+            runs.push(ms(start));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(Stats::of(&runs).unwrap())
 }
