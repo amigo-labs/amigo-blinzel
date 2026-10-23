@@ -7,7 +7,7 @@ Dieses Dokument ist die verbindliche Planung. Am Ende wird jeder Punkt gegen die
 - 🟡 umgesetzt, Verifikation (CI oder manuell unter Windows) steht aus
 - ⬜ offen
 
-Stand: 2026-10-22.
+Stand: 2026-10-23. Der aktuelle Arbeitsstand für die nächste Session steht in [Abschnitt 16](#16-übergabe-nächste-schritte).
 
 ---
 
@@ -318,15 +318,78 @@ Linux-Container, 4 vCPU, ein Kern je Decode, Bench im Schnellmodus:
 | Puffer 96 MB | Pool 0,6 ms; neu 40 ms |
 | `blinzel.exe` (x64, Release, statische CRT) | 1,49 MB (Cross-Build mit clang-cl/lld); 2,5 MB mit MSVC im CI |
 
-Windows-CI (`windows-2025`, ohne GPU, Artefakt `windows-bench-and-exe`), erster Lauf:
+Windows-CI (`windows-2025`, ohne GPU, Artefakt `windows-bench-and-exe`), vor und nach dem libjpeg-turbo-Fix (PR #2):
 
-| Fall | Ergebnis |
-|---|---|
-| JPEG 24 MP, voll | turbojpeg YCbCr 228 ms; zune-jpeg 160 ms |
-| JPEG 24 MP, 1/8 | 195 ms |
-| App: 24 MP öffnen (Decode auf 2250 × 1500) | 240 ms Decode, 2 ms Upload |
-| Blättern mit 30 Tasten/s | 19 von 22 aus dem Prefetch; Median 0 ms, p99 604 ms |
-| Ordner mit 10k Dateien | 9,9 ms |
-| Start bis erstes Present (WARP) | 617 ms, davon 342 ms Decode und ca. 260 ms WARP-Rendering |
+| Fall | vorher | nachher |
+|---|---|---|
+| JPEG 24 MP 4:2:0, turbojpeg YCbCr voll | 228 ms | 93 ms |
+| JPEG 24 MP 4:2:0, 1/8 | 195 ms | 70 ms |
+| JPEG 24 MP 4:4:4 / Graustufen, voll | 284 / 217 ms | 118 / 86 ms |
+| JPEG 45 MP, voll | 423 ms | 175 ms |
+| JPEG 24 MP progressiv, voll | 658 ms | ca. 300 ms |
+| zune-jpeg 24 MP (Vergleich) | 160 ms | 129 ms; turbojpeg jetzt 1,2–1,4× schneller |
+| App: 24 MP öffnen (Decode auf 2250 × 1500) | 240 ms | 87 ms (Upload 1 ms) |
+| Blättern mit 30 Tasten/s, p99 | 604 ms | 240 ms (19 von 22 aus dem Prefetch, Median 0 ms) |
+| Ordner mit 10k Dateien | 9,9 ms | 8,8 ms |
+| Start bis erstes Present | 617 ms | 150 ms, davon 134 ms Decode |
 
-Der C-Teil von libjpeg-turbo war dabei unoptimiert: cmake-rs entfernt unter MSVC mit Visual-Studio-Generator alle `/O`-Flags, MSBuild kompiliert dann mit `/Od`. Behoben durch eine gepatchte Kopie von cmake-rs (`third_party/cmake-rs`, per `[patch.crates-io]`), die CMakes Standard-Flags je Konfiguration behält. libjpeg-turbo baut außerdem als „Release“ (`/O2 /Ob2`). `blinzel-bench run --check` schlägt fehl, falls zune-jpeg den ausgelieferten JPEG-Pfad je wieder schlägt. Die Startzeiten des CI-Runners sind wegen WARP nicht repräsentativ; die Startmessung schreibt deshalb den Adapternamen mit.
+Der Runner hat keine GPU: Die Startmessung meldet `"adapter": "Microsoft Basic Render Driver"`, also Software-Rendering durch Windows. Echte GPU-Startzeiten müssen auf einem Rechner mit Grafikkarte gemessen werden (`blinzel.exe bild.jpg --exit-after-first-frame --json start.json`).
+
+Der C-Teil von libjpeg-turbo war dabei unoptimiert: cmake-rs entfernt unter MSVC mit Visual-Studio-Generator alle `/O`-Flags, MSBuild kompiliert dann mit `/Od`. Behoben durch eine gepatchte Kopie von cmake-rs (`third_party/cmake-rs`, per `[patch.crates-io]`), die CMakes Standard-Flags je Konfiguration behält. libjpeg-turbo baut außerdem als „Release“ (`/O2 /Ob2`). `blinzel-bench run --check` schlägt fehl, falls zune-jpeg den ausgelieferten JPEG-Pfad je wieder schlägt. Die Startmessung schreibt den Adapternamen mit, damit Software-Rendering erkennbar ist.
+
+## 16. Übergabe: nächste Schritte
+
+**Stand (2026-10-23):**
+- PR #1 (M0–M2) ist gemergt.
+- PR #2 „Build libjpeg-turbo optimized on MSVC“ (Branch `ccr-7afcd313-p6h9j3`) ist grün und wartet auf Review. Er enthält:
+  - die gepatchte Kopie von cmake-rs,
+  - `blinzel-bench run --check`,
+  - den Adapternamen in der Startmessung,
+  - die Zahlen oben.
+
+**Als Nächstes: SIMD-Stufen messen (AVX, AVX2).** Gewünscht ist, im Benchmark zu zeigen, was AVX und AVX2 bringen würden.
+
+Ausgangslage:
+- libjpeg-turbo wählt zur Laufzeit selbst AVX2. Bei unserem YCbCr-Pfad betrifft das aber nur die IDCT; der Huffman-Decoder ist skalar.
+- Unser Rust-Code wird nur für SSE2 gebaut und nutzt kein AVX.
+- AVX2 darf nicht vorausgesetzt werden: Windows 11 läuft auch auf Pentium/Celeron ohne AVX (z. B. Gemini Lake).
+
+Schritte, alle in einem PR:
+1. **Baseline x86-64-v2:**
+   - In `.cargo/config.toml` bekommt `[target.x86_64-pc-windows-msvc]` zusätzlich `-C target-cpu=x86-64-v2` (SSE4.2, SSSE3, POPCNT).
+   - Das ist sicher, weil Windows 11 24H2 ohne SSE4.2 und POPCNT nicht startet.
+2. **Kernel-Modul `crates/blinzel-core/src/kernels.rs`:**
+   - Die Hot Loops werden einmal geschrieben (`#[inline(always)]`). Ein Makro erzeugt je Kernel `pub fn name(level: Level, …)` mit Wrappern `#[target_feature(enable = "sse4.2" | "avx" | "avx2,fma")]`.
+   - `Level::available()` prüft per `is_x86_feature_detected!`.
+   - Kernels:
+     - RGB→RGBA und Grau+Alpha→RGBA (heute `expand` in `decode/png.rs`)
+     - RGBA→BGRA
+     - YCbCr→BGRA (heute der Ycc-Zweig von `Image::to_bgra` in `pixel.rs`)
+   - `png.rs` und `pixel.rs` rufen die Kernels mit `Level::Baseline` auf; das Verhalten bleibt gleich.
+   - `pixel::sample_plane` bekommt `#[inline]`.
+   - Ein Test prüft, dass alle Stufen byte-identisch sind.
+3. **Benchmark, Gruppe `simd`, in `crates/blinzel-bench/src/main.rs`:**
+   - **a) libjpeg-turbo je SIMD-Stufe:** Der Bench startet sich als Kindprozess neu (verstecktes Kommando `simd-child <datei>`), jeweils mit `JSIMD_FORCENONE=1`, `JSIMD_FORCESSE2=1` und `JSIMD_FORCEAVX2=1`. libjpeg-turbo liest das nur einmal pro Prozess. Eine AVX-Stufe ohne AVX2 gibt es dort nicht. Gemessen werden auf `jpeg-24mp-420.jpg`:
+     - YCbCr voll
+     - BGRA voll; hier wirken auch Farbumrechnung und Upsampling, also das Maximum von SIMD bei libjpeg-turbo
+     - 1/8
+   - **b) Eigene Kernels je Stufe** (Baseline, SSE4.2, AVX, AVX2+FMA) auf einem 12-MP-Bild aus `testimg`; Ausgabe in ms und als Faktor gegenüber der Baseline.
+   - **c) Obergrenze „alles mit AVX2“:**
+     - CI baut `blinzel-bench` zusätzlich mit `RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=x86-64-v3"` und eigenem `CARGO_TARGET_DIR`, dann läuft `run --quick`.
+     - Neues Kommando `blinzel-bench compare a.json b.json` druckt beide nebeneinander mit Faktor und schreibt das Ergebnis in `$GITHUB_STEP_SUMMARY`.
+   - Ins JSON kommen CPU-Name (cpuid) und die erkannten Features (sse4.2, avx, avx2, avx512f).
+4. **Entscheidung nach den Zahlen:** Bringt eine Stufe auf einem Hot Path ≥ 10 %, wird sie per Laufzeit-Dispatch eingebaut, mit Baseline als Rückfall. Vorher werden die Zahlen dem Nutzer vorgelegt.
+5. **Prüfen:**
+   - `cargo fmt --check`
+   - `cargo clippy --workspace --all-targets -- -D warnings`
+   - `cargo xwin clippy --target x86_64-pc-windows-msvc -p blinzel-app --all-targets -- -D warnings`
+   - `cargo test --workspace`
+   - `cargo run --release -p blinzel-bench -- run testdata/generated --quick --check`; vorher einmal `corpus testdata/generated`.
+
+   Der Linux-Container hat AVX2 und AVX-512, alle Stufen sind dort messbar.
+
+**Danach:**
+- **M3** (eigener paralleler JPEG-Decoder). Die Zahlen oben bestätigen den Hebel:
+  - 1/8 kostet noch 75 % der vollen Decodezeit, weil der Huffman-Teil dominiert.
+  - Progressive JPEGs sind mit ca. 300 ms der langsamste Fall.
+- M7/M8 warten auf die Punkte in Abschnitt 14.
