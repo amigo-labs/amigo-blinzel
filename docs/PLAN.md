@@ -97,7 +97,7 @@ Reihenfolge der Stufen:
 | `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |
 | `blinzel-app` | `blinzel.exe`: Fenster, Chrome, Menü, D3D11-Renderer, Loader, WIC, Zwischenablage, Dialoge, `--bench` | 🟡 |
 | `blinzel-race` | Wettbewerbs-Benchmark (M8): Testbilder mit Farbsignatur, Desktop Duplication auf allen Monitoren, Öffnen/Weiter/Dauerfeuer | 🟡 |
-| `website/` | Website für Cloudflare Workers (M8) | ⬜ |
+| `website/` + `blinzel-site` | Website für Cloudflare Workers (M8): statisch, DE/EN, Diagramme als Inline-SVG aus `website/data/race.json` | 🟡 |
 
 ## 5. Kernprinzipien Start und Blättern
 
@@ -257,11 +257,11 @@ Umsetzung:
 
 ### Website auf Cloudflare Workers
 
-- ⬜ `website/`: statisches HTML/CSS mit minimalem JS, extrem schnell (passend zum Produkt), Deutsch und Englisch.
+- 🟡 `website/`: statisches HTML/CSS mit minimalem JS, extrem schnell (passend zum Produkt), Deutsch und Englisch.
   - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz, Code-Signing-Policy (für SignPath).
   - Charts werden beim Build als Inline-SVG aus den Benchmark-JSONs erzeugt; keine Chart-Library im Browser.
   - Der Download-Link zeigt auf `releases/latest/download/amigo-blinzel-setup-x64.exe` (stabile URL).
-- ⬜ **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml`), per GitHub Action (`cloudflare/wrangler-action`) bei Änderungen an `website/` und bei jedem Release.
+- 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml`), per GitHub Action (`cloudflare/wrangler-action`) bei Änderungen an `website/` und bei jedem Release.
   - Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (bei dir).
   - Zunächst die `workers.dev`-Subdomain; eine eigene Domain kann jederzeit dazukommen.
 
@@ -284,14 +284,14 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | ImageGlass 8.8 | 1,8 s | 0,8 s | alle, langsam |
 | Windows Photos 2026.11 | 1,2 s | 45 ms | 3 gezeigt, Tasten verschluckt |
 
-- ⬜ **Kandidaten:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Fotos; optional JPEGView und qimgv. Jeweils mit Standardeinstellungen; Versionen werden protokolliert.
-- ⬜ **Messgrößen:**
+- 🟡 **Kandidaten:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Fotos; optional JPEGView und qimgv. Jeweils mit Standardeinstellungen; Versionen werden protokolliert.
+- 🟡 **Messgrößen:**
   1. **Öffnen:** Zeit vom Prozessstart bis das Bild sichtbar ist, warm und kalt (Standby-Liste geleert).
      - Erkannt über die Desktop Duplication API (Frame-Zeitstempel `LastPresentTime`).
      - Die Testbilder tragen eine eindeutige Farbsignatur.
   2. **Weiterblättern:** `SendInput` (Pfeil rechts), Zeit bis die Farbsignatur wechselt; einzeln nach Leerlauf (Prefetch-Fall) und als Dauerfeuer mit 30 Hz (wie viele Bilder werden wirklich gezeigt).
   3. **Thumbnails** (ab M4): Zeit bis das Raster eines 1000er-Ordners gefüllt ist, für Viewer mit Raster-Modus.
-- ⬜ **Fairness und Recht:**
+- 🟡 **Fairness und Recht:**
   - Gleiche Maschine, gleiche Dateien, 10 Wiederholungen, Median und p95.
   - Rohdaten, Versionen und Methodik werden veröffentlicht.
   - Damit sachlich, nachprüfbar und relevant, wie es vergleichende Werbung (UWG §6) verlangt.
@@ -310,7 +310,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | ⬜ |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
-| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | ⬜ |
+| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug und Website fertig; offen: Referenzmessung, Funktionstabelle mit Quellen, Cloudflare-Secrets |
 
 **Reihenfolge:**
 1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
@@ -347,7 +347,8 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - ⬜ SignPath-Foundation-Antrag sowie `SIGNPATH_API_TOKEN` (Secret) und die Org-ID (Variable `SIGNPATH_ORGANIZATION_ID`).
 - ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-app/src/update.rs`.
 - ⬜ Cloudflare-Konto: `CLOUDFLARE_API_TOKEN` (Workers bearbeiten) und `CLOUDFLARE_ACCOUNT_ID` als Repo-Secrets; optional eine Domain.
-- ⬜ Referenzmaschine für die Website-Benchmarks festlegen.
+- ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
+- ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
 - ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
 
 ## 15. Messwerte (Stand)
@@ -481,7 +482,9 @@ Der Decode (44 ms bei 1/2) ist nicht der Engpass. Wege, nach Aufwand geordnet:
 2. Erstes Bild ohne Direct3D: ein vorübergehendes Fenster per `UpdateLayeredWindow` mit dem fertig decodierten Bild, bis der Direct3D-Pfad übernimmt. Erwartet ca. 110 ms statt ca. 270 ms.
 3. Resident-Modus (M6): Der warme Prozess zeigt ein neues Bild ohne Prozess- und Device-Start. Nur so ist ≤ 50 ms erreichbar.
 
+**M8 (Branch `m8-race`, PR auf `m7-install` gestapelt):** `blinzel-race` (siehe Abschnitt 11) und die Website: `crates/blinzel-site` baut `website/dist` aus `website/src` (Layout, eine HTML-Datei je Seite und Sprache), `CHANGELOG.md` und `website/data/race.json`; ohne Referenzmessung sagen die Seiten das, statt Zahlen zu zeigen. Strikte CSP ohne Inline-Skript, Handy-Layout geprüft. Deployment über `.github/workflows/website.yml`, sobald die Cloudflare-Secrets da sind.
+
 **Als Nächstes, in dieser Reihenfolge:**
-1. M8 fertigstellen: `website/` (statisch, DE/EN, Charts als Inline-SVG aus den Benchmark-JSONs) und den Deployment-Workflow für Cloudflare Workers hinter den Secrets.
-2. Startzeit nach dem Befund oben (Punkte 1 und 2), dann M6 mit dem Resident-Modus vorziehen. Ohne das verliert amigo-blinzel den Vergleich beim Öffnen, der Kernaussage der Website.
+1. Startzeit nach dem Befund oben: zuerst die Lücke zwischen fertigem Device und erstem Bild schließen, dann ein erstes Bild ohne Direct3D, dann M6 mit dem Resident-Modus.
+2. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
 3. M4, M5 wie in Abschnitt 12.
