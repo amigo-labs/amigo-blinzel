@@ -94,6 +94,7 @@ struct Shared {
     decode_threads: usize,
     /// The first decoded image went to the window for the GDI first frame.
     first_frame_sent: AtomicBool,
+    first_frame_target: Mutex<Option<crate::first_frame::Target>>,
 }
 
 impl Shared {
@@ -149,6 +150,7 @@ impl Loader {
             hwnd: AtomicIsize::new(0),
             decode_threads: decode_threads.max(1),
             first_frame_sent: AtomicBool::new(false),
+            first_frame_target: Mutex::new(None),
         });
         let (s_io, s_cpu) = (shared.clone(), shared.clone());
         let sched = Scheduler::new(
@@ -169,6 +171,11 @@ impl Loader {
             shared,
             results: rx,
         }
+    }
+
+    /// Lets the loader render the GDI first frame itself (see first_frame).
+    pub fn set_first_frame_target(&self, t: crate::first_frame::Target) {
+        *self.shared.first_frame_target.lock().unwrap() = Some(t);
     }
 
     pub fn set_hwnd(&self, hwnd: HWND) {
@@ -288,9 +295,25 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
             && shared.device.device.lock().unwrap().is_none()
             && !shared.first_frame_sent.swap(true, Ordering::Relaxed)
         {
+            // Rendered here, in parallel with the UI thread showing the
+            // window, when the layout does not depend on the image size.
+            let target = *shared.first_frame_target.lock().unwrap();
+            let rendered = target
+                .filter(|t| t.view.mode != blinzel_core::layout::ViewMode::FitWindowToImage)
+                .map(|t| {
+                    let bits = crate::first_frame::render(
+                        &img,
+                        probe.orientation,
+                        t.client,
+                        &t.view,
+                        t.background,
+                    );
+                    (bits, t.client)
+                });
             let ff = Box::new(crate::first_frame::FirstFrame {
                 image: img.clone(),
                 orientation: probe.orientation,
+                rendered,
             });
             let ptr = Box::into_raw(ff);
             blinzel_core::timing::mark("first_frame_posted");

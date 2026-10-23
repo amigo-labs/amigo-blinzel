@@ -280,14 +280,27 @@ pub fn run() -> i32 {
         Ok(h) => h,
         Err(e) => return fatal(&e.message()),
     };
+    prepare_window(hwnd);
+    let mut cr = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut cr);
+    }
+    loader.set_first_frame_target(crate::first_frame::Target {
+        client: (
+            (cr.right - cr.left).max(1) as u32,
+            (cr.bottom - cr.top).max(1) as u32,
+        ),
+        view: settings.view,
+        background: settings.background,
+    });
     // The loader may post the first decoded image from now on.
     loader.set_hwnd(hwnd);
     MAIN_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
-    prepare_window(hwnd);
     unsafe {
         // Still cloaked, so nothing shows yet; but a shown window gets
-        // painted, and the GDI first frame must not wait for this call.
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        // painted. Not activated: activation costs ~20 ms and waits until
+        // an image is on screen.
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
     }
     timing::mark("window_created");
 
@@ -354,6 +367,7 @@ pub fn run() -> i32 {
 
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = SetForegroundWindow(hwnd);
         // Results that arrived before the window existed.
         let _ = PostMessageW(Some(hwnd), WM_LOADED, WPARAM(0), LPARAM(0));
     }
