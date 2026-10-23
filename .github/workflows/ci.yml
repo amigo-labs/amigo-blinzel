@@ -50,6 +50,15 @@ jobs:
         run: cargo run --release -p blinzel-bench -- corpus testdata/generated
       - name: Library vs. own code benchmarks
         run: cargo run --release -p blinzel-bench -- run testdata/generated --check --json bench-libs-windows.json
+      # Upper bound "everything compiled for AVX2". RUSTFLAGS replaces the
+      # rustflags from .cargo/config.toml, so crt-static is repeated.
+      - name: Benchmarks built for x86-64-v3
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static -C target-cpu=x86-64-v3
+          CARGO_TARGET_DIR: target/x86-64-v3
+        run: cargo run --release -p blinzel-bench -- run testdata/generated --quick --json bench-libs-windows-v3.json
+      - name: Compare with x86-64-v3
+        run: cargo run --release -p blinzel-bench -- compare bench-libs-windows.json bench-libs-windows-v3.json
       # blinzel.exe is a GUI-subsystem program: PowerShell would not wait
       # for it without Start-Process -Wait.
       - name: App benchmark (offscreen, WARP)

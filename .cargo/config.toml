@@ -1,5 +1,8 @@
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+# x86-64-v2 (SSE4.2, SSSE3, POPCNT) is safe: Windows 11 24H2 does not start
+# without SSE4.2 and POPCNT. AVX/AVX2 are not (Pentium/Celeron lack them);
+# code that wants them dispatches at run time (blinzel_core::kernels).
+rustflags = ["-C", "target-feature=+crt-static", "-C", "target-cpu=x86-64-v2"]
 
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]

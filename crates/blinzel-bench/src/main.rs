@@ -5,6 +5,10 @@
 //! candidate for each hot path and prints a table (and JSON for CI
 //! artifacts). The numbers decide which implementation ships. `--check`
 //! fails when a shipped implementation is beaten by its yardstick.
+//! `blinzel-bench compare <a.json> <b.json>` puts two runs side by side.
+
+mod compare;
+mod simd;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +27,8 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("corpus") => corpus(&args[1..]),
         Some("run") => run(&args[1..]),
+        Some("compare") => compare::compare(&args[1..]),
+        Some("simd-child") => simd::child(&args[1..]),
         _ => Err(usage()),
     };
     if let Err(e) = result {
@@ -32,7 +38,7 @@ fn main() {
 }
 
 fn usage() -> String {
-    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]".into()
+    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]\n  blinzel-bench compare <a.json> <b.json>".into()
 }
 
 fn flag(args: &[String], name: &str) -> bool {
@@ -366,6 +372,8 @@ fn run(args: &[String]) -> Result<(), String> {
         }
     }
 
+    simd::run(&dir, iters, &mut results)?;
+
     // File-name sorting for a 10k-image folder.
     let names: Vec<String> = (0..10_000)
         .map(|i| format!("IMG_{:05} ({}).JPG", (i * 7919) % 10_000, i % 7))
@@ -525,10 +533,17 @@ fn write_json(path: &Path, results: &[Result_]) -> Result<(), String> {
             )
         })
         .collect();
+    let list = |v: Vec<&str>| {
+        let v: Vec<String> = v.into_iter().map(json_str).collect();
+        format!("[{}]", v.join(", "))
+    };
     let json = format!(
-        "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {cpus},\n  \"results\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {cpus},\n  \"cpu\": {}, \"cpu_features\": {}, \"build_features\": {},\n  \"results\": [\n{}\n  ]\n}}\n",
         json_str(std::env::consts::OS),
         json_str(std::env::consts::ARCH),
+        json_str(&simd::cpu_name()),
+        list(simd::cpu_features()),
+        list(simd::build_features()),
         items.join(",\n")
     );
     fs::write(path, json).map_err(|e| e.to_string())

@@ -12,6 +12,7 @@ pub mod export;
 pub mod filelist;
 pub mod format;
 pub mod geom;
+pub mod kernels;
 pub mod layout;
 pub mod natsort;
 pub mod pixel;
