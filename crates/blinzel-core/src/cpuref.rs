@@ -3,8 +3,11 @@
 //! straight-alpha compositing over the background) so the GPU output can be
 //! checked pixel by pixel in the WARP golden tests.
 
+use std::sync::Arc;
+
 use crate::geom::{Affine, Rect};
 use crate::layout::texels_per_pixel;
+use crate::lut::Lut3d;
 use crate::pixel::{Alpha, Image, PackedFormat, Pixels, Plane, to_u8, ycc_to_rgb};
 
 /// Maximum box-filter taps per axis; must match `MAX_TAPS` in the shader.
@@ -22,6 +25,9 @@ pub struct Frame {
     /// Visible content in stage texel coordinates.
     pub content: Rect,
     pub background: [u8; 3],
+    /// Colour transform for the image (not the background), applied after
+    /// filtering.
+    pub lut: Option<Arc<Lut3d>>,
 }
 
 /// Renders `img` into a tightly packed BGRA frame.
@@ -57,8 +63,12 @@ pub fn render(img: &Image, f: &Frame) -> Vec<u8> {
                 }
                 let nn = (n * n) as f32;
                 let a = acc[3] / nn;
+                let mut c = [acc[0] / nn, acc[1] / nn, acc[2] / nn];
+                if let Some(lut) = &f.lut {
+                    c = lut.apply(c);
+                }
                 for k in 0..3 {
-                    rgb[k] = acc[k] / nn * a + bg[k] * (1.0 - a);
+                    rgb[k] = c[k] * a + bg[k] * (1.0 - a);
                 }
             }
             let o = (y * cw + x) * 4;
@@ -198,6 +208,7 @@ mod tests {
             stage_to_client: stage_to_client(&l, o, full, (img.width, img.height)),
             content: content_in_stage(&l, o, full, (img.width, img.height)),
             background: [10, 20, 30],
+            lut: None,
         }
     }
 

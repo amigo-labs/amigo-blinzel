@@ -95,6 +95,7 @@ pub fn probe(data: &[u8]) -> Result<Probe> {
         height: h,
         orientation: orientation(&frame),
         previews: Vec::new(),
+        icc: None,
     })
 }
 

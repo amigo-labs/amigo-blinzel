@@ -10,15 +10,17 @@
 //! The D3D11 device is free-threaded, so this runs on decode workers.
 
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_SHADER_RESOURCE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE3D_DESC,
     D3D11_USAGE_IMMUTABLE, ID3D11Device, ID3D11ShaderResourceView, ID3D11Texture2D,
+    ID3D11Texture3D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM,
-    DXGI_SAMPLE_DESC,
+    DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_SAMPLE_DESC,
 };
 
 use blinzel_core::geom::Orientation;
+use blinzel_core::lut::Lut3d;
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 
 /// Texels of neighbouring data around each luma/RGBA tile (chroma: half).
@@ -65,6 +67,48 @@ impl GpuImage {
     pub fn is_full_resolution(&self) -> bool {
         self.width == self.full_width && self.height == self.full_height
     }
+}
+
+/// A colour transform as a 3D texture (RGBA16, trilinear).
+#[derive(Clone)]
+pub struct GpuLut {
+    pub srv: ID3D11ShaderResourceView,
+    pub size: u32,
+}
+
+pub fn upload_lut(device: &ID3D11Device, lut: &Lut3d) -> windows::core::Result<GpuLut> {
+    let n = lut.size() as u32;
+    let texels: Vec<[u16; 4]> = lut
+        .nodes()
+        .iter()
+        .map(|c| [c[0], c[1], c[2], 65535])
+        .collect();
+    let desc = D3D11_TEXTURE3D_DESC {
+        Width: n,
+        Height: n,
+        Depth: n,
+        MipLevels: 1,
+        Format: DXGI_FORMAT_R16G16B16A16_UNORM,
+        Usage: D3D11_USAGE_IMMUTABLE,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+    let init = D3D11_SUBRESOURCE_DATA {
+        pSysMem: texels.as_ptr().cast(),
+        SysMemPitch: n * 8,
+        SysMemSlicePitch: n * n * 8,
+    };
+    let mut tex: Option<ID3D11Texture3D> = None;
+    let mut srv: Option<ID3D11ShaderResourceView> = None;
+    unsafe {
+        device.CreateTexture3D(&desc, Some(&init), Some(&mut tex))?;
+        device.CreateShaderResourceView(tex.as_ref().unwrap(), None, Some(&mut srv))?;
+    }
+    Ok(GpuLut {
+        srv: srv.unwrap(),
+        size: n,
+    })
 }
 
 /// Texture of the plane area `[x0, y0, x1, y1)`.

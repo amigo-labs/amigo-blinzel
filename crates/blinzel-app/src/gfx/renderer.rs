@@ -17,7 +17,7 @@ use blinzel_core::cpuref::taps;
 use blinzel_core::geom::{Affine, Rect};
 use blinzel_core::layout::texels_per_pixel;
 
-use super::texture::{GpuImage, Kind};
+use super::texture::{GpuImage, GpuLut, Kind};
 
 static VS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/vs.cso"));
 static PS_IMAGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.cso"));
@@ -35,6 +35,7 @@ struct DrawCb {
     view: [f32; 4],
     color: [f32; 4],
     params: [f32; 4],
+    cms: [f32; 4],
 }
 
 /// Colour with straight alpha, 0..1.
@@ -234,8 +235,16 @@ impl Renderer {
         xform: &Affine,
         content: &Rect,
         bg: Rgba,
+        lut: Option<&GpuLut>,
     ) {
         let footprint = texels_per_pixel(xform);
+        let cms = match lut {
+            Some(l) => {
+                let n = l.size as f32;
+                [1.0, (n - 1.0) / n, 0.5 / n, 0.0]
+            }
+            None => [0.0; 4],
+        };
         let n = taps(footprint);
         let (mode, sub, opaque) = match img.kind {
             Kind::Rgba { opaque } => (0.0, (1.0, 1.0), opaque),
@@ -249,6 +258,7 @@ impl Renderer {
         unsafe {
             ctx.PSSetShader(&self.ps_image, None);
             ctx.OMSetBlendState(None, None, 0xFFFF_FFFF);
+            ctx.PSSetShaderResources(3, Some(&[lut.map(|l| l.srv.clone())]));
         }
         for tile in &img.tiles {
             let r = tile.rect;
@@ -293,6 +303,7 @@ impl Renderer {
                 view: self.view_vec(footprint as f32, n as f32),
                 color: [bg.0, bg.1, bg.2, 1.0],
                 params: [sub.0, sub.1, mode, if opaque { 1.0 } else { 0.0 }],
+                cms,
             };
             self.upload_cb(ctx, &cb);
             unsafe {

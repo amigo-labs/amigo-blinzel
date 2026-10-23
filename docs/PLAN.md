@@ -134,6 +134,15 @@ Reihenfolge der Stufen:
   - Der `--resident`-Start wärmt Decode, Upload und Present einmal vor (generiertes JPEG in Bildschirmgröße; das Fenster wird dafür einmal gecloakt und als Toolfenster gezeigt, also ohne Taskleisten-Knopf).
   - Ist inzwischen ein Update installiert, startet die versteckte Instanz beim nächsten Verstecken die neue Version.
   - Eine aufgeweckte Instanz lädt die Einstellungen neu; eine versteckte speichert beim Beenden nicht (ihre Kopie kann veraltet sein).
+- 🟡 **ICC-Farbmanagement (M6, Einstellung, standardmäßig an):**
+  - Eingebettete Profile aus JPEG (APP2 `ICC_PROFILE`) und PNG (`iCCP`) landen im `Probe`; Bilder ohne Profil gelten als sRGB.
+  - Ziel ist das Profil des Monitors, auf dem das Fenster liegt (`GetICMProfileW`). Ist dort „Erweiterte Farbe“ aktiv (Auto Color Management oder HDR), rechnet DWM selbst von sRGB um; Ziel ist dann sRGB.
+  - Eine eigene Prüfung erkennt sRGB-Profile an Primärfarben und Gradationskurve. Sind Quelle und Ziel sRGB (der Normalfall), passiert nichts: kein DLL-Laden, kein Shader-Aufwand.
+  - Sonst baut das Windows Color System (`mscms`, alle Profilarten) eine 3D-LUT mit 33³ Punkten (16 Bit), zwischengespeichert je Profilpaar. Der Bild-Shader wendet sie nach der Filterung trilinear an, vor dem Zusammensetzen mit dem Hintergrund; die CPU-Referenz und das GDI-Erstbild tun dasselbe.
+  - Beim Wechsel auf einen anderen Monitor (oder `WM_DISPLAYCHANGE`) wird das Ziel neu bestimmt.
+  - `GetICMProfileW` lädt beim ersten Aufruf das ICM-Subsystem (ca. 7 ms, die beim Start mit Decode und Device konkurrierten: GDI-Erstbild und Direct3D-Frame je ca. 7 ms später). Deshalb nutzt ein Start das Ziel des letzten Laufs (`%LOCALAPPDATA%migo-blinzel\display-color.txt`) und fragt Windows erst nach dem ersten Frame; weicht die Antwort ab, wird neu gezeichnet. Danach im A/B kein messbarer Unterschied mehr.
+  - Eine benötigte LUT entsteht parallel zum Decodieren (4–7 ms, kalt mit DLL-Laden). Display-P3-Bild (24 MP) kalt: GDI-Erstbild wie ohne Profil; Resident-Übergabe mit Profil 24–26 ms. Der `--resident`-Start lädt `mscms` vorab.
+  - Profile aus WIC-Formaten (HEIC, AVIF, WebP, TIFF) werden noch nicht gelesen (kommt mit den nativen Decodern in M5); Graustufen- und CMYK-Profile ergeben keine Transformation.
 - 🟡 **App-Icon:** `build.rs` zeichnet das Favicon-Motiv und bettet es als ICO ein (DIB bis 64 px, PNG für 256 px). Fenster, Taskleiste, Tray und Startmenü-Verknüpfung nutzen es.
 - 🟡 **Erstes Bild über GDI:** Die Device-Erzeugung dauert länger als Lesen und Decodieren. Der Loader rendert das erste decodierte Bild deshalb selbst auf der CPU (`blinzel_core::preview`, dieselbe Geometrie wie die GPU), der UI-Thread pumpt Nachrichten statt auf das Device zu warten und zeigt es mit `SetDIBitsToDevice`. Direct3D übernimmt, sobald das Device steht. Das Fenster wird ohne Aktivierung gezeigt (`SW_SHOWNA`, spart ca. 20 ms) und holt sich den Vordergrund nach dem ersten Bild.
 
@@ -319,7 +328,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | ⬜ |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | ⬜ |
-| **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon fertig; Handoff 24 ms (Median); offen: ICC |
+| **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug und Website fertig; offen: Referenzmessung, Funktionstabelle mit Quellen, Cloudflare-Secrets |
 
@@ -506,6 +515,6 @@ Speicher der versteckten Instanz: 50 MB privat nach dem Start, nach Benutzung ca
 
 **Als Nächstes, in dieser Reihenfolge:**
 1. Bei entsperrtem Bildschirm: Sichtprüfung des GDI-Übergangs, Tray-Menü und Aufwecken ansehen, `blinzel-race` mit Kaltstart und Resident messen.
-2. M6 abschließen: ICC-Farbmanagement (eingebettete Profile → Monitorprofil).
+2. M6 abschließen: Sichtprüfung von Tray, Aufwecken und Farbmanagement auf einem Monitor mit Wide-Gamut-Profil.
 3. Funktionstabelle der anderen Viewer für die Vergleichsseite, jede Angabe mit Quelle und geprüfter Version.
 4. M4, M5 wie in Abschnitt 12.

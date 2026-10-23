@@ -4,8 +4,9 @@
 //
 // One vertex shader expands a quad from the constant buffer (no vertex
 // buffers). `ps_image` samples a tile of an image stage (RGBA, gray or
-// YCbCr planes), box-filters when minifying and composites over the
-// background. `ps_overlay` draws the UI (SDF shapes, text).
+// YCbCr planes), box-filters when minifying, applies the colour transform
+// (3D LUT, optional) and composites over the background. `ps_overlay`
+// draws the UI (SDF shapes, text).
 //
 // ps_image must stay in sync with blinzel-core/src/cpuref.rs, which the
 // WARP golden tests compare against.
@@ -20,11 +21,13 @@ cbuffer Draw : register(b0)
     float4 view;    // 2/client.x, 2/client.y, footprint (texels/pixel), taps
     float4 color;   // image: background rgb; overlay: colour rgba
     float4 params;  // image: chroma sub h, v, mode, opaque; overlay: shape, thickness, radius
+    float4 cms;     // image: 3D LUT on, (n - 1) / n, 0.5 / n
 };
 
 Texture2D t0 : register(t0);
 Texture2D t1 : register(t1);
 Texture2D t2 : register(t2);
+Texture3D lut : register(t3);
 SamplerState lin : register(s0);
 
 struct VSOut
@@ -87,7 +90,12 @@ float4 ps_image(VSOut i) : SV_Target
         }
     }
     acc /= (float)(n * n);
-    return float4(acc.rgb * acc.a + color.rgb * (1.0 - acc.a), 1.0);
+    float3 rgb = acc.rgb;
+    if (cms.x > 0.5)
+    {
+        rgb = lut.SampleLevel(lin, rgb * cms.y + cms.z, 0).rgb;
+    }
+    return float4(rgb * acc.a + color.rgb * (1.0 - acc.a), 1.0);
 }
 
 // Overlay shapes (params.x):

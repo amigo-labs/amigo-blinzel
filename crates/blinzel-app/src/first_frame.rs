@@ -13,6 +13,7 @@ use blinzel_core::geom::Orientation;
 use blinzel_core::layout::{
     ViewMode, ViewOptions, ViewState, compute, content_in_stage, stage_to_client,
 };
+use blinzel_core::lut::Lut3d;
 use blinzel_core::pixel::Image;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT};
 use windows::Win32::Graphics::Gdi::{
@@ -32,6 +33,8 @@ pub struct FirstFrame {
     pub orientation: Orientation,
     /// Already rendered by the loader for this client size (BGRA).
     pub rendered: Option<(Vec<u8>, (u32, u32))>,
+    /// Colour transform to the display (see `color`).
+    pub lut: Option<Arc<Lut3d>>,
 }
 
 /// What the loader needs to render the first frame itself, off the UI
@@ -50,6 +53,7 @@ pub fn render(
     client: (u32, u32),
     view: &ViewOptions,
     background: [u8; 3],
+    lut: Option<Arc<Lut3d>>,
 ) -> Vec<u8> {
     let full = (img.full_width, img.full_height);
     let oriented = orientation.oriented_size(full.0, full.1);
@@ -65,6 +69,7 @@ pub fn render(
         stage_to_client: stage_to_client(&l, orientation, full, stage),
         content: content_in_stage(&l, orientation, full, stage),
         background,
+        lut,
     };
     blinzel_core::preview::render(img, &frame)
 }
@@ -144,7 +149,14 @@ fn prepare(hwnd: HWND, ff: FirstFrame) {
     );
     let bgra = match ff.rendered {
         Some((bits, size)) if size == client => bits,
-        _ => render(img, ff.orientation, client, &view, background),
+        _ => render(
+            img,
+            ff.orientation,
+            client,
+            &view,
+            background,
+            ff.lut.clone(),
+        ),
     };
     blinzel_core::timing::mark("first_frame_rendered");
     STATE.with(|s| s.borrow_mut().bitmap = Some((bgra, client.0, client.1)));

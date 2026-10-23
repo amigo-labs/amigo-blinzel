@@ -10,6 +10,8 @@ pub mod chrome;
 #[cfg(windows)]
 pub mod clipboard;
 #[cfg(windows)]
+pub mod color;
+#[cfg(windows)]
 pub mod dialogs;
 #[cfg(windows)]
 pub mod first_frame;

@@ -9,4 +9,4 @@ pub mod texture;
 pub use device::Gfx;
 pub use renderer::{Renderer, Rgba, Shape};
 pub use target::{Offscreen, SwapChain};
-pub use texture::{GpuImage, Kind, upload};
+pub use texture::{GpuImage, GpuLut, Kind, upload, upload_lut};

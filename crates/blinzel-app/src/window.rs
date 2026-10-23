@@ -22,7 +22,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::app::{Action, App, CursorKind, WM_DIR_CHANGED, WM_LIST, monitor_rect};
+use crate::app::{Action, App, CursorKind, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, monitor_rect};
 use crate::chrome::Button;
 use crate::instance::Request;
 use crate::loader::WM_LOADED;
@@ -222,6 +222,7 @@ fn handle(
         }
         WM_EXITSIZEMOVE | WM_DISPLAYCHANGE => {
             app.update_screen_box();
+            app.check_monitor(msg == WM_DISPLAYCHANGE);
             Outcome::Default
         }
         WM_DPICHANGED => {
@@ -437,6 +438,13 @@ fn handle(
             app.on_dir_changed();
             done
         }
+        WM_COLOR_TARGET => {
+            let b =
+                unsafe { Box::from_raw(lp.0 as *mut (isize, Option<blinzel_core::icc::Profile>)) };
+            let (monitor, target) = *b;
+            app.on_color_target(monitor, target);
+            done
+        }
         WM_COPYDATA => {
             let cds = unsafe { &*(lp.0 as *const COPYDATASTRUCT) };
             match instance::received(cds) {
@@ -501,6 +509,11 @@ fn handle(
         WM_DESTROY => {
             unsafe { PostQuitMessage(0) };
             done
+        }
+        WM_WINDOWPOSCHANGED => {
+            // Another monitor may want other colours.
+            app.check_monitor(false);
+            Outcome::Default
         }
         _ if msg == resident::taskbar_created() => {
             resident::on_taskbar_created(hwnd);

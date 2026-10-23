@@ -72,6 +72,8 @@ pub struct Probe {
     pub orientation: Orientation,
     /// Embedded JPEG previews, largest first.
     pub previews: Vec<EmbeddedPreview>,
+    /// Embedded colour profile (none: sRGB).
+    pub icc: Option<crate::icc::Profile>,
 }
 
 impl Probe {
@@ -107,24 +109,32 @@ pub fn probe(data: &[u8]) -> Result<Probe> {
 
 fn probe_inner(data: &[u8]) -> Result<Probe> {
     let format = format::detect(data);
-    let (width, height, orientation, previews) = match format {
+    let (width, height, orientation, previews, icc) = match format {
         Format::Jpeg => {
             let info =
                 blinzel_jpeg::parse(data).map_err(|e| DecodeError::Corrupt(e.to_string()))?;
             let meta = exif::jpeg_meta(data, &info);
-            (info.width, info.height, meta.orientation, meta.previews)
+            let icc = crate::icc::from_jpeg(data, &info);
+            (
+                info.width,
+                info.height,
+                meta.orientation,
+                meta.previews,
+                icc,
+            )
         }
         Format::Png => {
             let (w, h) = png::header_size(data)?;
-            (w, h, Orientation::NORMAL, Vec::new())
+            let icc = crate::icc::from_png(data);
+            (w, h, Orientation::NORMAL, Vec::new(), icc)
         }
         Format::Gif => {
             let (w, h) = gif::header_size(data)?;
-            (w, h, Orientation::NORMAL, Vec::new())
+            (w, h, Orientation::NORMAL, Vec::new(), None)
         }
         Format::Bmp => {
             let h = bmp::Header::parse(data)?;
-            (h.width, h.height, Orientation::NORMAL, Vec::new())
+            (h.width, h.height, Orientation::NORMAL, Vec::new(), None)
         }
         other => return Err(DecodeError::Unsupported(other)),
     };
@@ -135,6 +145,7 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
         height,
         orientation,
         previews,
+        icc,
     })
 }
 
