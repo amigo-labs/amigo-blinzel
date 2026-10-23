@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/blinzel-core", "crates/blinzel-jpeg", "crates/blinzel-i18n", "crates/blinzel-bench", "crates/blinzel-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[workspace.dependencies]
+blinzel-core = { path = "crates/blinzel-core", default-features = false }
+blinzel-jpeg = { path = "crates/blinzel-jpeg" }
+blinzel-i18n = { path = "crates/blinzel-i18n" }
+turbojpeg-sys = { version = "1.2", default-features = false, features = ["cmake", "require-simd"] }
+zune-jpeg = "0.5.16-rc3"
+zune-png = "0.5.2"
+zune-core = "0.5"
+png = "0.18"
+gif = "0.14"
+toml = "0.9"
+windows = "0.62"
+windows-sys = "0.61"
+windows-numerics = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# Keep unwinding: every decode job runs in catch_unwind so one broken file
+# cannot take the viewer down.
+panic = "unwind"
+debug = "line-tables-only"
+
+[profile.bench]
+inherits = "release"
+
+# Decoders and test-image generation are unbearably slow unoptimized.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.test.package."*"]
+opt-level = 3

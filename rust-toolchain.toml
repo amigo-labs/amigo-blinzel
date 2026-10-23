@@ -1,0 +1,7 @@
+# One toolchain for CI and local builds: new lints arrive with deliberate
+# updates, not with whatever "stable" happens to be on the runner.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
+profile = "minimal"

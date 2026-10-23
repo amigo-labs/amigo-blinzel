@@ -1,0 +1,7 @@
+[package]
+name = "blinzel-jpeg"
+description = "Own JPEG code: marker/header parser now, the parallel decoder (M3) later"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
