@@ -120,6 +120,13 @@ impl Gfx {
         16384
     }
 
+    /// The adapter's name, e.g. "Microsoft Basic Render Driver" for WARP.
+    pub fn adapter_name(&self) -> String {
+        unsafe { self.adapter.GetDesc() }
+            .map(|d| crate::platform::from_wide(&d.Description))
+            .unwrap_or_default()
+    }
+
     /// Bytes of video memory we allow ourselves to keep in textures.
     pub fn texture_budget(&self) -> usize {
         const MIN: usize = 256 << 20;

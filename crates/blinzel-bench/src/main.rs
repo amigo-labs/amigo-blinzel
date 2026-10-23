@@ -1,9 +1,10 @@
 //! Benchmark gate "library vs. own code".
 //!
 //! `blinzel-bench corpus <dir> [--large]` writes a deterministic test corpus.
-//! `blinzel-bench run <dir> [--json <file>] [--quick]` times every candidate
-//! for each hot path and prints a table (and JSON for CI artifacts). The
-//! numbers decide which implementation ships.
+//! `blinzel-bench run <dir> [--json <file>] [--quick] [--check]` times every
+//! candidate for each hot path and prints a table (and JSON for CI
+//! artifacts). The numbers decide which implementation ships. `--check`
+//! fails when a shipped implementation is beaten by its yardstick.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,7 +32,7 @@ fn main() {
 }
 
 fn usage() -> String {
-    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick]".into()
+    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]".into()
 }
 
 fn flag(args: &[String], name: &str) -> bool {
@@ -424,7 +425,49 @@ fn run(args: &[String]) -> Result<(), String> {
         write_json(Path::new(out), &results)?;
         println!("wrote {out}");
     }
+    if flag(args, "--check") {
+        check(&results)?;
+    }
     Ok(())
+}
+
+/// The shipped JPEG path (libjpeg-turbo to YCbCr planes) must beat
+/// zune-jpeg on every file. It does by 1.4–2× when libjpeg-turbo is built
+/// properly; an unoptimized C build (MSVC /Od) is 1.4× slower than zune.
+fn check(results: &[Result_]) -> Result<(), String> {
+    let median = |file: &str, candidate: &str| {
+        results
+            .iter()
+            .find(|r| r.group == "jpeg-full" && r.file == file && r.candidate == candidate)
+            .map(|r| r.stats.median)
+    };
+    let mut failures = Vec::new();
+    for r in results
+        .iter()
+        .filter(|r| r.candidate == "turbojpeg YCbCr planes")
+    {
+        let Some(zune) = median(&r.file, "zune-jpeg RGBA") else {
+            continue;
+        };
+        if r.stats.median >= zune {
+            failures.push(format!(
+                "  {}: turbojpeg {:.1} ms, zune-jpeg {:.1} ms",
+                r.file, r.stats.median, zune
+            ));
+        }
+    }
+    if failures.is_empty() {
+        println!("check passed: turbojpeg beats zune-jpeg on every JPEG");
+        Ok(())
+    } else {
+        Err(format!(
+            "check failed: zune-jpeg beats the shipped libjpeg-turbo path\n{}\n\
+             If libjpeg-turbo's C code is built without optimization (see \
+             third_party/cmake-rs/README.md) fix the build; if zune-jpeg genuinely \
+             got faster, the benchmark gate says to reconsider the decoder.",
+            failures.join("\n")
+        ))
+    }
 }
 
 fn zune_decode(data: &[u8]) -> Vec<u8> {

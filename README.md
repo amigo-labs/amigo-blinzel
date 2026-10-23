@@ -38,7 +38,7 @@ Der vollständige Plan mit allen Entscheidungen und Checklisten steht in [docs/P
   - Das Fenster entsteht unsichtbar, ohne DWM-Animation.
   - Datei-Decode und D3D11-Init laufen parallel, die Ordnerliste im Hintergrund.
   - Sichtbar wird das Fenster mit dem ersten Bild.
-- **Nativer Stack.** Win32 + Direct3D 11 + vorkompilierte Shader, statische Exe von ca. 1,5 MB, keine Runtime.
+- **Nativer Stack.** Win32 + Direct3D 11 + vorkompilierte Shader, statische Exe von ca. 2,5 MB, keine Runtime.
 - **Benchmark-Gate.** Jede Library ist nur Messlatte; wo der Eigenbau gewinnt, wird er eingebaut (`crates/blinzel-bench`).
 
 ## Aufbau

@@ -630,7 +630,15 @@ impl App {
                 actions.push(Action::Uncloak);
             }
             if let Some(out) = &self.exit_after_first_frame {
-                let _ = std::fs::write(out, timing::marks_json());
+                // The adapter tells a real GPU from WARP / Basic Render
+                // Driver, which costs hundreds of ms per frame.
+                let json = format!(
+                    "{{\"adapter\": {}, \"warp\": {}, \"marks\": {}}}",
+                    timing::json_str(&self.gfx.adapter_name()),
+                    self.gfx.warp,
+                    timing::marks_json()
+                );
+                let _ = std::fs::write(out, json);
                 actions.push(Action::Quit);
             }
             crate::gfx::text::prewarm();

@@ -316,6 +316,17 @@ Linux-Container, 4 vCPU, ein Kern je Decode, Bench im Schnellmodus:
 | PNG 8 MP Screenshot | eigener Pfad 8,4 ms; beide Libraries mit RGBA-Expansion 24–27 ms |
 | natürliche Sortierung, 10k Namen | 2,5 ms |
 | Puffer 96 MB | Pool 0,6 ms; neu 40 ms |
-| `blinzel.exe` (x64, Release, statische CRT) | 1,49 MB |
+| `blinzel.exe` (x64, Release, statische CRT) | 1,49 MB (Cross-Build mit clang-cl/lld); 2,5 MB mit MSVC im CI |
 
-Windows-Werte folgen aus dem CI (Artefakt `windows-bench-and-exe`).
+Windows-CI (`windows-2025`, ohne GPU, Artefakt `windows-bench-and-exe`), erster Lauf:
+
+| Fall | Ergebnis |
+|---|---|
+| JPEG 24 MP, voll | turbojpeg YCbCr 228 ms; zune-jpeg 160 ms |
+| JPEG 24 MP, 1/8 | 195 ms |
+| App: 24 MP öffnen (Decode auf 2250 × 1500) | 240 ms Decode, 2 ms Upload |
+| Blättern mit 30 Tasten/s | 19 von 22 aus dem Prefetch; Median 0 ms, p99 604 ms |
+| Ordner mit 10k Dateien | 9,9 ms |
+| Start bis erstes Present (WARP) | 617 ms, davon 342 ms Decode und ca. 260 ms WARP-Rendering |
+
+Der C-Teil von libjpeg-turbo war dabei unoptimiert: cmake-rs entfernt unter MSVC mit Visual-Studio-Generator alle `/O`-Flags, MSBuild kompiliert dann mit `/Od`. Behoben durch eine gepatchte Kopie von cmake-rs (`third_party/cmake-rs`, per `[patch.crates-io]`), die CMakes Standard-Flags je Konfiguration behält. libjpeg-turbo baut außerdem als „Release“ (`/O2 /Ob2`). `blinzel-bench run --check` schlägt fehl, falls zune-jpeg den ausgelieferten JPEG-Pfad je wieder schlägt. Die Startzeiten des CI-Runners sind wegen WARP nicht repräsentativ; die Startmessung schreibt deshalb den Adapternamen mit.

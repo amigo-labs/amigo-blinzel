@@ -1,0 +1,27 @@
+# Vendored cmake-rs 0.1.58 (https://github.com/rust-lang/cmake-rs) with one
+# patch, marked "amigo-blinzel patch" in src/lib.rs. Wired in through
+# [patch.crates-io] in the workspace Cargo.toml.
+[package]
+name = "cmake"
+version = "0.1.58"
+authors = ["Alex Crichton <alex@alexcrichton.com>"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["build-dependencies"]
+repository = "https://github.com/rust-lang/cmake-rs"
+homepage = "https://github.com/rust-lang/cmake-rs"
+documentation = "https://docs.rs/cmake"
+description = """
+A build dependency for running `cmake` to build a native library
+"""
+categories = ["development-tools::build-utils"]
+edition = "2021"
+rust-version = "1.65"
+
+[dependencies]
+cc = "1.2.46"
+
+# Upstream still calls the deprecated cc::Tool::env; keep the vendored copy
+# untouched apart from the patch.
+[lints.rust]
+deprecated = "allow"
