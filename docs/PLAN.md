@@ -96,7 +96,7 @@ Reihenfolge der Stufen:
 | `blinzel-i18n` | `i18n/*.toml` → statische Tabellen (DE/EN) | 🟡 |
 | `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |
 | `blinzel-app` | `blinzel.exe`: Fenster, Chrome, Menü, D3D11-Renderer, Loader, WIC, Zwischenablage, Dialoge, `--bench` | 🟡 |
-| `blinzel-race` | Wettbewerbs-Benchmark (M8) | ⬜ |
+| `blinzel-race` | Wettbewerbs-Benchmark (M8): Testbilder mit Farbsignatur, Desktop Duplication auf allen Monitoren, Öffnen/Weiter/Dauerfeuer | 🟡 |
 | `website/` | Website für Cloudflare Workers (M8) | ⬜ |
 
 ## 5. Kernprinzipien Start und Blättern
@@ -268,6 +268,21 @@ Umsetzung:
 ### Wettbewerbs-Benchmark `blinzel-race`
 
 Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
+
+**Umsetzung (`crates/blinzel-race`, Branch `m8-race`):**
+- `corpus <dir>`: 24 JPEGs mit 24 MP und je ca. 8 MB (Sensorrauschen, damit der Entropie-Decoder so viel arbeitet wie bei echten Fotos), jedes um eine von sechs Signaturfarben (die farbigen Ecken des RGB-Würfels). Aufeinanderfolgende Bilder unterscheiden sich immer.
+- Erkennung: Desktop Duplication auf jedem Monitor (Viewer öffnen dort, wo sie zuletzt waren); jeder präsentierte Frame liefert `LastPresentTime` (QPC) und ein Raster aus 40 × 24 Abtastpunkten.
+- Tasten gehen nur raus, solange der Viewer das Vordergrundfenster besitzt.
+- `list` zeigt die erkannten Viewer mit Version (Versionsressource; `blinzel.exe` hat jetzt eine).
+- `run <dir> [--reps N] [--cold] [--only …] [--viewer name=exe] [--json …]`. `--cold` leert die Standby-Liste und braucht Administratorrechte.
+
+**Erste Probeläufe** (Laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 Monitore; nur Funktionsnachweis, keine Referenzzahlen):
+
+| Viewer | Öffnen warm | Weiter | Dauerfeuer 6 Tasten |
+|---|---|---|---|
+| amigo-blinzel 0.1.0 | 270–295 ms | 9–14 ms | alle gezeigt |
+| ImageGlass 8.8 | 1,8 s | 0,8 s | alle, langsam |
+| Windows Photos 2026.11 | 1,2 s | 45 ms | 3 gezeigt, Tasten verschluckt |
 
 - ⬜ **Kandidaten:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Fotos; optional JPEGView und qimgv. Jeweils mit Standardeinstellungen; Versionen werden protokolliert.
 - ⬜ **Messgrößen:**
@@ -453,7 +468,20 @@ Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichau
 
 **M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit drei Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Lizenz, SignPath, Release-Schlüssel) und der erste echte Release.
 
+**Befund Startzeit (echte GPU, 2026-10-23):** Öffnen eines 24-MP-JPEGs aus einem neu gestarteten Prozess dauert 230–330 ms bis zum ersten Bild. Das verfehlt das M1-Ziel (≤ 50 ms warm) klar. Die Startmarken (`--exit-after-first-frame --json`) zeigen, wo die Zeit liegt:
+
+| Phase | GPU (Radeon 680M) | WARP |
+|---|---|---|
+| vor `main` (Loader, Defender) | 42–60 ms | 43–52 ms |
+| `D3D11CreateDevice` allein | 115–150 ms | 65–85 ms |
+| Device fertig → erstes Bild | ca. 60 ms | ca. 50 ms |
+
+Der Decode (44 ms bei 1/2) ist nicht der Engpass. Wege, nach Aufwand geordnet:
+1. Die Lücke zwischen fertigem Device und erstem Bild (ca. 60 ms) mit Startmarken aufklären und schließen (Renderer, Swapchain und Upload laufen heute nacheinander auf dem UI-Thread bzw. warten aufeinander).
+2. Erstes Bild ohne Direct3D: ein vorübergehendes Fenster per `UpdateLayeredWindow` mit dem fertig decodierten Bild, bis der Direct3D-Pfad übernimmt. Erwartet ca. 110 ms statt ca. 270 ms.
+3. Resident-Modus (M6): Der warme Prozess zeigt ein neues Bild ohne Prozess- und Device-Start. Nur so ist ≤ 50 ms erreichbar.
+
 **Als Nächstes, in dieser Reihenfolge:**
-1. CI-Ergebnisse der PRs #5 (M3) und M7 prüfen.
-2. M8: `blinzel-race` (Messwerkzeug für den Wettbewerbsvergleich) und `website/` (statisch, Charts als Inline-SVG aus den Benchmark-JSONs, Deployment-Workflow für Cloudflare Workers hinter den Secrets).
-3. M4, M5, M6 wie in Abschnitt 12.
+1. M8 fertigstellen: `website/` (statisch, DE/EN, Charts als Inline-SVG aus den Benchmark-JSONs) und den Deployment-Workflow für Cloudflare Workers hinter den Secrets.
+2. Startzeit nach dem Befund oben (Punkte 1 und 2), dann M6 mit dem Resident-Modus vorziehen. Ohne das verliert amigo-blinzel den Vergleich beim Öffnen, der Kernaussage der Website.
+3. M4, M5 wie in Abschnitt 12.
