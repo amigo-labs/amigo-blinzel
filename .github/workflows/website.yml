@@ -40,4 +40,4 @@ jobs:
             echo "Cloudflare secrets not set: built only, not deployed."
             exit 0
           fi
-          npx --yes wrangler@4.45.0 deploy
+          npx --yes wrangler@4.149.0 deploy
