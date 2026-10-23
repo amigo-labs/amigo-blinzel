@@ -74,7 +74,7 @@ error_empty_folder = "No images in this folder"
 
 app_description = "Fast image viewer"
 setup_title = "Install amigo-blinzel"
-setup_body = "Version {version} will be installed for you only, to\n{dir}\nNo administrator rights needed."
+setup_body = "Version {version} will be installed for you only, to\n{dir}\nNo administrator rights needed.\n\namigo-blinzel checks GitHub for updates at most once a day; turn this off under Settings → “Install updates automatically”."
 setup_install = "Install"
 setup_cancel = "Cancel"
 setup_done_title = "amigo-blinzel is installed"

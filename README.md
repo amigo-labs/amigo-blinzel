@@ -83,3 +83,7 @@ cargo run --release -p blinzel-site                       # website/dist
 ```
 
 Unter Linux laufen alle plattformunabhängigen Tests. `cargo xwin check --target x86_64-pc-windows-msvc` prüft die Windows-App.
+
+## Lizenz
+
+[MIT](LICENSE).
