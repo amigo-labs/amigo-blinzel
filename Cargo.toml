@@ -22,6 +22,9 @@ zune-core = "0.5"
 png = "0.18"
 gif = "0.14"
 image-webp = "0.2.4"
+jxl-oxide = "0.12.6"
+jxl-render = "0.12.4"
+zune-jpegxl = "0.5.2"
 # Verifies our own signature of release checksums (self-updater).
 ed25519-compact = { version = "2.1", default-features = false }
 toml = "0.9"
@@ -47,6 +50,46 @@ debug = "line-tables-only"
 # "RelWithDebInfo" (/Ob1 limits inlining on MSVC).
 [profile.release.package.turbojpeg-sys]
 debug = false
+
+# JPEG XL: optimized for size (see docs/PLAN.md, JPEG XL gate).
+[profile.release.package.jxl-bitstream]
+opt-level = "s"
+
+[profile.release.package.jxl-coding]
+opt-level = "s"
+
+[profile.release.package.jxl-color]
+opt-level = "s"
+
+[profile.release.package.jxl-frame]
+opt-level = "s"
+
+[profile.release.package.jxl-grid]
+opt-level = "s"
+
+[profile.release.package.jxl-image]
+opt-level = "s"
+
+[profile.release.package.jxl-jbr]
+opt-level = "s"
+
+[profile.release.package.jxl-modular]
+opt-level = "s"
+
+[profile.release.package.jxl-oxide]
+opt-level = "s"
+
+[profile.release.package.jxl-oxide-common]
+opt-level = "s"
+
+[profile.release.package.jxl-render]
+opt-level = "s"
+
+[profile.release.package.jxl-threadpool]
+opt-level = "s"
+
+[profile.release.package.jxl-vardct]
+opt-level = "s"
 
 [profile.bench]
 inherits = "release"

@@ -5,6 +5,7 @@ pub mod bmp;
 pub mod gif;
 #[cfg(feature = "turbojpeg")]
 pub mod jpeg;
+pub mod jxl;
 pub mod own_jpeg;
 pub mod png;
 pub mod webp;
@@ -160,6 +161,10 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
             let ((w, h), orientation, icc) = webp::info(data)?;
             (w, h, orientation, Vec::new(), icc)
         }
+        Format::Jxl => {
+            let ((w, h), orientation, icc) = jxl::info(data)?;
+            (w, h, orientation, Vec::new(), icc)
+        }
         other => return Err(DecodeError::Unsupported(other)),
     };
     check_size(width as u64, height as u64)?;
@@ -203,6 +208,7 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::Gif => finish(gif::decode(data)?, req),
         Format::Bmp => finish(bmp::decode(data)?, req),
         Format::WebP => finish(webp::decode(data)?, req),
+        Format::Jxl => finish(jxl::decode(data, threads)?, req),
         other => Err(DecodeError::Unsupported(other)),
     }
 }
