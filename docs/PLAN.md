@@ -251,9 +251,10 @@ Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur C
 ### Signierung über SignPath Foundation
 
 Voraussetzungen, die bei dir liegen:
-1. ⬜ OSI-Lizenz wählen (z. B. MIT oder Apache-2.0) und als `LICENSE` ins Repo legen. Das Repo ist bereits öffentlich ✅.
-2. ⬜ Antrag bei der SignPath Foundation stellen (Projekt, Code-Signing-Policy, Datenschutz-Seite auf der Website).
-3. ⬜ In SignPath Projekt, Artefakt-Konfiguration und Signing-Policy anlegen; Secret `SIGNPATH_API_TOKEN` und die Org-ID ins Repo.
+1. ✅ OSI-Lizenz: **MIT** (`LICENSE`). Das Repo ist öffentlich ✅.
+2. ⬜ Erster Release ohne Authenticode (Release-Schlüssel nötig, siehe Abschnitt 14): Die Foundation signiert nur Projekte, die in der zu signierenden Form schon veröffentlicht sind.
+3. ⬜ Antrag bei der SignPath Foundation (signpath.org/apply). Code-Signing-Policy und Datenschutz stehen auf der Website und sind auf jeder Seite verlinkt; das Setup nennt die Update-Prüfung und wie man sie abschaltet.
+4. ⬜ In SignPath Projekt, Artefakt-Konfiguration und Signing-Policy nach `packaging/signpath/README.md` anlegen; Secret `SIGNPATH_API_TOKEN` und Variable `SIGNPATH_ORGANIZATION_ID` ins Repo.
 
 Umsetzung:
 - 🟡 Release-Workflow bei Tag `v*` auf GitHub-gehosteten Runnern (SignPath prüft die Build-Herkunft):
@@ -395,8 +396,8 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 
 ## 14. Offene Punkte, die bei dir liegen
 
-- ⬜ Lizenz wählen (Voraussetzung für die SignPath Foundation).
-- ⬜ SignPath-Foundation-Antrag sowie `SIGNPATH_API_TOKEN` (Secret) und die Org-ID (Variable `SIGNPATH_ORGANIZATION_ID`).
+- ✅ Lizenz: MIT.
+- ⬜ SignPath-Foundation-Antrag nach dem ersten Release (Abschnitt 10) sowie `SIGNPATH_API_TOKEN` (Secret) und die Org-ID (Variable `SIGNPATH_ORGANIZATION_ID`).
 - ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-app/src/update.rs`.
 - 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
@@ -519,7 +520,7 @@ Grenze: Der letzte Y-Verfeinerungsscan (3,7 MB) läuft allein ca. 100 ms. Ohne K
 
 Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichauf mit turbo (1,01×), mit 16 Threads 4,1×.
 
-**M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit drei Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Lizenz, SignPath, Release-Schlüssel) und der erste echte Release.
+**M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit drei Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Release-Schlüssel, SignPath) und der erste echte Release.
 
 **Startzeit (echte GPU, Radeon 680M, 24-MP-JPEG, Prozessstart → erstes Bild):**
 

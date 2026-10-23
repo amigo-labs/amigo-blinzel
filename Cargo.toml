@@ -8,6 +8,7 @@ default-members = ["crates/blinzel-core", "crates/blinzel-jpeg", "crates/blinzel
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 rust-version = "1.89"
 publish = false
 

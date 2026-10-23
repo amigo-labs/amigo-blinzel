@@ -4,6 +4,7 @@ description = "Compile-time translation tables: no parsing, no lookup at runtime
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [build-dependencies]
