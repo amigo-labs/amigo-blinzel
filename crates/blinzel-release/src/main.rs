@@ -9,7 +9,7 @@
 //!
 //! The secret key is the 32-byte Ed25519 seed as hex. It belongs in the
 //! repository secret `RELEASE_SIGNING_KEY` and nowhere in the repository;
-//! the public key goes into `blinzel-app/src/update.rs` (`RELEASE_KEY`).
+//! the public key goes into `blinzel-core/src/update.rs` (`RELEASE_KEY`).
 
 mod notices;
 
@@ -71,7 +71,7 @@ fn keygen(path: &str) -> Result<(), String> {
     );
     println!("public key: {pk}");
     println!(
-        "for update.rs: pub const RELEASE_KEY: Option<[u8; 32]> = Some({});",
+        "for blinzel-core/src/update.rs: pub const RELEASE_KEY: Option<[u8; 32]> = Some({});",
         rust_bytes(kp.pk.as_ref())
     );
     Ok(())

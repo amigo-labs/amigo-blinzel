@@ -27,10 +27,6 @@ use windows::core::{BOOL, PCSTR, PCWSTR, w};
 use crate::platform::{debug_log, wide};
 use crate::setup::{self, Layout, registry};
 
-/// Public key of the release signing key (docs/PLAN.md, section 10). Until
-/// it is set, the updater checks nothing and installs nothing.
-pub const RELEASE_KEY: Option<[u8; 32]> = None;
-
 /// Largest download accepted (the executable is about 3 MB).
 const MAX_DOWNLOAD: usize = 64 << 20;
 
@@ -137,7 +133,7 @@ pub fn on_first_frame() {
 /// Starts the daily background check. A resident instance runs for days,
 /// so it looks again every hour and reads the setting each time.
 pub fn schedule() {
-    if RELEASE_KEY.is_none() || installed_layout().is_none() {
+    if core::RELEASE_KEY.is_none() || installed_layout().is_none() {
         return;
     }
     let _ = std::thread::Builder::new()
@@ -226,7 +222,7 @@ pub fn check_now(hwnd: HWND, notice_msg: u32) {
 }
 
 fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
-    let key = RELEASE_KEY.ok_or("no release signing key in this build")?;
+    let key = core::RELEASE_KEY.ok_or("no release signing key in this build")?;
     let api = format!(
         "https://api.github.com/repos/{}/releases/latest",
         core::REPO
@@ -238,7 +234,7 @@ fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
         exe_url,
         sums_url,
         sig_url,
-    } = core::parse_release(&json, arch()).ok_or("no usable release")?;
+    } = core::parse_release(&json, &core::asset_name(arch())).ok_or("no usable release")?;
     let running = running_version();
     if version <= running {
         return Ok(Outcome::Current(running));

@@ -312,7 +312,7 @@ Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur C
 - Entscheidungen ohne Windows in `blinzel-core::update` (Version, Release-JSON über einen kleinen eigenen JSON-Leser, `SHA256SUMS`, Ed25519 über `ed25519-compact`, Zeitplan, Startzähler) mit Unit-Tests.
 - Windows-Teil in `blinzel-app/src/update.rs`: WinHTTP und `BCryptHash` werden erst bei Bedarf geladen. Nur eine installierte Kopie aktualisiert sich; Entwickler- und portable Builds nie.
 - `blinzel-release keygen | sign | verify` für den eigenen Signaturschlüssel.
-- **Solange der öffentliche Schlüssel fehlt** (`RELEASE_KEY = None` in `update.rs`), prüft und installiert der Updater nichts. Erzeugen: `cargo run -p blinzel-release -- keygen <datei>`, den Inhalt der Datei als Secret `RELEASE_SIGNING_KEY` hinterlegen, die Datei löschen, die ausgegebene Zeile in `update.rs` eintragen.
+- **Solange der öffentliche Schlüssel fehlt** (`RELEASE_KEY = None` in `crates/blinzel-core/src/update.rs`), prüft und installiert der Updater nichts. Erzeugen: `cargo run -p blinzel-release -- keygen <datei>`, den Inhalt der Datei als Secret `RELEASE_SIGNING_KEY` hinterlegen, die Datei löschen, die ausgegebene Zeile in `crates/blinzel-core/src/update.rs` eintragen.
 
 ## 11. Website und Wettbewerbsvergleich (M8)
 
@@ -414,7 +414,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 ## 14. Offene Punkte, die bei dir liegen
 
 - ✅ Lizenz: MIT.
-- ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-app/src/update.rs`.
+- ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-core/src/update.rs`.
 - 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
 - ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.

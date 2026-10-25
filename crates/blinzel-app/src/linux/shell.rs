@@ -33,9 +33,11 @@ use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, Window
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::{CursorIcon, Fullscreen, ResizeDirection, Window, WindowId};
 
 use super::gpu::{Gpu, Target, WgpuCanvas, WgpuDevice, instance};
+use super::install::APP_ID;
 
 /// Events from other threads to the event loop.
 #[derive(Debug)]
@@ -72,7 +74,7 @@ impl LinuxServices {
 }
 
 /// Debug output when `BLINZEL_DEBUG` is set.
-fn log(msg: &str) {
+pub(super) fn log(msg: &str) {
     if std::env::var_os("BLINZEL_DEBUG").is_some() {
         eprintln!("blinzel: {msg}");
     }
@@ -161,6 +163,10 @@ impl Host for LinuxHost {
         self.window.request_redraw();
     }
 
+    fn first_frame_shown(&self) {
+        super::update::on_first_frame();
+    }
+
     fn set_title(&self, title: &str) {
         self.window.set_title(title);
     }
@@ -219,6 +225,8 @@ pub struct Args {
     pub file: Option<PathBuf>,
     pub json: Option<PathBuf>,
     pub exit_after_first_frame: bool,
+    pub install: bool,
+    pub uninstall: bool,
 }
 
 pub fn parse_args() -> Args {
@@ -228,6 +236,8 @@ pub fn parse_args() -> Args {
         match arg.to_str() {
             Some("--json") => a.json = it.next().map(PathBuf::from),
             Some("--exit-after-first-frame") => a.exit_after_first_frame = true,
+            Some("--install") => a.install = true,
+            Some("--uninstall") => a.uninstall = true,
             _ => a.file = Some(PathBuf::from(arg)),
         }
     }
@@ -273,12 +283,15 @@ impl Shell {
         let settings = self.settings.take().unwrap_or_default();
         let monitor = el.primary_monitor().map(|m| m.size());
         let (w, h) = monitor.map_or((1280, 800), |s| (s.width * 7 / 10, s.height * 7 / 10));
+        // The app id (Wayland) / WM_CLASS (X11, the same field) ties the
+        // window to the desktop entry `--install` writes.
         let attrs = Window::default_attributes()
             .with_title(tr(Msg::AppName))
             .with_decorations(false)
             .with_visible(self.args.file.is_none())
             .with_inner_size(PhysicalSize::new(w.max(320), h.max(240)))
             .with_min_inner_size(PhysicalSize::new(200, 150));
+        let attrs = WindowAttributesExtWayland::with_name(attrs, APP_ID, APP_ID);
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         timing::mark("window_created");
         let instance = instance();
@@ -414,7 +427,10 @@ impl Shell {
                 vec![]
             }
             Action::CheckUpdates => {
-                open_url(&format!("{URL}/releases/latest"));
+                let proxy = self.proxy.clone();
+                super::update::check_now(move |text| {
+                    let _ = proxy.send_event(UserEvent::Notice(text));
+                });
                 vec![]
             }
             Action::About => {
@@ -953,6 +969,12 @@ pub fn run() -> i32 {
         .and_then(blinzel_i18n::lang_from_code)
         .unwrap_or_else(system_language);
     blinzel_i18n::set_lang(lang);
+    if args.install || args.uninstall {
+        return super::install::run(args.uninstall);
+    }
+    if super::update::on_start() {
+        return 0;
+    }
     if settings.single_instance
         && !args.exit_after_first_frame
         && super::instance::hand_off(args.file.as_deref())
@@ -999,6 +1021,7 @@ pub fn run() -> i32 {
         }]);
     }
     timing::mark("first_job_queued");
+    super::update::schedule();
     let mut shell = Shell {
         args,
         proxy,

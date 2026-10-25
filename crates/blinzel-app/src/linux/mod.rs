@@ -3,8 +3,10 @@
 
 pub mod color;
 pub mod gpu;
+pub mod install;
 pub mod instance;
 pub mod shell;
 pub mod text;
+pub mod update;
 
 pub use shell::run;
