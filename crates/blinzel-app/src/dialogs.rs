@@ -1,5 +1,5 @@
-//! System dialogs: open file, move to recycle bin. Both are localized by
-//! Windows itself.
+//! System dialogs: open file, pick a folder, move to recycle bin. They are
+//! localized by Windows itself.
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +61,41 @@ pub fn open_file(hwnd: HWND) -> Option<PathBuf> {
     }
 }
 
+/// A folder (the batch dialog's output).
+pub fn pick_folder(hwnd: HWND) -> Option<PathBuf> {
+    use windows::Win32::UI::Shell::FOS_PICKFOLDERS;
+    ensure_sta();
+    unsafe {
+        let dlg: IFileOpenDialog =
+            CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        dlg.SetOptions(dlg.GetOptions().ok()? | FOS_PICKFOLDERS)
+            .ok()?;
+        dlg.Show(Some(hwnd)).ok()?;
+        let item = dlg.GetResult().ok()?;
+        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = name.to_string().ok().map(PathBuf::from);
+        CoTaskMemFree(Some(name.0 as *const _));
+        path
+    }
+}
+
+/// Opens `dir` in Explorer.
+pub fn open_folder(hwnd: HWND, dir: &Path) {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let d = wide(dir);
+    unsafe {
+        ShellExecuteW(
+            Some(hwnd),
+            windows::core::w!("open"),
+            PCWSTR(d.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
 /// Moves `path` to the recycle bin (Windows asks for confirmation).
 pub fn recycle(hwnd: HWND, path: &Path) -> bool {
     // pFrom is a list terminated by two NULs.
@@ -91,6 +126,8 @@ pub fn save_file(
             CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
         let (n1, s1) = (wide(tr(Msg::SaveFilterJpeg)), wide("*.jpg;*.jpeg"));
         let (n2, s2) = (wide(tr(Msg::SaveFilterPng)), wide("*.png"));
+        let (n3, s3) = (wide("WebP"), wide("*.webp"));
+        let (n4, s4) = (wide("AVIF"), wide("*.avif"));
         let filters = [
             COMDLG_FILTERSPEC {
                 pszName: PCWSTR(n1.as_ptr()),
@@ -99,6 +136,14 @@ pub fn save_file(
             COMDLG_FILTERSPEC {
                 pszName: PCWSTR(n2.as_ptr()),
                 pszSpec: PCWSTR(s2.as_ptr()),
+            },
+            COMDLG_FILTERSPEC {
+                pszName: PCWSTR(n3.as_ptr()),
+                pszSpec: PCWSTR(s3.as_ptr()),
+            },
+            COMDLG_FILTERSPEC {
+                pszName: PCWSTR(n4.as_ptr()),
+                pszSpec: PCWSTR(s4.as_ptr()),
             },
         ];
         dlg.SetFileTypes(&filters).ok()?;

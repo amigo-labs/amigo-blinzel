@@ -12,6 +12,6 @@ default = ["turbojpeg"]
 turbojpeg = ["blinzel-core/turbojpeg"]
 
 [dependencies]
-blinzel-core.workspace = true
+blinzel-core = { workspace = true, features = ["batch"] }
 blinzel-i18n.workspace = true
 blinzel-jpeg.workspace = true

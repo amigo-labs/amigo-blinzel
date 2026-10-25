@@ -2,7 +2,7 @@
 //! current image's neighbours): layout, drawing from the thumbnail atlas,
 //! hit testing, and asking the thumbnail pool for what is visible first.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use blinzel_core::filelist::FileList;
@@ -25,11 +25,15 @@ const PLACEHOLDER: Rgba = Rgba(1.0, 1.0, 1.0, 0.05);
 const HOVER: Rgba = Rgba(1.0, 1.0, 1.0, 0.10);
 const ACCENT: Rgba = Rgba(0.35, 0.62, 1.0, 1.0);
 const STRIP_BG: Rgba = Rgba(0.0, 0.0, 0.0, 0.30);
+const MARKED: Rgba = Rgba(0.35, 0.62, 1.0, 0.22);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct GridState {
     pub scroll: f64,
     pub selected: usize,
+    /// Names of the marked images (Ctrl/Shift+click, Ctrl+A), e.g. for the
+    /// batch dialog.
+    pub marked: BTreeSet<String>,
 }
 
 pub struct Browse<S> {
@@ -87,6 +91,7 @@ impl<S: Services> Browse<S> {
         self.grid = Some(GridState {
             scroll: g.reveal(selected, 0.0, client.1),
             selected,
+            marked: BTreeSet::new(),
         });
         self.hover = None;
     }
@@ -179,11 +184,12 @@ impl<S: Services> Browse<S> {
         scale: f64,
         background: [u8; 3],
     ) {
-        let Some(mut state) = self.grid else { return };
+        let Some(mut state) = self.grid.take() else {
+            return;
+        };
         self.atlas.begin_frame();
         let g = grid_layout(list.len(), client, scale);
         state.scroll = state.scroll.clamp(0.0, g.max_scroll(client.1));
-        self.grid = Some(state);
         let visible = g.visible(state.scroll, client.1);
         for i in visible.clone() {
             let cell = g.cell_rect(i, state.scroll);
@@ -194,7 +200,18 @@ impl<S: Services> Browse<S> {
                     color: HOVER,
                 }]);
             }
+            let marked = list.get(i).is_some_and(|e| state.marked.contains(&e.name));
+            if marked {
+                r.draw_shapes(&[Shape::Fill {
+                    rect: grow(&cell, 4.0 * scale),
+                    radius: (6.0 * scale) as f32,
+                    color: MARKED,
+                }]);
+            }
             self.draw_item(r, list, i, &cell);
+            if marked {
+                mark_badge(r, &cell, scale);
+            }
         }
         if visible.contains(&state.selected) {
             let cell = g.cell_rect(state.selected, state.scroll);
@@ -205,6 +222,7 @@ impl<S: Services> Browse<S> {
                 color: ACCENT,
             }]);
         }
+        self.grid = Some(state);
         let page = visible.len();
         let next = visible.end..(visible.end + page).min(list.len());
         let prev = visible.start.saturating_sub(page)..visible.start;
@@ -282,7 +300,7 @@ impl<S: Services> Browse<S> {
         client: (f64, f64),
         scale: f64,
     ) -> Option<usize> {
-        let state = self.grid?;
+        let state = self.grid.as_ref()?;
         grid_layout(count, client, scale).hit(p, state.scroll)
     }
 
@@ -310,6 +328,28 @@ impl<S: Services> Browse<S> {
         .find(|(_, r)| r.contains((p.0, p.1 - top)))
         .map(|(i, _)| i)
     }
+}
+
+/// A check mark in a circle at the top right of a marked cell.
+fn mark_badge(r: &mut impl Canvas, cell: &Rect, scale: f64) {
+    let d = 22.0 * scale;
+    let c = Rect::new(cell.right() - d - 4.0 * scale, cell.y + 4.0 * scale, d, d);
+    let (x, y, k) = (c.x + d / 2.0, c.y + d / 2.0, 4.5 * scale);
+    let line = |a: (f64, f64), b: (f64, f64)| Shape::Line {
+        a: (a.0 as f32, a.1 as f32),
+        b: (b.0 as f32, b.1 as f32),
+        thickness: (2.0 * scale) as f32,
+        color: Rgba(1.0, 1.0, 1.0, 1.0),
+    };
+    r.draw_shapes(&[
+        Shape::Fill {
+            rect: c,
+            radius: (d / 2.0) as f32,
+            color: ACCENT,
+        },
+        line((x - k, y), (x - k / 3.0, y + k * 0.7)),
+        line((x - k / 3.0, y + k * 0.7), (x + k, y - k * 0.8)),
+    ]);
 }
 
 fn grow(r: &Rect, d: f64) -> Rect {

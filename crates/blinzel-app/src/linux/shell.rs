@@ -387,7 +387,10 @@ impl Shell {
                     .and_then(|c| c.path.parent().map(Path::to_path_buf));
                 let mut d = rfd::FileDialog::new()
                     .set_title(tr(Msg::MenuOpen))
-                    .add_filter(tr(Msg::MenuOpen), IMAGE_EXTENSIONS);
+                    .add_filter(
+                        tr(Msg::OpenFilterImages),
+                        blinzel_core::format::IMAGE_EXTENSIONS,
+                    );
                 if let Some(dir) = dir {
                     d = d.set_directory(dir);
                 }
@@ -429,6 +432,16 @@ impl Shell {
                 }
                 vec![]
             }
+            Action::PickFolder => {
+                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    app.batch_folder_picked(dir);
+                }
+                vec![]
+            }
+            Action::OpenFolder(dir) => {
+                open_url(&dir.to_string_lossy());
+                vec![]
+            }
             Action::SetResident(_) | Action::TrayMenu { .. } => vec![],
             Action::Wake { .. } | Action::Activate => {
                 window.set_visible(true);
@@ -459,6 +472,8 @@ impl Shell {
             .set_file_name(&job.default_name)
             .add_filter("JPEG", &["jpg", "jpeg"])
             .add_filter("PNG", &["png"])
+            .add_filter("WebP", &["webp"])
+            .add_filter("AVIF", &["avif"])
             .save_file()
         else {
             return;
@@ -599,7 +614,8 @@ impl Shell {
             }
         }
         let app = self.app.as_mut().unwrap();
-        let actions = app.mouse_down(p, shift, false);
+        let ctrl = self.modifiers.control_key();
+        let actions = app.mouse_down(p, shift, ctrl, false);
         self.run(el, actions);
     }
 
@@ -626,12 +642,17 @@ impl Shell {
         if event.state != ElementState::Pressed {
             return;
         }
-        let Some(k) = key_of(&event.key_without_modifiers()) else {
-            return;
-        };
         let (ctrl, shift) = (self.modifiers.control_key(), self.modifiers.shift_key());
         let Some(app) = self.app.as_mut() else { return };
-        if let Some(actions) = app.key(k, ctrl, shift) {
+        let actions = key_of(&event.key_without_modifiers()).and_then(|k| app.key(k, ctrl, shift));
+        // Characters for the batch dialog's text fields.
+        if app.dialog.is_some()
+            && !ctrl
+            && let Some(text) = &event.text
+        {
+            app.text_input(text);
+        }
+        if let Some(actions) = actions {
             self.run(el, actions);
         }
     }
@@ -679,12 +700,6 @@ impl Shell {
 
 const URL: &str = "https://github.com/amigo-labs/amigo-blinzel";
 
-/// What the open dialog offers.
-const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "webp", "jxl", "tif", "tiff", "heic",
-    "heif", "avif", "dng", "cr2", "cr3", "nef", "arw", "raf", "rw2", "orf", "pef",
-];
-
 fn open_url(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
@@ -715,6 +730,7 @@ fn key_of(k: &WKey) -> Option<Key> {
             NamedKey::Backspace => Key::Backspace,
             NamedKey::Enter => Key::Enter,
             NamedKey::Escape => Key::Escape,
+            NamedKey::Tab => Key::Tab,
             NamedKey::Delete => Key::Delete,
             NamedKey::F10 => Key::F10,
             NamedKey::F11 => Key::F11,
@@ -812,7 +828,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                     (MouseButton::Left, false) => self.left_up(el),
                     (MouseButton::Middle, true) => {
                         let p = self.cursor;
-                        let actions = self.app.as_mut().unwrap().mouse_down(p, shift, true);
+                        let ctrl = self.modifiers.control_key();
+                        let actions = self.app.as_mut().unwrap().mouse_down(p, shift, ctrl, true);
                         self.run(el, actions);
                     }
                     (MouseButton::Middle, false) => self.app.as_mut().unwrap().mouse_up(),
@@ -872,6 +889,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             UserEvent::Wake(Wake::Thumbs) => {
                 app.on_thumbs();
+                vec![]
+            }
+            UserEvent::Wake(Wake::Batch) => {
+                app.on_batch();
                 vec![]
             }
             UserEvent::Wake(Wake::ColorTarget { monitor, target }) => {

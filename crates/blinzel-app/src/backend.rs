@@ -47,6 +47,8 @@ pub const WM_DIR_CHANGED: u32 = WM_APP + 3;
 pub const WM_COLOR_TARGET: u32 = WM_APP + 8;
 /// Thumbnails wait in the thumbnail pool's channel.
 pub const WM_THUMB: u32 = WM_APP + 9;
+/// Batch progress waits in the batch dialog's channel.
+pub const WM_BATCH: u32 = WM_APP + 10;
 /// The animation timer (the window procedure dispatches it).
 pub const TIMER_ANIM: usize = 3;
 
@@ -355,6 +357,9 @@ impl Services for WinServices {
             }
             Wake::Thumbs => {
                 self.post(WM_THUMB, 0);
+            }
+            Wake::Batch => {
+                self.post(WM_BATCH, 0);
             }
             Wake::ColorTarget { monitor, target } => {
                 let msg = Box::into_raw(Box::new((monitor, target)));

@@ -22,6 +22,8 @@ pub enum Cmd {
     SelectAll,
     ShowOriginal,
     SaveCutout,
+    /// The batch dialog (resize many images).
+    Batch,
     Next,
     Prev,
     First,
@@ -83,6 +85,7 @@ impl Cmd {
             Cmd::ToggleFilmstrip => 31,
             Cmd::ToggleGrid => 32,
             Cmd::Notices => 33,
+            Cmd::Batch => 34,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -103,7 +106,7 @@ impl Cmd {
     }
 }
 
-pub const ALL: [Cmd; 33] = [
+pub const ALL: [Cmd; 34] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -137,6 +140,7 @@ pub const ALL: [Cmd; 33] = [
     Cmd::ToggleFilmstrip,
     Cmd::ToggleGrid,
     Cmd::Notices,
+    Cmd::Batch,
 ];
 
 /// State the menu reflects.
@@ -149,6 +153,8 @@ pub struct MenuState {
     pub has_selection: bool,
     pub is_cropped: bool,
     pub has_neighbours: bool,
+    /// The folder has images (batch).
+    pub has_images: bool,
     pub language: Option<Lang>,
     pub resident: bool,
     pub auto_update: bool,
@@ -341,6 +347,13 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
         Some(accel(&[ctrl, "S"])),
         false,
         s.has_selection || s.is_cropped,
+    ));
+    m.push(MenuItem::item(
+        Cmd::Batch,
+        tr(Msg::MenuBatch),
+        Some(accel(&[ctrl, "B"])),
+        false,
+        s.has_images,
     ));
     m.push(MenuItem::Separator);
 

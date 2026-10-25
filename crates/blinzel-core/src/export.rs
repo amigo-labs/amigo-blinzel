@@ -17,6 +17,9 @@ use crate::selection::orient_bgra;
 pub enum SaveFormat {
     Jpeg,
     Png,
+    /// With the `batch` feature (its encoders).
+    Webp,
+    Avif,
 }
 
 impl SaveFormat {
@@ -29,6 +32,8 @@ impl SaveFormat {
             .as_deref()
         {
             Some("png") => SaveFormat::Png,
+            Some("webp") => SaveFormat::Webp,
+            Some("avif") => SaveFormat::Avif,
             _ => SaveFormat::Jpeg,
         }
     }
@@ -95,6 +100,7 @@ pub fn export(
     let bytes = match format {
         SaveFormat::Png => encode_png(&pixels, w, h)?,
         SaveFormat::Jpeg => encode_jpeg(&pixels, w, h, data, info.as_ref())?,
+        SaveFormat::Webp | SaveFormat::Avif => encode_modern(&pixels, w, h, data, format)?,
     };
     Ok(Saved {
         bytes,
@@ -132,6 +138,46 @@ fn encode_jpeg(
     _: Option<&blinzel_jpeg::JpegInfo>,
 ) -> Result<Vec<u8>, String> {
     Err("JPEG encoding needs the turbojpeg feature".into())
+}
+
+/// WebP and AVIF through the batch encoders, at high quality, with the
+/// source's colour profile.
+#[cfg(feature = "batch")]
+fn encode_modern(
+    bgra: &[u8],
+    w: u32,
+    h: u32,
+    source: &[u8],
+    format: SaveFormat,
+) -> Result<Vec<u8>, String> {
+    use crate::batch::{Codec, Quality, encode};
+    let icc = crate::decode::probe(source).ok().and_then(|p| p.icc);
+    let codec = if format == SaveFormat::Webp {
+        Codec::Webp
+    } else {
+        Codec::Avif
+    };
+    let q = Quality {
+        jpeg: JPEG_QUALITY,
+        webp: 90,
+        webp_lossless: false,
+        avif: 85,
+        avif_speed: 6,
+    };
+    encode::encode(
+        bgra,
+        w,
+        h,
+        codec,
+        &q,
+        None,
+        icc.as_ref().map(|p| &p.bytes[..]),
+    )
+}
+
+#[cfg(not(feature = "batch"))]
+fn encode_modern(_: &[u8], _: u32, _: u32, _: &[u8], _: SaveFormat) -> Result<Vec<u8>, String> {
+    Err("WebP and AVIF need the batch feature".into())
 }
 
 fn encode_png(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>, String> {
@@ -282,6 +328,27 @@ mod tests {
         .to_bgra();
         // Same coefficients: only chroma upsampling at the new edges differs.
         assert!(psnr(&got, &region(&src, r)) > 40.0);
+    }
+
+    #[cfg(feature = "batch")]
+    #[test]
+    fn webp_and_avif_cutouts() {
+        let src = jpeg(320, 240);
+        let r = PixelRect::new(10, 20, 100, 60);
+        for (format, want) in [
+            (SaveFormat::Webp, Format::WebP),
+            (SaveFormat::Avif, Format::Avif),
+        ] {
+            let s = export(&src, &cut(r, 1, 6), format, &crate::decode::decode).unwrap();
+            assert!(!s.lossless);
+            assert_eq!(format::detect(&s.bytes), want);
+            let p = crate::decode::probe(&s.bytes).unwrap();
+            assert_eq!((p.width, p.height), (60, 100), "{format:?} turned upright");
+        }
+        assert_eq!(
+            SaveFormat::from_path(std::path::Path::new("a.WEBP")),
+            SaveFormat::Webp
+        );
     }
 
     #[test]

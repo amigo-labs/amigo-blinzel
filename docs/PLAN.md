@@ -223,7 +223,9 @@ Grundsatz wie oben: Quelldateien bleiben unverändert. Jede Ausgabe ist eine neu
   - Schreiben: temporäre Datei, dann per Hardlink an den freien Namen (scheitert statt zu ersetzen; ohne Hardlinks Umbenennen).
   - Parallel über Dateien (ein Decode-Thread je Datei), begrenzt durch ein Speicherbudget; eine kaputte Datei wird gemeldet, der Rest läuft weiter; Abbrechen.
 - ✅ **Messung** (`blinzel-bench batch`, Linux-Container, 4 vCPU, 24 12-MP-JPEGs mit Sensorrauschen, langer Rand 1920): JPEG 8,6/s (431 KB je Datei), WebP 5,1/s (213 KB), AVIF 1,1/s (73 KB, rav1e Geschwindigkeit 6). Zum Vergleich ImageMagick auf denselben Dateien (`convert -resize 1920x1920`, 4 Prozesse): 2,1/s.
-- ⬜ **Dialog in der App** mit Mehrfachauswahl im Raster (Phase 4) und „Speichern unter“ auch als WebP/AVIF.
+- ✅ **Dialog in der App** (Menü „Größe ändern…“, Strg+B): modales Panel über dem Viewer, auf allen Plattformen derselbe Code (`blinzel-ui/src/batch_dialog.rs`, Bedienelemente in `widgets.rs`). Größenmodus, Maße, „nicht vergrößern“, Format, Qualität, verlustfrei (WebP), Nachschärfen, Metadaten/GPS/Farbprofil, Namensmuster mit Beispiel, Zielordner (Systemdialog „…“). Läuft im Hintergrund mit Fortschritt, Abbrechen, Bericht (erste Fehler) und „Ordner öffnen“. Die Einstellungen bleiben für die Sitzung erhalten.
+- ✅ **Mehrfachauswahl im Raster:** Strg+Klick, Umschalt+Klick (Bereich), Strg+A, Esc hebt auf; markierte Kacheln mit Häkchen. Der Dialog nimmt die markierten Bilder, sonst den ganzen Ordner.
+- ✅ **„Ausschnitt speichern unter“** auch als WebP und AVIF (dieselben Encoder).
 - ⬜ Vergleich mit `vipsthumbnail` und XnConvert in `blinzel-race`.
 
 ## 8. Mehrsprachigkeit

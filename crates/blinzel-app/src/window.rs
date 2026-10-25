@@ -28,7 +28,8 @@ use blinzel_ui::chrome::Button;
 use blinzel_ui::settings_store;
 
 use crate::backend::{
-    App, TIMER_ANIM, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, WM_LOADED, WM_THUMB, monitor_rect,
+    App, TIMER_ANIM, WM_BATCH, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, WM_LOADED, WM_THUMB,
+    monitor_rect,
 };
 use crate::instance::Request;
 use crate::resident::{self, WM_TRAY};
@@ -319,7 +320,13 @@ fn handle(
         },
         WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
             let shift = (wp.0 & 0x0004) != 0;
-            actions.extend(app.mouse_down(point_from_lparam(lp), shift, msg == WM_MBUTTONDOWN));
+            let ctrl = key_down(VK_CONTROL);
+            actions.extend(app.mouse_down(
+                point_from_lparam(lp),
+                shift,
+                ctrl,
+                msg == WM_MBUTTONDOWN,
+            ));
             if app.is_dragging() {
                 unsafe { SetCapture(hwnd) };
             }
@@ -455,6 +462,18 @@ fn handle(
             app.on_thumbs();
             done
         }
+        WM_BATCH => {
+            app.on_batch();
+            done
+        }
+        // Characters for the batch dialog's text fields (keys go through
+        // WM_KEYDOWN).
+        WM_CHAR if app.dialog.is_some() => {
+            if let Some(c) = char::from_u32(wp.0 as u32) {
+                app.text_input(c.encode_utf8(&mut [0; 4]));
+            }
+            done
+        }
         WM_COLOR_TARGET => {
             let b =
                 unsafe { Box::from_raw(lp.0 as *mut (isize, Option<blinzel_core::icc::Profile>)) };
@@ -556,6 +575,7 @@ fn key_of(vk: u16) -> Option<Key> {
         VK_BACK => Key::Backspace,
         VK_RETURN => Key::Enter,
         VK_ESCAPE => Key::Escape,
+        VK_TAB => Key::Tab,
         VK_DELETE => Key::Delete,
         VK_F10 => Key::F10,
         VK_F11 => Key::F11,
@@ -710,6 +730,16 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             if let Err(e) = crate::notices::show(hwnd) {
                 platform::debug_log(&format!("notices: {e}"));
             }
+            vec![]
+        }
+        Action::PickFolder => {
+            if let Some(dir) = crate::dialogs::pick_folder(hwnd) {
+                with_app(|a| a.batch_folder_picked(dir));
+            }
+            vec![]
+        }
+        Action::OpenFolder(dir) => {
+            crate::dialogs::open_folder(hwnd, &dir);
             vec![]
         }
         Action::SetResident(on) => {

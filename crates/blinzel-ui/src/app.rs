@@ -26,6 +26,7 @@ use blinzel_core::timing;
 use blinzel_i18n::{Msg, tr, trf};
 
 use crate::backend::{Backend, Canvas, CursorKind, Device, Host, Key, Services, Timer, Wake};
+use crate::batch_dialog::{self, BatchDialog, RunMsg};
 use crate::browse::{Browse, grid_layout, strip_height};
 use crate::chrome::{Button, Chrome};
 use crate::color::ColorManager;
@@ -79,6 +80,11 @@ pub enum Action {
     Close,
     /// Exit for good, also in resident mode.
     Exit,
+    /// Ask for a folder for the batch dialog (then
+    /// [`App::batch_folder_picked`]).
+    PickFolder,
+    /// Show a folder in the platform's file manager.
+    OpenFolder(PathBuf),
     Activate,
     Uncloak,
     Quit,
@@ -186,6 +192,10 @@ pub struct App<B: Backend> {
     /// The menu drawn by the UI itself (platforms without native popup
     /// menus in the window).
     pub popup: Option<Popup>,
+    /// The batch dialog, open over the viewer.
+    pub dialog: Option<BatchDialog>,
+    /// Its settings from the last time it was open.
+    last_dialog: Option<BatchDialog>,
 }
 
 impl<B: Backend> App<B> {
@@ -248,6 +258,8 @@ impl<B: Backend> App<B> {
             exit_after_first_frame: None,
             notice: None,
             popup: None,
+            dialog: None,
+            last_dialog: None,
         }
     }
 
@@ -1005,6 +1017,10 @@ impl<B: Backend> App<B> {
                 .shapes(self.hover, self.pressed, self.maximized);
             self.canvas.draw_shapes(&chrome);
         }
+        let (client, scale) = (self.client_f(), self.scale());
+        if let Some(d) = &mut self.dialog {
+            d.draw(&mut self.canvas, client, scale);
+        }
         if let Some(p) = &self.popup {
             p.draw(&mut self.canvas);
         }
@@ -1214,16 +1230,26 @@ impl<B: Backend> App<B> {
         }
     }
 
-    pub fn mouse_down(&mut self, p: (f64, f64), shift: bool, middle: bool) -> Vec<Action> {
+    pub fn mouse_down(
+        &mut self,
+        p: (f64, f64),
+        shift: bool,
+        ctrl: bool,
+        middle: bool,
+    ) -> Vec<Action> {
         if let Some(popup) = &mut self.popup {
             let o = popup.mouse_down(p, &mut self.canvas);
             return self.popup_outcome(o);
+        }
+        if let Some(d) = &mut self.dialog {
+            let o = d.mouse_down(p);
+            return self.dialog_outcome(o);
         }
         if !middle && !self.fullscreen && self.chrome().hit(p) == Some(Button::Menu) {
             self.pressed = None;
             return vec![self.menu_at_button()];
         }
-        if let Some(handled) = self.browse_click(p) {
+        if let Some(handled) = self.browse_click(p, shift, ctrl) {
             return handled;
         }
         let Some(l) = self.layout() else {
@@ -1254,10 +1280,25 @@ impl<B: Backend> App<B> {
 
     /// Clicks on the grid (selects) and the filmstrip (opens). `None`
     /// when `p` is on neither.
-    fn browse_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
+    fn browse_click(&mut self, p: (f64, f64), shift: bool, ctrl: bool) -> Option<Vec<Action>> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         if let Some(state) = &mut self.browse.grid {
             if let Some(i) = grid_layout(count, client, scale).hit(p, state.scroll) {
+                let name = |i: usize| self.list.get(i).map(|e| e.name.clone());
+                if ctrl {
+                    // Toggle one.
+                    if let Some(n) = name(i)
+                        && !state.marked.remove(&n)
+                    {
+                        state.marked.insert(n);
+                    }
+                } else if shift {
+                    // Everything from the selected item to this one.
+                    let (a, b) = (state.selected.min(i), state.selected.max(i));
+                    state.marked.extend((a..=b).filter_map(name));
+                } else {
+                    state.marked.clear();
+                }
                 state.selected = i;
                 self.invalidate();
             }
@@ -1328,6 +1369,11 @@ impl<B: Backend> App<B> {
             self.popup_outcome(o);
             return;
         }
+        if let Some(d) = &mut self.dialog {
+            let o = d.mouse_move(p);
+            self.dialog_outcome(o);
+            return;
+        }
         self.update_browse_hover(p);
         let hover = if self.fullscreen {
             None
@@ -1368,6 +1414,10 @@ impl<B: Backend> App<B> {
     }
 
     pub fn mouse_up(&mut self) {
+        if let Some(d) = &mut self.dialog {
+            d.mouse_up();
+            return;
+        }
         if let Some(DragState::Pending { .. }) = self.drag {
             // A click without dragging clears the selection.
             if self.selection.take().is_some() {
@@ -1384,6 +1434,7 @@ impl<B: Backend> App<B> {
     /// Cursor shape for a client point.
     pub fn cursor_at(&self, p: (f64, f64), shift: bool) -> CursorKind {
         if self.browse.grid.is_some()
+            || self.dialog.is_some()
             || (!self.fullscreen && self.chrome().hit(p).is_some())
             || (self.filmstrip_shown() && p.1 >= self.view_area().1)
         {
@@ -1422,7 +1473,7 @@ impl<B: Backend> App<B> {
     }
 
     pub fn wheel(&mut self, p: (f64, f64), delta: i16) -> Vec<Action> {
-        if self.popup.is_some() {
+        if self.popup.is_some() || self.dialog.is_some() {
             return vec![];
         }
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
@@ -1460,7 +1511,18 @@ impl<B: Backend> App<B> {
             let o = popup.key(key, &mut self.canvas);
             return Some(self.popup_outcome(o));
         }
-        if let Some(a) = self.grid_key(key) {
+        if let Some(d) = &mut self.dialog {
+            let o = match key {
+                Tab => d.tab(shift),
+                k => d.key(k),
+            };
+            // The dialog is modal: every key stays with it.
+            return Some(self.dialog_outcome(o));
+        }
+        if ctrl && key == Letter('B') {
+            return Some(self.command(Cmd::Batch));
+        }
+        if let Some(a) = self.grid_key(key, ctrl) {
             return Some(a);
         }
         match key {
@@ -1517,10 +1579,22 @@ impl<B: Backend> App<B> {
     }
 
     /// Keys in the grid: moving the selection, opening, leaving.
-    fn grid_key(&mut self, key: Key) -> Option<Vec<Action>> {
+    fn grid_key(&mut self, key: Key, ctrl: bool) -> Option<Vec<Action>> {
         use Key::*;
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         let state = self.browse.grid.as_mut()?;
+        if ctrl && key == Letter('A') {
+            state
+                .marked
+                .extend((0..count).filter_map(|i| self.list.get(i).map(|e| e.name.clone())));
+            self.invalidate();
+            return Some(vec![]);
+        }
+        if key == Escape && !state.marked.is_empty() {
+            state.marked.clear();
+            self.invalidate();
+            return Some(vec![]);
+        }
         let g = grid_layout(count, client, scale);
         let page = g.page_rows(client.1) as isize;
         let i = state.selected;
@@ -1574,6 +1648,7 @@ impl<B: Backend> App<B> {
             has_selection: self.selection.is_some(),
             is_cropped: self.view.crop.is_some(),
             has_neighbours: self.list.len() > 1,
+            has_images: !self.list.is_empty() || self.current.is_some(),
             language: self
                 .settings
                 .language
@@ -1746,6 +1821,10 @@ impl<B: Backend> App<B> {
                 vec![]
             }
             Cmd::About => vec![Action::About],
+            Cmd::Batch => {
+                self.open_batch();
+                vec![]
+            }
             Cmd::Notices => vec![Action::Notices],
             Cmd::SaveCutout => match self.save_job() {
                 Some(job) => vec![Action::SaveCutout(job)],
@@ -1806,6 +1885,137 @@ impl<B: Backend> App<B> {
             default_name: format!("{stem}_{}.{ext}", tr(Msg::SaveSuffix)),
             prefer_png,
         })
+    }
+
+    /// Opens the batch dialog for the grid's marked images, else the
+    /// folder's.
+    fn open_batch(&mut self) {
+        let dir = self.list.dir().to_path_buf();
+        let marked: Vec<PathBuf> = self
+            .browse
+            .grid
+            .as_ref()
+            .map(|g| {
+                (0..self.list.len())
+                    .filter_map(|i| self.list.get(i))
+                    .filter(|e| g.marked.contains(&e.name))
+                    .map(|e| dir.join(&e.name))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_marked = !marked.is_empty();
+        let mut files = marked;
+        if files.is_empty() {
+            files = (0..self.list.len())
+                .filter_map(|i| self.list.get(i))
+                .filter(|e| !e.is_placeholder())
+                .map(|e| dir.join(&e.name))
+                .collect();
+        }
+        if files.is_empty()
+            && let Some(c) = &self.current
+        {
+            files.push(c.path.clone());
+        }
+        self.dialog = Some(match self.last_dialog.take() {
+            Some(d) => d.reopen(files, is_marked),
+            None => BatchDialog::new(files, is_marked),
+        });
+        self.invalidate();
+    }
+
+    fn dialog_outcome(&mut self, o: batch_dialog::Outcome) -> Vec<Action> {
+        use batch_dialog::Outcome as O;
+        match o {
+            O::Unchanged => vec![],
+            O::Redraw => {
+                self.invalidate();
+                vec![]
+            }
+            O::Close => {
+                self.last_dialog = self.dialog.take();
+                self.invalidate();
+                vec![]
+            }
+            O::Start(job, files) => {
+                self.start_batch(job, files);
+                self.invalidate();
+                vec![]
+            }
+            O::PickFolder => vec![Action::PickFolder],
+            O::OpenFolder(p) => vec![Action::OpenFolder(p)],
+        }
+    }
+
+    /// Runs a batch in the background; progress goes to the dialog.
+    fn start_batch(&mut self, job: blinzel_core::batch::Job, files: Vec<PathBuf>) {
+        use blinzel_core::batch::run::{self, Options, Source};
+        use std::sync::atomic::AtomicBool;
+
+        struct Platform<S>(Arc<S>);
+
+        impl<S: Services> Source for Platform<S> {
+            fn probe(&self, data: &[u8]) -> Result<Probe, blinzel_core::decode::DecodeError> {
+                self.0.probe(data)
+            }
+            fn decode(
+                &self,
+                data: &[u8],
+                req: blinzel_core::decode::Request,
+            ) -> Result<blinzel_core::pixel::Image, blinzel_core::decode::DecodeError> {
+                self.0.decode(data, req, 1)
+            }
+        }
+
+        let Some(d) = &mut self.dialog else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        d.started(rx, cancel.clone());
+        let services = self.services.clone();
+        let _ = std::thread::Builder::new()
+            .name("blinzel-batch".into())
+            .spawn(move || {
+                services.tune_thread(false);
+                let tx2 = std::sync::Mutex::new(tx.clone());
+                let progress = |p| {
+                    let _ = tx2.lock().unwrap().send(RunMsg::Progress(p));
+                    services.wake(Wake::Batch);
+                };
+                let source = Platform(services.clone());
+                let summary = run::run(
+                    &job,
+                    &files,
+                    &source,
+                    &Options::default(),
+                    &progress,
+                    &cancel,
+                );
+                let _ = tx.send(RunMsg::Finished(summary));
+                services.wake(Wake::Batch);
+            });
+    }
+
+    /// Progress of a running batch ([`Wake::Batch`]).
+    pub fn on_batch(&mut self) {
+        if self.dialog.as_mut().is_some_and(|d| d.poll()) {
+            self.invalidate();
+        }
+    }
+
+    /// The folder the platform's dialog returned for the batch.
+    pub fn batch_folder_picked(&mut self, folder: PathBuf) {
+        if let Some(d) = &mut self.dialog {
+            d.set_folder(folder);
+            self.invalidate();
+        }
+    }
+
+    /// Typed text (characters, not keys) for the batch dialog's fields.
+    pub fn text_input(&mut self, text: &str) {
+        if let Some(d) = &mut self.dialog {
+            let o = d.text_input(text);
+            self.dialog_outcome(o);
+        }
     }
 
     pub fn show_notice(&mut self, text: String) {

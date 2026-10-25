@@ -78,7 +78,15 @@ fn generate(root: &Path) -> Result<String, String> {
         if p.name == "turbojpeg-sys" {
             notices.push(libjpeg_turbo(&dir)?);
         }
-        let n = crate_notice(&p, &dir)?;
+        if p.name == "libwebp-sys" {
+            notices.push(libwebp(&dir)?);
+        }
+        let mut n = crate_notice(&p, &dir)?;
+        // A patent grant shipped next to the licence (rav1e: the AV1
+        // patent licence) goes with it.
+        if let Some(patents) = read_text(&dir.join("PATENTS")) {
+            n.text = format!("{}\n\n\n{}", n.text, normalize(&patents));
+        }
         // Crates of one project usually share the text word for word.
         match crates.get_mut(&n.text) {
             Some(same) => same.covers.extend(n.covers),
@@ -401,6 +409,44 @@ fn libjpeg_turbo(turbojpeg_sys: &Path) -> Result<Notice, String> {
         )],
         licence: "IJG AND BSD-3-Clause".into(),
         text: format!("{ijg}\n\n\n{bsd}"),
+    })
+}
+
+/// A text file in UTF-8 or, failing that, Windows-1252 (rav1e's PATENTS).
+fn read_text(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    Some(String::from_utf8(bytes).unwrap_or_else(|e| {
+        e.into_bytes()
+            .into_iter()
+            .map(|b| match b {
+                0x91 => '‘',
+                0x92 => '’',
+                0x93 => '“',
+                0x94 => '”',
+                0x96 => '–',
+                0x97 => '—',
+                b => char::from(b),
+            })
+            .collect()
+    }))
+}
+
+/// libwebp, built from the sources bundled in libwebp-sys: Google's BSD
+/// licence and patent grant (COPYING, PATENTS).
+fn libwebp(libwebp_sys: &Path) -> Result<Notice, String> {
+    let dir = libwebp_sys.join("vendor");
+    let read = |f: &str| {
+        fs::read_to_string(dir.join(f))
+            .map(|t| normalize(&t))
+            .map_err(|e| format!("{}/{f}: {e}", dir.display()))
+    };
+    Ok(Notice {
+        covers: vec!["libwebp (https://chromium.googlesource.com/webm/libwebp)".into()],
+        licence: "BSD-3-Clause".into(),
+        text: format!("{}
+
+
+{}", read("COPYING")?, read("PATENTS")?),
     })
 }
 

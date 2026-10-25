@@ -120,6 +120,8 @@ pub enum Wake {
     DirChanged,
     /// Thumbnails wait in the thumbnail pool's channel.
     Thumbs,
+    /// Progress of a batch wait in the batch dialog's channel.
+    Batch,
     /// The colour target of a monitor, asked for in the background.
     ColorTarget {
         monitor: isize,
@@ -172,6 +174,7 @@ pub enum Key {
     Backspace,
     Enter,
     Escape,
+    Tab,
     Delete,
     F10,
     F11,

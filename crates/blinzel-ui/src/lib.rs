@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod backend;
+pub mod batch_dialog;
 pub mod browse;
 pub mod chrome;
 pub mod color;
@@ -16,3 +17,4 @@ pub mod menu;
 pub mod popup;
 pub mod settings_store;
 pub mod thumbs;
+pub mod widgets;
