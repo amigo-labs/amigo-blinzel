@@ -32,6 +32,7 @@ use crate::color::ColorManager;
 use crate::gfx::{ImageInfo, Rgba, Shape};
 use crate::loader::{self, GpuAnimation, Job, Loaded, Loader, Stage};
 use crate::menu::{Cmd, MenuState};
+use crate::popup::{Outcome, Popup};
 use crate::settings_store;
 
 /// An image stage on the GPU of backend `B`.
@@ -182,6 +183,9 @@ pub struct App<B: Backend> {
     pub exit_after_first_frame: Option<PathBuf>,
     /// Short message shown at the bottom (saved, errors), cleared by timer.
     pub notice: Option<String>,
+    /// The menu drawn by the UI itself (platforms without native popup
+    /// menus in the window).
+    pub popup: Option<Popup>,
 }
 
 impl<B: Backend> App<B> {
@@ -243,6 +247,7 @@ impl<B: Backend> App<B> {
             sized_for: None,
             exit_after_first_frame: None,
             notice: None,
+            popup: None,
         }
     }
 
@@ -1000,6 +1005,9 @@ impl<B: Backend> App<B> {
                 .shapes(self.hover, self.pressed, self.maximized);
             self.canvas.draw_shapes(&chrome);
         }
+        if let Some(p) = &self.popup {
+            p.draw(&mut self.canvas);
+        }
         self.canvas.present();
 
         // After the first frame: checking the remembered colour target
@@ -1170,7 +1178,47 @@ impl<B: Backend> App<B> {
         Action::ShowMenu { x, y }
     }
 
+    /// Opens the menu drawn by the UI at client point `at` (see
+    /// [`App::popup`]).
+    pub fn open_menu(&mut self, at: (f64, f64)) {
+        let items = crate::menu::items(&self.menu_state());
+        let (client, scale) = (self.client_f(), self.scale());
+        self.popup = Some(Popup::open(
+            items,
+            at,
+            client,
+            scale,
+            blinzel_i18n::is_rtl(),
+            &mut self.canvas,
+        ));
+        self.invalidate();
+    }
+
+    fn popup_outcome(&mut self, o: Outcome) -> Vec<Action> {
+        match o {
+            Outcome::Unchanged => vec![],
+            Outcome::Redraw => {
+                self.invalidate();
+                vec![]
+            }
+            Outcome::Closed => {
+                self.popup = None;
+                self.invalidate();
+                vec![]
+            }
+            Outcome::Chosen(cmd) => {
+                self.popup = None;
+                self.invalidate();
+                self.command(cmd)
+            }
+        }
+    }
+
     pub fn mouse_down(&mut self, p: (f64, f64), shift: bool, middle: bool) -> Vec<Action> {
+        if let Some(popup) = &mut self.popup {
+            let o = popup.mouse_down(p, &mut self.canvas);
+            return self.popup_outcome(o);
+        }
         if !middle && !self.fullscreen && self.chrome().hit(p) == Some(Button::Menu) {
             self.pressed = None;
             return vec![self.menu_at_button()];
@@ -1275,6 +1323,11 @@ impl<B: Backend> App<B> {
     }
 
     pub fn mouse_move(&mut self, p: (f64, f64)) {
+        if let Some(popup) = &mut self.popup {
+            let o = popup.mouse_move(p, &mut self.canvas);
+            self.popup_outcome(o);
+            return;
+        }
         self.update_browse_hover(p);
         let hover = if self.fullscreen {
             None
@@ -1369,6 +1422,9 @@ impl<B: Backend> App<B> {
     }
 
     pub fn wheel(&mut self, p: (f64, f64), delta: i16) -> Vec<Action> {
+        if self.popup.is_some() {
+            return vec![];
+        }
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         if let Some(state) = &mut self.browse.grid {
             let g = grid_layout(count, client, scale);
@@ -1400,6 +1456,10 @@ impl<B: Backend> App<B> {
     /// Keyboard. Returns None for keys we do not handle.
     pub fn key(&mut self, key: Key, ctrl: bool, shift: bool) -> Option<Vec<Action>> {
         use Key::*;
+        if let Some(popup) = &mut self.popup {
+            let o = popup.key(key, &mut self.canvas);
+            return Some(self.popup_outcome(o));
+        }
         if let Some(a) = self.grid_key(key) {
             return Some(a);
         }
@@ -1814,5 +1874,33 @@ impl<B: Backend> App<B> {
         if let Some((_, size)) = self.host.monitor() {
             self.loader.set_screen_box(size);
         }
+    }
+}
+
+/// Reads the source, exports the cutout and writes it atomically (temp
+/// file + rename). Returns the message for the notice toast.
+pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> String {
+    use blinzel_core::export::{SaveFormat, export};
+    use blinzel_i18n::{Msg, trf};
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let result = (|| -> Result<bool, String> {
+        let data = services.read_file(&job.source).map_err(|e| e.to_string())?;
+        let decode = |d: &[u8], req| services.decode(d, req, 1);
+        let saved = export(&data, &job.cut, SaveFormat::from_path(target), &decode)?;
+        let tmp = target.with_extension("blinzel-tmp");
+        std::fs::write(&tmp, &saved.bytes).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, target).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            e.to_string()
+        })?;
+        Ok(saved.lossless)
+    })();
+    match result {
+        Ok(true) => trf(Msg::SavedLossless, &[("name", &name)]),
+        Ok(false) => trf(Msg::Saved, &[("name", &name)]),
+        Err(e) => trf(Msg::ErrorSave, &[("name", &name), ("reason", &e)]),
     }
 }

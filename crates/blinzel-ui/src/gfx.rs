@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use blinzel_core::geom::{Orientation, Rect};
+use blinzel_core::pixel::{Image, Pixels};
 use blinzel_core::thumb::{EDGE, Planes};
 
 /// Colour with straight alpha, 0..1.
@@ -58,6 +59,78 @@ pub trait ImageInfo {
     fn is_full_resolution(&self) -> bool {
         self.size() == self.full_size()
     }
+}
+
+/// Texels of neighbouring data around each luma/RGBA tile (chroma: half),
+/// so bilinear and box filtering are seamless across tiles.
+pub const BORDER: u32 = 4;
+/// Largest tile edge, border included.
+pub const DEFAULT_TILE: u32 = 4096;
+
+/// One tile of an image stage: the area it is responsible for and the
+/// plane areas its textures hold (with borders).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TilePlan {
+    /// Stage (luma) texels: x0, y0, x1, y1, without border.
+    pub rect: [u32; 4],
+    /// Luma/RGBA plane area of the main texture.
+    pub main: [u32; 4],
+    /// Cb and Cr plane area, for YCbCr.
+    pub chroma: Option<[u32; 4]>,
+}
+
+/// Splits `0..len` into spans of at most `tile` that start at multiples of
+/// `align` (so chroma tiles line up with luma tiles).
+fn spans(len: u32, tile: u32, align: u32) -> Vec<(u32, u32)> {
+    let step = (tile / align).max(1) * align;
+    (0..len.div_ceil(step))
+        .map(|i| (i * step, ((i + 1) * step).min(len)))
+        .collect()
+}
+
+/// Cuts an image stage into tiles of at most `tile` texels per edge
+/// (border included): upload spikes stay bounded, eviction is finer, and
+/// nothing exceeds a GPU's texture limit.
+pub fn plan_tiles(img: &Image, tile: u32) -> Vec<TilePlan> {
+    let tile = tile.max(64);
+    let inner = tile - 2 * BORDER;
+    let (w, h) = (img.width, img.height);
+    let (align_x, align_y, sub) = match &img.pixels {
+        Pixels::Packed { .. } => (1, 1, None),
+        Pixels::Ycc { cb, sub, .. } => (
+            sub.h.max(1) as u32 * 8,
+            sub.v.max(1) as u32 * 8,
+            Some((sub.h as u32, sub.v as u32, cb.width, cb.height)),
+        ),
+    };
+    let mut out = Vec::new();
+    for &(y0, y1) in &spans(h, inner, align_y) {
+        for &(x0, x1) in &spans(w, inner, align_x) {
+            let main = [
+                x0.saturating_sub(BORDER),
+                y0.saturating_sub(BORDER),
+                (x1 + BORDER).min(w),
+                (y1 + BORDER).min(h),
+            ];
+            // Chroma: the same area divided by the factors, with a border
+            // of BORDER / factor chroma texels.
+            let chroma = sub.map(|(sh, sv, cw, ch)| {
+                let (bx, by) = (BORDER.div_ceil(sh), BORDER.div_ceil(sv));
+                [
+                    (x0 / sh).saturating_sub(bx),
+                    (y0 / sv).saturating_sub(by),
+                    (x1.div_ceil(sh) + bx).min(cw),
+                    (y1.div_ceil(sv) + by).min(ch),
+                ]
+            });
+            out.push(TilePlan {
+                rect: [x0, y0, x1, y1],
+                main,
+                chroma,
+            });
+        }
+    }
+    out
 }
 
 /// Atlas page edge in texels: 64 slots of [`EDGE`]² thumbnails, in 4:2:0
@@ -208,6 +281,33 @@ impl Atlas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiles_cover_the_image_with_borders() {
+        use blinzel_core::pixel::{Alpha, PackedFormat, Plane};
+        let img = Image {
+            pixels: Pixels::Packed {
+                plane: Plane::new(10_000, 300, 4),
+                format: PackedFormat::Bgra8,
+                alpha: Alpha::Opaque,
+            },
+            width: 10_000,
+            height: 300,
+            full_width: 10_000,
+            full_height: 300,
+            region: None,
+        };
+        let t = plan_tiles(&img, DEFAULT_TILE);
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[0].rect, [0, 0, 4088, 300]);
+        assert_eq!(t[0].main, [0, 0, 4092, 300]);
+        assert_eq!(t[1].main, [4084, 0, 8180, 300]);
+        assert_eq!(t[2].rect[2], 10_000);
+        assert!(
+            t.iter()
+                .all(|t| t.main[2] - t.main[0] <= DEFAULT_TILE && t.chroma.is_none())
+        );
+    }
 
     #[derive(Default)]
     struct Fake {

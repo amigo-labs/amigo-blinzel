@@ -56,7 +56,7 @@ pub const JPEG_QUALITY: u8 = 95;
 
 /// Decodes a region of a source file (native decoders plus the platform
 /// fallback).
-pub type RegionDecoder = dyn Fn(&[u8], Request) -> Result<Image, DecodeError>;
+pub type RegionDecoder<'a> = dyn Fn(&[u8], Request) -> Result<Image, DecodeError> + 'a;
 
 /// Produces the bytes of the saved cutout. `decode` decodes a region of
 /// the source (native decoders plus the platform fallback).
@@ -64,7 +64,7 @@ pub fn export(
     data: &[u8],
     cut: &Cutout,
     format: SaveFormat,
-    decode: &RegionDecoder,
+    decode: &RegionDecoder<'_>,
 ) -> Result<Saved, String> {
     let source = format::detect(data);
     let info = (source == Format::Jpeg)

@@ -1,5 +1,9 @@
-//! amigo-blinzel for Windows: a frameless Win32 window, a Direct3D 11
-//! renderer and a prefetching decode pipeline around `blinzel-core`.
+//! amigo-blinzel's platform shells around `blinzel-ui`: Windows (Win32,
+//! Direct3D 11) and Linux (winit, wgpu).
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod linux;
+pub mod notices_text;
 
 #[cfg(windows)]
 pub mod backend;

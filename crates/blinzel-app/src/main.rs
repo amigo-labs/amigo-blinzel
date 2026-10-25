@@ -8,8 +8,7 @@ fn main() {
     std::process::exit(blinzel_app::run::run());
 }
 
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn main() {
-    eprintln!("amigo-blinzel is a Windows application.");
-    std::process::exit(1);
+    std::process::exit(blinzel_app::linux::run());
 }

@@ -12,18 +12,29 @@ env:
 
 jobs:
   linux:
-    name: Linux (core, fmt, clippy, tests)
+    name: Linux (core, app, fmt, clippy, tests)
     runs-on: ubuntu-latest
+    env:
+      # The wgpu golden test must find a GPU: lavapipe, Mesa's software
+      # Vulkan (the counterpart of WARP on Windows).
+      BLINZEL_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@v4
       # Toolchain, components and targets come from rust-toolchain.toml.
       - run: rustup toolchain install && rustup show active-toolchain
-      - name: Install NASM (libjpeg-turbo SIMD)
-        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Install NASM (libjpeg-turbo SIMD), lavapipe and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y nasm mesa-vulkan-drivers xvfb
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The viewer starts, shows a test image and exits (X11 on Xvfb).
+      - name: Linux viewer smoke test
+        run: |
+          cargo build --release -p blinzel-app
+          XDG_RUNTIME_DIR=$RUNNER_TEMP timeout 120 xvfb-run -a ./target/release/blinzel \
+            crates/blinzel-core/testdata/rgb420-64x48.avif --exit-after-first-frame --json startup.json
+          cat startup.json
       # Fails when Cargo.lock changed without regenerating the notices.
       - name: Third-party notices up to date
         run: cargo run --locked -p blinzel-release -- notices --check

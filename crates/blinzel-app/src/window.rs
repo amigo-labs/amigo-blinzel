@@ -659,10 +659,12 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
                 crate::dialogs::save_file(hwnd, &folder, &job.default_name, job.prefer_png)
             {
                 let raw = hwnd.0 as isize;
+                let services = with_app(|a| a.services.clone());
                 let _ = std::thread::Builder::new()
                     .name("blinzel-save".into())
                     .spawn(move || {
-                        let text = save_cutout(&job, &target);
+                        let Some(services) = services else { return };
+                        let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
                         let ptr = Box::into_raw(Box::new(text)) as isize;
                         unsafe {
                             if PostMessageW(
@@ -1062,36 +1064,4 @@ pub fn register_class(
         return Err(windows::core::Error::from_thread());
     }
     Ok(())
-}
-
-/// Reads the source, exports the cutout and writes it atomically (temp
-/// file + rename). Returns the message for the notice toast.
-fn save_cutout(job: &blinzel_ui::app::SaveJob, target: &std::path::Path) -> String {
-    use blinzel_core::export::{SaveFormat, export};
-    use blinzel_i18n::{Msg, trf};
-    let name = target
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let result = (|| -> Result<bool, String> {
-        let data = platform::io::read_file(&job.source).map_err(|e| e.to_string())?;
-        let saved = export(
-            &data,
-            &job.cut,
-            SaveFormat::from_path(target),
-            &crate::wic::decode_any,
-        )?;
-        let tmp = target.with_extension("blinzel-tmp");
-        std::fs::write(&tmp, &saved.bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, target).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            e.to_string()
-        })?;
-        Ok(saved.lossless)
-    })();
-    match result {
-        Ok(true) => trf(Msg::SavedLossless, &[("name", &name)]),
-        Ok(false) => trf(Msg::Saved, &[("name", &name)]),
-        Err(e) => trf(Msg::ErrorSave, &[("name", &name), ("reason", &e)]),
-    }
 }

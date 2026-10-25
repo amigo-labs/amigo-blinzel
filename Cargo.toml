@@ -18,7 +18,7 @@ blinzel-jpeg = { path = "crates/blinzel-jpeg" }
 blinzel-i18n = { path = "crates/blinzel-i18n" }
 blinzel-ui = { path = "crates/blinzel-ui", default-features = false }
 turbojpeg-sys = { version = "1.2", default-features = false, features = ["cmake", "require-simd"] }
-zune-jpeg = "0.5.16-rc3"
+zune-jpeg = "0.5.15"
 zune-png = "0.5.2"
 zune-core = "0.5"
 png = "0.18"
@@ -35,6 +35,18 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 # assembly is added by blinzel-core's `av1-asm` feature, like dav1d's.
 libwebp-sys = "0.14.4"
 ravif = { version = "0.13.0", default-features = false }
+# The Linux shell: window and input (Wayland, X11), rendering (Vulkan,
+# OpenGL ES), text, file dialogs, clipboard, recycle bin, folder watching,
+# colour transforms.
+winit = "0.30.13"
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "gles", "wgsl"] }
+pollster = "1.0.1"
+cosmic-text = "0.19.0"
+rfd = "0.17.2"
+arboard = { version = "3.7.0", features = ["wayland-data-control"] }
+trash = "5.2.9"
+notify = "8.2.0"
+lcms2 = "6.2.0"
 # Only in the benches: the resampler gate.
 fast_image_resize = "6.1.0"
 # Verifies our own signature of release checksums (self-updater).
