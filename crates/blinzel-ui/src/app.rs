@@ -2,10 +2,11 @@
 //! state, selection, rendering. It never decodes; it shows the best texture
 //! that is ready and tells the loader what to prepare next.
 //!
-//! Anything that can re-enter the window procedure (menus, dialogs, window
-//! moves) is returned as an [`Action`] and executed by `window.rs` after the
-//! state borrow has been released.
+//! Anything that can re-enter the platform's event loop (menus, dialogs,
+//! window moves) is returned as an [`Action`] and executed by the shell
+//! after the state borrow has been released.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,20 +24,19 @@ use blinzel_core::selection::{self, Drag, Hit, LeftDrag, hit_test, left_drag_act
 use blinzel_core::settings::Settings;
 use blinzel_core::timing;
 use blinzel_i18n::{Msg, tr, trf};
-use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::UI::WindowsAndMessaging::SetWindowTextW;
-use windows::core::PCWSTR;
 
-use crate::browse::{Browse, strip_height};
+use crate::backend::{Backend, Canvas, CursorKind, Device, Host, Key, Services, Timer, Wake};
+use crate::browse::{Browse, grid_layout, strip_height};
 use crate::chrome::{Button, Chrome};
-use crate::clipboard;
 use crate::color::ColorManager;
-use crate::gfx::text::Text;
-use crate::gfx::{Gfx, GpuImage, GpuLut, Renderer, Rgba, Shape, SwapChain};
+use crate::gfx::{ImageInfo, Rgba, Shape};
 use crate::loader::{self, GpuAnimation, Job, Loaded, Loader, Stage};
 use crate::menu::{Cmd, MenuState};
-use crate::platform::{enumerate, io, wide};
 use crate::settings_store;
+
+/// An image stage on the GPU of backend `B`.
+type Img<B> = <<B as Backend>::Device as Device>::Image;
+type Lut<B> = <<B as Backend>::Device as Device>::Lut;
 
 /// Deferred work that may re-enter the window procedure.
 #[derive(Debug)]
@@ -92,6 +92,16 @@ pub struct SaveJob {
     pub prefer_png: bool,
 }
 
+/// What a copy put on the clipboard: decoded only when someone pastes.
+#[derive(Clone, Debug)]
+pub struct ClipSource {
+    pub path: PathBuf,
+    /// Region in stored (file) orientation.
+    pub stored_rect: PixelRect,
+    /// Orientation to apply (EXIF plus the user's rotation).
+    pub orientation: Orientation,
+}
+
 pub struct Current {
     pub path: PathBuf,
     pub entry: Entry,
@@ -111,33 +121,24 @@ enum DragState {
     Select(Drag),
 }
 
-/// Messages from helper threads to the UI thread.
-pub const WM_LIST: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
-pub const WM_DIR_CHANGED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 3;
-/// Timer that advances an animation (window.rs dispatches it).
-pub const TIMER_ANIM: usize = 3;
-
-/// LPARAM: `Box<(isize, Option<Profile>)>`, a monitor and its colour target.
-pub const WM_COLOR_TARGET: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
-
-pub struct App {
-    pub hwnd: HWND,
-    pub gfx: Gfx,
-    renderer: Renderer,
-    pub swap: SwapChain,
-    text: Option<Result<Text, ()>>,
+pub struct App<B: Backend> {
+    pub host: B::Host,
+    pub device: Arc<B::Device>,
+    pub canvas: B::Canvas,
+    pub services: Arc<B::Services>,
     pub settings: Settings,
-    pub loader: Loader,
+    pub loader: Loader<B::Device, B::Services>,
     list: FileList,
     list_rx: Option<Receiver<(PathBuf, std::io::Result<Vec<Entry>>)>>,
-    watcher: Option<enumerate::DirWatcher>,
+    /// The watched folder and the platform's watch on it.
+    watcher: Option<(PathBuf, Box<dyn Any>)>,
     pub current: Option<Current>,
-    textures: ByteLru<u64, Arc<GpuImage>>,
+    textures: ByteLru<u64, Arc<Img<B>>>,
     vram_budget: usize,
     probes: HashMap<u64, Probe>,
     failed: HashMap<u64, String>,
     /// What is on screen (may be the previous image while the next loads).
-    shown: Option<(u64, Arc<GpuImage>)>,
+    shown: Option<(u64, Arc<Img<B>>)>,
     pub view: ViewState,
     user_rotation: Orientation,
     selection: Option<Rect>,
@@ -157,15 +158,15 @@ pub struct App {
     /// Colour management (shared with the loader) and the GPU copies of
     /// its transforms, by transform.
     pub color: Arc<ColorManager>,
-    gpu_luts: HashMap<usize, (Arc<blinzel_core::lut::Lut3d>, Option<GpuLut>)>,
+    gpu_luts: HashMap<usize, (Arc<blinzel_core::lut::Lut3d>, Option<Lut<B>>)>,
     /// The monitor the colour target was chosen for.
     pub monitor: isize,
     /// The remembered colour target was checked against Windows.
     color_verified: bool,
     /// Grid browser and filmstrip.
-    pub browse: Browse,
+    pub browse: Browse<B::Services>,
     /// The current image's animation (`None`: it is a still image).
-    animations: HashMap<u64, Option<Arc<GpuAnimation>>>,
+    animations: HashMap<u64, Option<Arc<GpuAnimation<Img<B>>>>>,
     /// Frame shown and complete plays so far.
     anim_frame: usize,
     anim_plays: u32,
@@ -175,7 +176,7 @@ pub struct App {
     pub dpi: u32,
     pub client: (u32, u32),
     direction: isize,
-    pub clip: Option<clipboard::Source>,
+    pub clip: Option<ClipSource>,
     first_image_shown: bool,
     sized_for: Option<u64>,
     pub exit_after_first_frame: Option<PathBuf>,
@@ -183,26 +184,25 @@ pub struct App {
     pub notice: Option<String>,
 }
 
-impl App {
+impl<B: Backend> App<B> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        hwnd: HWND,
-        gfx: Gfx,
-        renderer: Renderer,
-        swap: SwapChain,
+        host: B::Host,
+        device: Arc<B::Device>,
+        canvas: B::Canvas,
+        services: Arc<B::Services>,
         settings: Settings,
-        loader: Loader,
+        loader: Loader<B::Device, B::Services>,
         color: Arc<ColorManager>,
         dpi: u32,
         client: (u32, u32),
-    ) -> App {
-        let vram_budget = gfx.texture_budget();
+    ) -> App<B> {
+        let vram_budget = device.texture_budget();
         App {
-            hwnd,
-            gfx,
-            renderer,
-            swap,
-            text: None,
+            host,
+            device,
+            canvas,
+            services,
             settings,
             loader,
             list: FileList::default(),
@@ -259,9 +259,7 @@ impl App {
     }
 
     pub fn invalidate(&self) {
-        unsafe {
-            let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(self.hwnd), None, false);
-        }
+        self.host.invalidate();
     }
 
     // ------------------------------------------------------------- resident
@@ -291,7 +289,7 @@ impl App {
         self.browse.reset();
         self.stop_animation();
         self.drop_animations(None);
-        self.gfx.trim();
+        self.canvas.trim();
         // Also what prefetch jobs still in flight give back later.
         blinzel_core::bufpool::global().set_max_retained(0);
     }
@@ -306,7 +304,7 @@ impl App {
             .language
             .as_deref()
             .and_then(blinzel_i18n::lang_from_code);
-        blinzel_i18n::set_lang(lang.unwrap_or_else(crate::run::system_language));
+        blinzel_i18n::set_lang(lang.unwrap_or_else(|| self.services.system_language()));
     }
 
     /// Resident start: decodes, uploads and draws a generated JPEG once
@@ -326,40 +324,28 @@ impl App {
         let Ok(img) = decode::decode_with(&data, req, threads) else {
             return;
         };
-        let tile = self
-            .gfx
-            .max_texture_size()
-            .min(crate::gfx::texture::DEFAULT_TILE);
-        let Ok(gpu) =
-            crate::gfx::texture::upload(&self.gfx.device, &img, Orientation::NORMAL, tile)
-        else {
-            return;
-        };
-        let Some(rtv) = self.swap.rtv().cloned() else {
+        let Ok(gpu) = self.device.upload(&img, Orientation::NORMAL) else {
             return;
         };
         let bg = Rgba::from_u8(self.settings.background, 1.0);
-        let ctx = self.gfx.context.clone();
-        let full = (gpu.full_width, gpu.full_height);
+        let full = gpu.full_size();
         let l = compute(
             full,
             (self.client.0 as f64, self.client.1 as f64),
             &self.settings.view,
             &ViewState::default(),
         );
-        let stage = (gpu.width, gpu.height);
+        let stage = gpu.size();
         let xform = stage_to_client(&l, Orientation::NORMAL, full, stage);
         let content = content_in_stage(&l, Orientation::NORMAL, full, stage);
-        self.renderer.begin(&ctx, &rtv, self.swap.size, bg);
-        self.renderer
-            .draw_image(&ctx, &gpu, &xform, &content, bg, None);
-        let _ = self.swap.present();
-        // The colour system (mscms) loads on first use: once now, with the
-        // profile most photos with one carry (phones: Display P3).
+        if self.canvas.begin(bg) {
+            self.canvas.draw_image(&gpu, &xform, &content, bg, None);
+            self.canvas.present();
+        }
+        // The colour system loads on first use: once now, with the profile
+        // most photos with one carry (phones: Display P3).
         if self.settings.color_management {
-            use blinzel_core::icc::{Profile, Trc, colorants, matrix_profile};
-            let p3 = Profile::new(matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3"));
-            let _ = crate::color::build_lut(Some(&p3), None);
+            self.color.warm_up();
         }
     }
 
@@ -371,7 +357,7 @@ impl App {
         if self.hidden {
             self.reload_settings();
         }
-        let entry = match io::entry(&path) {
+        let entry = match self.services.entry(&path) {
             Ok(e) => e,
             Err(e) => {
                 let name = path
@@ -406,22 +392,15 @@ impl App {
     pub fn start_listing(&mut self, dir: PathBuf) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.list_rx = Some(rx);
-        let hwnd = self.hwnd.0 as isize;
+        let services = self.services.clone();
         let _ = std::thread::Builder::new()
             .name("blinzel-list".into())
             .spawn(move || {
                 let t = std::time::Instant::now();
-                let r = enumerate::list_dir(&dir);
+                let r = services.list_dir(&dir);
                 timing::record("list_dir_us", t.elapsed().as_secs_f64() * 1e6);
                 let _ = tx.send((dir, r));
-                unsafe {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                        Some(HWND(hwnd as *mut _)),
-                        WM_LIST,
-                        windows::Win32::Foundation::WPARAM(0),
-                        windows::Win32::Foundation::LPARAM(0),
-                    );
-                }
+                services.wake(Wake::List);
             });
     }
 
@@ -438,8 +417,8 @@ impl App {
         if let Some(cur) = &mut self.current {
             cur.index = self.list.index_of(&cur.entry.name);
         }
-        if self.watcher.as_ref().map(|w| w.dir != dir).unwrap_or(true) {
-            self.watcher = enumerate::DirWatcher::start(&dir, self.hwnd, WM_DIR_CHANGED).ok();
+        if self.watcher.as_ref().is_none_or(|w| w.0 != dir) {
+            self.watcher = self.host.watch_dir(&dir).map(|w| (dir.clone(), w));
         }
         self.update_wanted();
         self.invalidate();
@@ -491,9 +470,7 @@ impl App {
         self.anim_frame = 0;
         self.anim_plays = 0;
         self.anim_waiting = false;
-        unsafe {
-            let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(self.hwnd), TIMER_ANIM);
-        }
+        self.host.kill_timer(Timer::Anim);
     }
 
     /// Forgets the animations of every image but `keep` (the loader may
@@ -512,18 +489,11 @@ impl App {
     }
 
     fn schedule_frame(&self, ms: u32) {
-        unsafe {
-            windows::Win32::UI::WindowsAndMessaging::SetTimer(
-                Some(self.hwnd),
-                TIMER_ANIM,
-                ms.max(10),
-                None,
-            );
-        }
+        self.host.set_timer(Timer::Anim, ms.max(10));
     }
 
     /// The current image's animation, if it has one.
-    fn animation(&self) -> Option<Arc<GpuAnimation>> {
+    fn animation(&self) -> Option<Arc<GpuAnimation<Img<B>>>> {
         let c = self.current.as_ref()?;
         self.animations.get(&c.cache_id)?.clone()
     }
@@ -531,9 +501,7 @@ impl App {
     /// The animation timer: next frame; at the end of the last play the
     /// last frame stays.
     pub fn on_anim_timer(&mut self) {
-        unsafe {
-            let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(self.hwnd), TIMER_ANIM);
-        }
+        self.host.kill_timer(Timer::Anim);
         let Some(a) = self.animation() else { return };
         let next = self.anim_frame + 1;
         if next == a.frames.len() && !a.complete {
@@ -567,10 +535,7 @@ impl App {
             Some(c) => trf(Msg::WindowTitle, &[("name", &c.entry.name)]),
             None => tr(Msg::AppName).to_string(),
         };
-        let w = wide(&title);
-        unsafe {
-            let _ = SetWindowTextW(self.hwnd, PCWSTR(w.as_ptr()));
-        }
+        self.host.set_title(&title);
     }
 
     // ------------------------------------------------------------- prefetch
@@ -592,7 +557,7 @@ impl App {
         };
         // Zoomed in beyond what the screen-sized stage resolves.
         if let (Some(img), Some(l)) = (self.best_texture(cur.cache_id), self.layout()) {
-            let texel_per_px = l.scale * img.full_width as f64 / img.width.max(1) as f64;
+            let texel_per_px = l.scale * img.full_size().0 as f64 / img.size().0.max(1) as f64;
             if texel_per_px > 1.05 && !img.is_full_resolution() {
                 return Stage::Full;
             }
@@ -691,6 +656,7 @@ impl App {
 
     /// Drains finished loads into the texture cache.
     pub fn on_loaded(&mut self) -> Vec<Action> {
+        type Out<B> = Loaded<Img<B>>;
         if self.hidden {
             // Late results of the closed session: not kept.
             while let Ok(l) = self.loader.results.try_recv() {
@@ -701,7 +667,7 @@ impl App {
         let mut changed_current = false;
         let current_id = self.current.as_ref().map(|c| c.cache_id);
         while let Ok(l) = self.loader.results.try_recv() {
-            let Loaded {
+            let Out::<B> {
                 cache_id,
                 stage,
                 probe,
@@ -741,7 +707,7 @@ impl App {
             }
             match image {
                 Ok(img) => {
-                    let bytes = img.bytes;
+                    let bytes = img.bytes();
                     self.textures
                         .insert(loader::key(cache_id, stage), img, bytes);
                     // The image the user waits for (startup or wake).
@@ -801,7 +767,7 @@ impl App {
         ids
     }
 
-    fn best_texture(&self, cache_id: u64) -> Option<Arc<GpuImage>> {
+    fn best_texture(&self, cache_id: u64) -> Option<Arc<Img<B>>> {
         [Stage::Full, Stage::Screen, Stage::Preview]
             .into_iter()
             .find_map(|s| self.textures.peek(&loader::key(cache_id, s)).cloned())
@@ -809,12 +775,12 @@ impl App {
 
     // --------------------------------------------------------------- layout
 
-    fn orientation_of(&self, img: &GpuImage) -> Orientation {
-        img.orientation.then(self.user_rotation)
+    fn orientation_of(&self, img: &Img<B>) -> Orientation {
+        img.orientation().then(self.user_rotation)
     }
 
     /// Image to display and its layout.
-    fn displayed(&self) -> Option<(Arc<GpuImage>, Orientation, Layout)> {
+    fn displayed(&self) -> Option<(Arc<Img<B>>, Orientation, Layout)> {
         let frame = self
             .animation()
             .and_then(|a| a.frames.get(self.anim_frame).map(|f| f.0.clone()));
@@ -828,7 +794,8 @@ impl App {
             None => None,
         }?;
         let o = self.orientation_of(&img);
-        let oriented = o.oriented_size(img.full_width, img.full_height);
+        let full = img.full_size();
+        let oriented = o.oriented_size(full.0, full.1);
         let l = compute(oriented, self.view_area(), &self.settings.view, &self.view);
         Some((img, o, l))
     }
@@ -866,54 +833,39 @@ impl App {
 
     /// The colour transform for image `cache_id` on the GPU, if it needs
     /// one.
-    fn gpu_lut(&mut self, cache_id: u64) -> Option<GpuLut> {
+    fn gpu_lut(&mut self, cache_id: u64) -> Option<Lut<B>> {
         let icc = self.probes.get(&cache_id).and_then(|p| p.icc.clone());
         let lut = self.color.lut(icc.as_ref())?;
         let key = Arc::as_ptr(&lut) as usize;
-        let device = &self.gfx.device;
+        let device = &self.device;
         self.gpu_luts
             .entry(key)
             .or_insert_with(|| {
-                let gpu = crate::gfx::upload_lut(device, &lut).ok();
+                let gpu = device.upload_lut(&lut).ok();
                 (lut, gpu)
             })
             .1
             .clone()
     }
 
-    /// Asks Windows for the monitor's colour target in the background (the
-    /// start used the remembered one); the answer comes back as
-    /// [`WM_COLOR_TARGET`].
+    /// Asks the platform for the monitor's colour target in the background
+    /// (the start used the remembered one); the answer comes back as
+    /// [`Wake::ColorTarget`].
     fn verify_color_target(&mut self) {
         if self.color_verified || !self.settings.color_management {
             return;
         }
         self.color_verified = true;
-        let (hwnd, monitor) = (self.hwnd.0 as isize, self.monitor);
+        let (services, monitor) = (self.services.clone(), self.monitor);
         let _ = std::thread::Builder::new()
             .name("blinzel-color-target".into())
             .spawn(move || {
-                use windows::Win32::Foundation::{LPARAM, WPARAM};
-                use windows::Win32::Graphics::Gdi::HMONITOR;
-                use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
-                let target = crate::color::display_target(HMONITOR(monitor as *mut _));
-                let msg = Box::into_raw(Box::new((monitor, target)));
-                unsafe {
-                    if PostMessageW(
-                        Some(HWND(hwnd as *mut _)),
-                        WM_COLOR_TARGET,
-                        WPARAM(0),
-                        LPARAM(msg as isize),
-                    )
-                    .is_err()
-                    {
-                        drop(Box::from_raw(msg));
-                    }
-                }
+                let target = services.display_target(monitor);
+                services.wake(Wake::ColorTarget { monitor, target });
             });
     }
 
-    /// The colour target Windows reported for `monitor`.
+    /// The colour target the platform reported for `monitor`.
     pub fn on_color_target(&mut self, monitor: isize, target: Option<blinzel_core::icc::Profile>) {
         if monitor == self.monitor && self.color.set_target(target) {
             self.gpu_luts.clear();
@@ -924,13 +876,14 @@ impl App {
     /// Re-targets colour management when the window moved to another
     /// monitor (or the displays changed: `force`).
     pub fn check_monitor(&mut self, force: bool) {
-        use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
-        let m = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
-        if !force && m.0 as isize == self.monitor {
+        let Some((m, _)) = self.host.monitor() else {
+            return;
+        };
+        if !force && m == self.monitor {
             return;
         }
-        self.monitor = m.0 as isize;
-        if self.color.set_target(crate::color::display_target(m)) {
+        self.monitor = m;
+        if self.color.set_target(self.services.display_target(m)) {
             self.gpu_luts.clear();
             self.invalidate();
         }
@@ -984,12 +937,10 @@ impl App {
     // ------------------------------------------------------------ rendering
 
     pub fn render(&mut self) -> Vec<Action> {
-        let Some(rtv) = self.swap.rtv().cloned() else {
-            return vec![];
-        };
         let bg = Rgba::from_u8(self.settings.background, 1.0);
-        let ctx = self.gfx.context.clone();
-        self.renderer.begin(&ctx, &rtv, self.swap.size, bg);
+        if !self.canvas.begin(bg) {
+            return vec![];
+        }
         let mut shapes: Vec<Shape> = Vec::new();
         let mut showed_image = false;
         let in_grid = self.browse.grid.is_some();
@@ -997,22 +948,20 @@ impl App {
             let (client, scale) = (self.client_f(), self.scale());
             let background = self.settings.background;
             self.browse.draw_grid(
-                &self.renderer,
-                &ctx,
-                self.hwnd,
+                &mut self.canvas,
+                &self.services,
                 &self.list,
                 client,
                 scale,
                 background,
             );
         } else if let Some((img, o, l)) = self.displayed() {
-            let full = (img.full_width, img.full_height);
-            let stage = (img.width, img.height);
+            let (full, stage) = (img.full_size(), img.size());
             let xform = stage_to_client(&l, o, full, stage);
             let content = content_in_stage(&l, o, full, stage);
             let lut = self.displayed_id().and_then(|id| self.gpu_lut(id));
-            self.renderer
-                .draw_image(&ctx, &img, &xform, &content, bg, lut.as_ref());
+            self.canvas
+                .draw_image(&img, &xform, &content, bg, lut.as_ref());
             if let Some(cur) = &self.current {
                 self.shown = Some((cur.cache_id, img.clone()));
                 showed_image = self.best_texture(cur.cache_id).is_some();
@@ -1021,7 +970,7 @@ impl App {
                 self.selection_shapes(&l, &sel, &mut shapes);
             }
         }
-        self.renderer.draw_shapes(&ctx, &shapes);
+        self.canvas.draw_shapes(&shapes);
         if let Some(sel) = self.selection
             && !in_grid
             && let Some(l) = self.layout()
@@ -1035,9 +984,8 @@ impl App {
             let current = self.current.as_ref().and_then(|c| c.index);
             let (client, scale) = (self.client_f(), self.scale());
             self.browse.draw_strip(
-                &self.renderer,
-                &ctx,
-                self.hwnd,
+                &mut self.canvas,
+                &self.services,
                 &self.list,
                 current,
                 client,
@@ -1050,9 +998,9 @@ impl App {
             let chrome = self
                 .chrome()
                 .shapes(self.hover, self.pressed, self.maximized);
-            self.renderer.draw_shapes(&ctx, &chrome);
+            self.canvas.draw_shapes(&chrome);
         }
-        let _ = self.swap.present();
+        self.canvas.present();
 
         // After the first frame: checking the remembered colour target
         // loads the ICM subsystem.
@@ -1064,20 +1012,19 @@ impl App {
         if showed_image && !self.first_image_shown {
             self.first_image_shown = true;
             timing::mark("first_present");
-            crate::update::on_first_frame();
+            self.host.first_frame_shown();
             if let Some(out) = &self.exit_after_first_frame {
                 // The adapter tells a real GPU from WARP / Basic Render
                 // Driver, which costs hundreds of ms per frame.
                 let json = format!(
                     "{{\"adapter\": {}, \"warp\": {}, \"marks\": {}}}",
-                    timing::json_str(&self.gfx.adapter_name()),
-                    self.gfx.warp,
+                    timing::json_str(&self.device.adapter_name()),
+                    self.device.is_software(),
                     timing::marks_json()
                 );
                 let _ = std::fs::write(out, json);
                 actions.push(Action::Quit);
             }
-            crate::gfx::text::prewarm();
         }
         actions
     }
@@ -1133,23 +1080,14 @@ impl App {
         }
     }
 
-    fn text(&mut self) -> Option<&mut Text> {
-        if self.text.is_none() {
-            self.text = Some(Text::new(&self.gfx.device).map_err(|_| ()));
-        }
-        self.text.as_mut().and_then(|t| t.as_mut().ok())
-    }
-
     fn draw_selection_label(&mut self, l: &Layout, sel: &Rect) {
         let s = self.scale();
         let label = format!("{} × {}", sel.w.round() as u32, sel.h.round() as u32);
         let r = l.image_to_client().map_rect(sel);
-        let ctx = self.gfx.context.clone();
-        let Some(text) = self.text() else { return };
-        let Ok(t) = text.get(&label, (12.0 * s) as f32, 1000.0) else {
+        let px = (12.0 * s) as f32;
+        let Some(size) = self.canvas.text_size(&label, px, 1000.0) else {
             return;
         };
-        let (srv, size) = (t.srv.clone(), t.size);
         let pad = 4.0 * s;
         let x = r.x.round();
         let mut y = (r.y - size.1 as f64 - 2.0 * pad - 4.0 * s).round();
@@ -1157,19 +1095,16 @@ impl App {
             y = (r.y + 4.0 * s).round();
         }
         let bg = Rect::new(x, y, size.0 as f64 + 2.0 * pad, size.1 as f64 + 2.0 * pad);
-        self.renderer.draw_shapes(
-            &ctx,
-            &[Shape::Fill {
-                rect: bg,
-                radius: (4.0 * s) as f32,
-                color: Rgba(0.0, 0.0, 0.0, 0.72),
-            }],
-        );
-        self.renderer.draw_text(
-            &ctx,
-            &srv,
+        self.canvas.draw_shapes(&[Shape::Fill {
+            rect: bg,
+            radius: (4.0 * s) as f32,
+            color: Rgba(0.0, 0.0, 0.0, 0.72),
+        }]);
+        self.canvas.draw_text(
+            &label,
+            px,
+            1000.0,
             ((x + pad) as f32, (y + pad) as f32),
-            size,
             Rgba(1.0, 1.0, 1.0, 1.0),
         );
     }
@@ -1200,18 +1135,16 @@ impl App {
         let Some(message) = message else { return };
         let s = self.scale();
         let (cw, ch) = (self.client.0 as f64, self.client.1 as f64);
-        let ctx = self.gfx.context.clone();
-        let Some(text) = self.text() else { return };
-        let Ok(t) = text.get(&message, (15.0 * s) as f32, (cw * 0.8).max(100.0) as f32) else {
+        let (px, max_w) = ((15.0 * s) as f32, (cw * 0.8).max(100.0) as f32);
+        let Some(size) = self.canvas.text_size(&message, px, max_w) else {
             return;
         };
-        let (srv, size) = (t.srv.clone(), t.size);
         let pos = (
             ((cw - size.0 as f64) / 2.0).round() as f32,
             ((ch - size.1 as f64) / 2.0).round() as f32,
         );
-        self.renderer
-            .draw_text(&ctx, &srv, pos, size, Rgba(0.85, 0.85, 0.85, 1.0));
+        self.canvas
+            .draw_text(&message, px, max_w, pos, Rgba(0.85, 0.85, 0.85, 1.0));
     }
 
     // ---------------------------------------------------------------- input
@@ -1233,14 +1166,8 @@ impl App {
         } else {
             r.x
         };
-        let mut pt = windows::Win32::Foundation::POINT {
-            x: x as i32,
-            y: r.bottom() as i32,
-        };
-        unsafe {
-            let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
-        }
-        Action::ShowMenu { x: pt.x, y: pt.y }
+        let (x, y) = self.host.to_screen((x, r.bottom()));
+        Action::ShowMenu { x, y }
     }
 
     pub fn mouse_down(&mut self, p: (f64, f64), shift: bool, middle: bool) -> Vec<Action> {
@@ -1282,7 +1209,7 @@ impl App {
     fn browse_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         if let Some(state) = &mut self.browse.grid {
-            if let Some(i) = Browse::grid_layout(count, client, scale).hit(p, state.scroll) {
+            if let Some(i) = grid_layout(count, client, scale).hit(p, state.scroll) {
                 state.selected = i;
                 self.invalidate();
             }
@@ -1322,9 +1249,9 @@ impl App {
         actions
     }
 
-    /// Thumbnails arrived (WM_THUMB).
+    /// Thumbnails arrived ([`Wake::Thumbs`]).
     pub fn on_thumbs(&mut self) {
-        if self.browse.on_thumbs(&self.gfx.device, &self.gfx.context) {
+        if self.browse.on_thumbs(&mut self.canvas) {
             self.invalidate();
         }
     }
@@ -1444,7 +1371,7 @@ impl App {
     pub fn wheel(&mut self, p: (f64, f64), delta: i16) -> Vec<Action> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         if let Some(state) = &mut self.browse.grid {
-            let g = Browse::grid_layout(count, client, scale);
+            let g = grid_layout(count, client, scale);
             let rows = -(delta as f64) / 120.0;
             state.scroll =
                 (state.scroll + rows * (g.cell + g.gap)).clamp(0.0, g.max_scroll(client.1));
@@ -1471,18 +1398,18 @@ impl App {
     }
 
     /// Keyboard. Returns None for keys we do not handle.
-    pub fn key(&mut self, vk: u16, ctrl: bool, shift: bool) -> Option<Vec<Action>> {
-        use windows::Win32::UI::Input::KeyboardAndMouse::*;
-        if let Some(a) = self.grid_key(vk) {
+    pub fn key(&mut self, key: Key, ctrl: bool, shift: bool) -> Option<Vec<Action>> {
+        use Key::*;
+        if let Some(a) = self.grid_key(key) {
             return Some(a);
         }
-        match VIRTUAL_KEY(vk) {
-            VK_G if !ctrl => return Some(self.command(Cmd::ToggleGrid)),
-            VK_T if !ctrl => return Some(self.command(Cmd::ToggleFilmstrip)),
+        match key {
+            Letter('G') if !ctrl => return Some(self.command(Cmd::ToggleGrid)),
+            Letter('T') if !ctrl => return Some(self.command(Cmd::ToggleFilmstrip)),
             _ => {}
         }
         let overflow = self.layout().map(|l| l.overflows).unwrap_or(false);
-        let pan = |app: &mut App, dx: f64, dy: f64| {
+        let pan = |app: &mut App<B>, dx: f64, dy: f64| {
             if let Some(l) = app.layout() {
                 let step = 0.1 * app.client.0.min(app.client.1) as f64;
                 layout::pan(&mut app.view, &l, (-dx * step, -dy * step));
@@ -1490,70 +1417,64 @@ impl App {
             }
             vec![]
         };
-        let a = match VIRTUAL_KEY(vk) {
-            VK_RIGHT if overflow && !ctrl => pan(self, 1.0, 0.0),
-            VK_LEFT if overflow && !ctrl => pan(self, -1.0, 0.0),
-            VK_UP if overflow => pan(self, 0.0, -1.0),
-            VK_DOWN if overflow => pan(self, 0.0, 1.0),
+        let a = match key {
+            Right if overflow && !ctrl => pan(self, 1.0, 0.0),
+            Left if overflow && !ctrl => pan(self, -1.0, 0.0),
+            Up if overflow => pan(self, 0.0, -1.0),
+            Down if overflow => pan(self, 0.0, 1.0),
             // Right-to-left languages page leftwards.
-            VK_RIGHT if blinzel_i18n::is_rtl() => self.command(Cmd::Prev),
-            VK_LEFT if blinzel_i18n::is_rtl() => self.command(Cmd::Next),
-            VK_RIGHT | VK_NEXT | VK_SPACE | VK_DOWN => self.command(Cmd::Next),
-            VK_LEFT | VK_PRIOR | VK_BACK | VK_UP => self.command(Cmd::Prev),
-            VK_HOME => self.command(Cmd::First),
-            VK_END => self.command(Cmd::Last),
-            VK_ADD | VK_OEM_PLUS => self.command(Cmd::ZoomIn),
-            VK_SUBTRACT | VK_OEM_MINUS => self.command(Cmd::ZoomOut),
-            VK_NUMPAD0 | VIRTUAL_KEY(0x30) => self.command(Cmd::ZoomReset),
-            VIRTUAL_KEY(0x31) | VK_NUMPAD1 if !ctrl => {
-                self.command(Cmd::View(ViewMode::FitWindowToImage))
-            }
-            VIRTUAL_KEY(0x32) | VK_NUMPAD2 if !ctrl => {
-                self.command(Cmd::View(ViewMode::FitImageToWindow))
-            }
-            VIRTUAL_KEY(0x33) | VK_NUMPAD3 if !ctrl => {
-                self.command(Cmd::View(ViewMode::ActualSize))
-            }
-            VK_R if !ctrl => self.command(if shift {
+            Right if blinzel_i18n::is_rtl() => self.command(Cmd::Prev),
+            Left if blinzel_i18n::is_rtl() => self.command(Cmd::Next),
+            Right | PageDown | Space | Down => self.command(Cmd::Next),
+            Left | PageUp | Backspace | Up => self.command(Cmd::Prev),
+            Home => self.command(Cmd::First),
+            End => self.command(Cmd::Last),
+            Plus => self.command(Cmd::ZoomIn),
+            Minus => self.command(Cmd::ZoomOut),
+            Digit(0) => self.command(Cmd::ZoomReset),
+            Digit(1) if !ctrl => self.command(Cmd::View(ViewMode::FitWindowToImage)),
+            Digit(2) if !ctrl => self.command(Cmd::View(ViewMode::FitImageToWindow)),
+            Digit(3) if !ctrl => self.command(Cmd::View(ViewMode::ActualSize)),
+            Letter('R') if !ctrl => self.command(if shift {
                 Cmd::RotateLeft
             } else {
                 Cmd::RotateRight
             }),
-            VK_L if !ctrl => self.command(Cmd::RotateLeft),
-            VK_F11 | VK_RETURN => self.command(Cmd::Fullscreen),
-            VK_C if ctrl => self.command(Cmd::Copy),
-            VK_X if ctrl => self.command(Cmd::Cut),
-            VK_A if ctrl => self.command(Cmd::SelectAll),
-            VK_O if ctrl => self.command(Cmd::Open),
-            VK_S if ctrl => self.command(Cmd::SaveCutout),
-            VK_W if ctrl => vec![Action::Close],
-            VK_DELETE => self.command(Cmd::Recycle),
-            VK_ESCAPE => self.escape(),
-            VK_F10 | VK_APPS => vec![self.menu_at_button()],
+            Letter('L') if !ctrl => self.command(Cmd::RotateLeft),
+            F11 | Enter => self.command(Cmd::Fullscreen),
+            Letter('C') if ctrl => self.command(Cmd::Copy),
+            Letter('X') if ctrl => self.command(Cmd::Cut),
+            Letter('A') if ctrl => self.command(Cmd::SelectAll),
+            Letter('O') if ctrl => self.command(Cmd::Open),
+            Letter('S') if ctrl => self.command(Cmd::SaveCutout),
+            Letter('W') if ctrl => vec![Action::Close],
+            Delete => self.command(Cmd::Recycle),
+            Escape => self.escape(),
+            F10 | Menu => vec![self.menu_at_button()],
             _ => return None,
         };
         Some(a)
     }
 
     /// Keys in the grid: moving the selection, opening, leaving.
-    fn grid_key(&mut self, vk: u16) -> Option<Vec<Action>> {
-        use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    fn grid_key(&mut self, key: Key) -> Option<Vec<Action>> {
+        use Key::*;
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         let state = self.browse.grid.as_mut()?;
-        let g = Browse::grid_layout(count, client, scale);
+        let g = grid_layout(count, client, scale);
         let page = g.page_rows(client.1) as isize;
         let i = state.selected;
-        let to = match VIRTUAL_KEY(vk) {
-            VK_LEFT => g.step(i, -1, 0),
-            VK_RIGHT => g.step(i, 1, 0),
-            VK_UP => g.step(i, 0, -1),
-            VK_DOWN => g.step(i, 0, 1),
-            VK_PRIOR => g.step(i, 0, -page),
-            VK_NEXT => g.step(i, 0, page),
-            VK_HOME => 0,
-            VK_END => count.saturating_sub(1),
-            VK_RETURN | VK_SPACE => return Some(self.open_from_grid(i)),
-            VK_ESCAPE | VK_G => {
+        let to = match key {
+            Left => g.step(i, -1, 0),
+            Right => g.step(i, 1, 0),
+            Up => g.step(i, 0, -1),
+            Down => g.step(i, 0, 1),
+            PageUp => g.step(i, 0, -page),
+            PageDown => g.step(i, 0, page),
+            Home => 0,
+            End => count.saturating_sub(1),
+            Enter | Space => return Some(self.open_from_grid(i)),
+            Escape | Letter('G') => {
                 return Some(self.command(Cmd::ToggleGrid));
             }
             _ => return None,
@@ -1709,7 +1630,7 @@ impl App {
             },
             Cmd::Language(lang) => {
                 self.settings.language = lang.map(|l| l.code().to_string());
-                blinzel_i18n::set_lang(lang.unwrap_or_else(crate::run::system_language));
+                blinzel_i18n::set_lang(lang.unwrap_or_else(|| self.services.system_language()));
                 settings_store::save(&self.settings);
                 self.update_title();
                 self.invalidate();
@@ -1788,8 +1709,8 @@ impl App {
             .or(self.view.crop)
             .unwrap_or(PixelRect::new(0, 0, ow, oh));
         let stored_rect = selection::to_stored(&rect, o, (p.width, p.height));
-        if clipboard::announce(self.hwnd) {
-            self.clip = Some(clipboard::Source {
+        if self.host.offer_clipboard() {
+            self.clip = Some(ClipSource {
                 path: cur.path.clone(),
                 stored_rect,
                 orientation: o,
@@ -1838,29 +1759,24 @@ impl App {
         };
         let s = self.scale();
         let (cw, ch) = (self.client.0 as f64, self.client.1 as f64);
-        let ctx = self.gfx.context.clone();
-        let Some(t) = self.text() else { return };
-        let Ok(t) = t.get(&text, (13.0 * s) as f32, (cw * 0.8).max(100.0) as f32) else {
+        let (px, max_w) = ((13.0 * s) as f32, (cw * 0.8).max(100.0) as f32);
+        let Some(size) = self.canvas.text_size(&text, px, max_w) else {
             return;
         };
-        let (srv, size) = (t.srv.clone(), t.size);
         let pad = 8.0 * s;
         let (w, h) = (size.0 as f64 + 2.0 * pad, size.1 as f64 + 2.0 * pad);
         let x = ((cw - w) / 2.0).round();
         let y = (ch - h - 24.0 * s).round();
-        self.renderer.draw_shapes(
-            &ctx,
-            &[Shape::Fill {
-                rect: Rect::new(x, y, w, h),
-                radius: (6.0 * s) as f32,
-                color: Rgba(0.0, 0.0, 0.0, 0.78),
-            }],
-        );
-        self.renderer.draw_text(
-            &ctx,
-            &srv,
+        self.canvas.draw_shapes(&[Shape::Fill {
+            rect: Rect::new(x, y, w, h),
+            radius: (6.0 * s) as f32,
+            color: Rgba(0.0, 0.0, 0.0, 0.78),
+        }]);
+        self.canvas.draw_text(
+            &text,
+            px,
+            max_w,
             ((x + pad) as f32, (y + pad) as f32),
-            size,
             Rgba(1.0, 1.0, 1.0, 1.0),
         );
     }
@@ -1890,44 +1806,13 @@ impl App {
             return;
         }
         self.client = client;
-        let _ = self.swap.resize(&self.gfx, client);
+        self.canvas.resize(client);
     }
 
     /// Screen box for the Screen stage: the monitor the window is on.
     pub fn update_screen_box(&self) {
-        if let Some(m) = monitor_rect(self.hwnd, false) {
-            self.loader
-                .set_screen_box(((m.right - m.left) as u32, (m.bottom - m.top) as u32));
+        if let Some((_, size)) = self.host.monitor() {
+            self.loader.set_screen_box(size);
         }
-    }
-}
-
-/// Cursor shapes the window procedure maps to system cursors.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CursorKind {
-    Arrow,
-    Cross,
-    Hand,
-    Move,
-    SizeNS,
-    SizeWE,
-    SizeNWSE,
-    SizeNESW,
-}
-
-/// Monitor rectangle (or work area) of the monitor showing `hwnd`.
-pub fn monitor_rect(hwnd: HWND, work: bool) -> Option<RECT> {
-    use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
-    };
-    unsafe {
-        let m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        GetMonitorInfoW(m, &mut mi)
-            .as_bool()
-            .then_some(if work { mi.rcWork } else { mi.rcMonitor })
     }
 }

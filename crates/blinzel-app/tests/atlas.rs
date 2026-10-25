@@ -1,12 +1,13 @@
-//! Thumbnail atlas on WARP: slots, orientation, scaling, no bleeding from
-//! neighbouring slots, slot reuse.
+//! Thumbnail atlas on WARP: orientation, scaling, no bleeding from
+//! neighbouring slots (slot reuse is tested in blinzel-ui).
 
 #![cfg(windows)]
 
-use blinzel_app::gfx::atlas::Atlas;
+use blinzel_app::gfx::atlas::Pages;
 use blinzel_app::gfx::{Gfx, Offscreen, Renderer, Rgba};
 use blinzel_core::geom::{Orientation, Rect};
 use blinzel_core::thumb::{Planes, Thumb};
+use blinzel_ui::gfx::Atlas;
 
 const RED: [u8; 4] = [0, 0, 255, 255];
 const GREEN: [u8; 4] = [0, 255, 0, 255];
@@ -64,19 +65,13 @@ fn draws_oriented_and_scaled_without_bleeding() {
     let gfx = Gfx::create(true).expect("WARP device");
     let mut r = Renderer::new(&gfx.device).expect("renderer");
     let mut atlas = Atlas::new(1);
+    let mut pages = Pages::new(&gfx.device, &gfx.context);
     // Slot 0: the quadrants, rotated (EXIF 6: 90° clockwise); slot 1, its
     // right neighbour: solid green, which must not bleed into slot 0.
     let t = quadrants(200, 100, Orientation::from_exif(6));
+    atlas.insert(&mut pages, 1, &planes(&t)).unwrap();
     atlas
-        .insert(&gfx.device, &gfx.context, 1, &planes(&t))
-        .unwrap();
-    atlas
-        .insert(
-            &gfx.device,
-            &gfx.context,
-            2,
-            &planes(&solid(256, 256, GREEN)),
-        )
+        .insert(&mut pages, 2, &planes(&solid(256, 256, GREEN)))
         .unwrap();
 
     let size = (300, 300);
@@ -87,7 +82,7 @@ fn draws_oriented_and_scaled_without_bleeding() {
     let placed = atlas.get(1).unwrap();
     assert_eq!(placed.size, (200, 100));
     let dest = Rect::new(10.0, 20.0, 50.0, 100.0);
-    r.draw_thumb(&gfx.context, &placed, &dest, 1.0);
+    r.draw_thumb(&gfx.context, &pages.pages[placed.page], &placed, &dest, 1.0);
     let got = target.read_bgra(&gfx.context).unwrap();
     // 90° clockwise: stored top-left (red) goes to the top right, stored
     // bottom-left (blue) to the top left.
@@ -101,33 +96,4 @@ fn draws_oriented_and_scaled_without_bleeding() {
     // (green): the white quadrant's last column must stay white.
     let edge = pixel(&got, 300, 15, 119);
     assert!(edge[0] > 240 && edge[2] > 240, "{edge:?}");
-}
-
-#[test]
-fn reuses_the_least_recently_drawn_slot() {
-    let gfx = Gfx::create(true).expect("WARP device");
-    let mut atlas = Atlas::new(1);
-    let t = planes(&solid(16, 16, RED));
-    for id in 0..64 {
-        assert_eq!(
-            atlas.insert(&gfx.device, &gfx.context, id, &t).unwrap(),
-            None
-        );
-    }
-    atlas.begin_frame();
-    // Everything but id 5 is drawn in this frame.
-    for id in (0..64).filter(|&id| id != 5) {
-        assert!(atlas.get(id).is_some());
-    }
-    assert_eq!(
-        atlas.insert(&gfx.device, &gfx.context, 100, &t).unwrap(),
-        Some(5)
-    );
-    assert!(!atlas.contains(5));
-    assert!(atlas.contains(100));
-    // Re-inserting an id keeps its slot.
-    assert_eq!(
-        atlas.insert(&gfx.device, &gfx.context, 100, &t).unwrap(),
-        None
-    );
 }

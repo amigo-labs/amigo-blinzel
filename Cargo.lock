@@ -176,6 +176,7 @@ dependencies = [
  "blinzel-core",
  "blinzel-i18n",
  "blinzel-jpeg",
+ "blinzel-ui",
  "png",
  "windows",
  "windows-numerics",
@@ -248,6 +249,15 @@ name = "blinzel-site"
 version = "0.1.0"
 dependencies = [
  "blinzel-core",
+]
+
+[[package]]
+name = "blinzel-ui"
+version = "0.1.0"
+dependencies = [
+ "blinzel-core",
+ "blinzel-i18n",
+ "blinzel-jpeg",
 ]
 
 [[package]]

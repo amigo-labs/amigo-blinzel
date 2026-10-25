@@ -9,6 +9,7 @@
 //! The window becomes visible (uncloaked) with the first image on it.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::mpsc::channel;
 
 use blinzel_core::timing;
@@ -29,12 +30,15 @@ use windows::Win32::UI::Shell::DragAcceptFiles;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, PWSTR};
 
-use crate::app::{Action, App};
+use blinzel_ui::app::Action;
+use blinzel_ui::loader::{Job, Stage};
+use blinzel_ui::settings_store;
+
+use crate::backend::{App, D3dCanvas, D3dDevice, Loader, WM_LOADED, WinHost, WinServices};
 use crate::gfx::{Gfx, Renderer, SwapChain};
-use crate::loader::{Job, Loader, Stage, WM_LOADED};
 use crate::platform::{io, threads, wide};
 use crate::window::{self, APP, run_actions, set_cloak, start_uncloak_timer};
-use crate::{bench, instance, resident, settings_store, setup, update};
+use crate::{bench, instance, resident, setup, update};
 
 /// The main window for the device thread's wake-up message (0 until it
 /// exists).
@@ -200,11 +204,13 @@ pub fn run() -> i32 {
     let drive = file.as_deref().map(io::drive_info).unwrap_or_default();
     let io_threads = if drive.seek_penalty { 1 } else { 2 };
     let cpu_threads = cpu.performance.clamp(2, 6);
-    let loader = Loader::new(io_threads, cpu_threads, cpu.performance);
+    let services = Arc::new(WinServices::default());
+    let loader = Loader::new(services.clone(), io_threads, cpu_threads, cpu.performance);
     let (hmonitor, monitor, work) = monitor_under_cursor();
     // The display's colour target as remembered from the last start (see
     // color); Windows is asked again after the first frame.
-    let color = crate::color::ColorManager::new(settings.color_management);
+    let color =
+        blinzel_ui::color::ColorManager::new(settings.color_management, crate::color::build_lut);
     if settings.color_management {
         let c = color.clone();
         let m = hmonitor.0 as isize;
@@ -216,6 +222,7 @@ pub fn run() -> i32 {
             });
     }
     loader.set_color(color.clone());
+    services.set_color(color.clone());
     loader.set_screen_box((
         (monitor.right - monitor.left) as u32,
         (monitor.bottom - monitor.top) as u32,
@@ -310,7 +317,7 @@ pub fn run() -> i32 {
     unsafe {
         let _ = GetClientRect(hwnd, &mut cr);
     }
-    loader.set_first_frame_target(crate::first_frame::Target {
+    services.set_first_frame_target(crate::first_frame::Target {
         client: (
             (cr.right - cr.left).max(1) as u32,
             (cr.bottom - cr.top).max(1) as u32,
@@ -319,7 +326,7 @@ pub fn run() -> i32 {
         background: settings.background,
     });
     // The loader may post the first decoded image from now on.
-    loader.set_hwnd(hwnd);
+    services.set_hwnd(hwnd);
     MAIN_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
     if !args.resident && !maximized {
         unsafe {
@@ -351,7 +358,8 @@ pub fn run() -> i32 {
             DispatchMessageW(&msg);
         }
     };
-    loader.set_device(gfx.device.clone(), gfx.max_texture_size());
+    let device = Arc::new(D3dDevice::new(&gfx));
+    loader.set_device(device.clone());
     let renderer = match Renderer::new(&gfx.device) {
         Ok(r) => r,
         Err(e) => return fatal(&e.message()),
@@ -373,7 +381,15 @@ pub fn run() -> i32 {
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let resident_mode = settings.resident;
     let mut app = App::new(
-        hwnd, gfx, renderer, swap, settings, loader, color, dpi, client,
+        WinHost { hwnd },
+        device,
+        D3dCanvas::new(gfx, renderer, swap),
+        services,
+        settings,
+        loader,
+        color,
+        dpi,
+        client,
     );
     // The colour target was chosen for this monitor.
     app.monitor = hmonitor.0 as isize;
@@ -395,7 +411,6 @@ pub fn run() -> i32 {
         None => Vec::new(),
     };
     app.update_screen_box();
-    app.loader.set_hwnd(hwnd);
     APP.with(|cell| *cell.borrow_mut() = Some(app));
     crate::first_frame::release();
     update::schedule();

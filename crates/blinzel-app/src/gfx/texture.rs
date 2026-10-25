@@ -63,9 +63,21 @@ pub struct GpuImage {
     pub bytes: usize,
 }
 
-impl GpuImage {
-    pub fn is_full_resolution(&self) -> bool {
-        self.width == self.full_width && self.height == self.full_height
+impl blinzel_ui::gfx::ImageInfo for GpuImage {
+    fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    fn full_size(&self) -> (u32, u32) {
+        (self.full_width, self.full_height)
+    }
+
+    fn orientation(&self) -> Orientation {
+        self.orientation
+    }
+
+    fn bytes(&self) -> usize {
+        self.bytes
     }
 }
 

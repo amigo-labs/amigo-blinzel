@@ -145,7 +145,7 @@ pub fn schedule() {
         .spawn(|| {
             std::thread::sleep(Duration::from_secs(10));
             loop {
-                if crate::settings_store::load().auto_update {
+                if blinzel_ui::settings_store::load().auto_update {
                     check_if_due();
                 }
                 std::thread::sleep(Duration::from_secs(3600));

@@ -1,11 +1,11 @@
 //! The decode pipeline: scheduler jobs that read a file once, then deliver
 //! the embedded preview (if useful) and the wanted resolution as GPU
-//! textures. Workers upload directly (the D3D11 device is free-threaded);
-//! the UI thread only receives finished textures.
+//! textures. Workers upload directly (every backend's device is
+//! thread-safe); the UI thread only receives finished textures.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
@@ -14,17 +14,9 @@ use blinzel_core::bufpool::PoolBuf;
 use blinzel_core::decode::{Probe, Request};
 use blinzel_core::layout::needed_decode_size;
 use blinzel_core::sched::{CancelToken, Config, JobSpec, Key, Priority, Role, Scheduler};
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::Graphics::Direct3D11::ID3D11Device;
-use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-use crate::gfx::texture::{DEFAULT_TILE, GpuImage, upload};
-use crate::platform::threads::{self, Kind};
-use crate::platform::{debug_log, io};
-use crate::wic;
-
-/// Posted to the window when results are waiting in the channel.
-pub const WM_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+use crate::backend::{Device, Services, Wake};
+use crate::color::ColorManager;
 
 /// Resolution levels of an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -43,8 +35,8 @@ pub enum Stage {
 const ANIM_BUDGET: usize = 256 << 20;
 
 /// An animation's frames on the GPU and how long each stays.
-pub struct GpuAnimation {
-    pub frames: Vec<(Arc<GpuImage>, u32)>,
+pub struct GpuAnimation<I> {
+    pub frames: Vec<(Arc<I>, u32)>,
     /// How often the whole animation plays; `None` for ever.
     pub plays: Option<u32>,
     /// All frames are here; otherwise more follow in a later `Loaded`.
@@ -81,13 +73,13 @@ pub struct Job {
 }
 
 /// A finished stage (or the reason it failed).
-pub struct Loaded {
+pub struct Loaded<I> {
     pub cache_id: u64,
     pub stage: Stage,
     pub probe: Option<Probe>,
-    pub image: Result<Arc<GpuImage>, String>,
+    pub image: Result<Arc<I>, String>,
     /// Stage `Anim`: the frames, or `None` for a still image.
-    pub animation: Option<Arc<GpuAnimation>>,
+    pub animation: Option<Arc<GpuAnimation<I>>>,
     pub read_ms: f64,
     pub decode_ms: f64,
     pub upload_ms: f64,
@@ -98,30 +90,27 @@ struct IoOut {
     read_ms: f64,
 }
 
-#[derive(Default)]
-struct DeviceSlot {
-    device: Mutex<Option<ID3D11Device>>,
+struct DeviceSlot<D> {
+    device: Mutex<Option<Arc<D>>>,
     ready: Condvar,
 }
 
-struct Shared {
+struct Shared<D: Device, S> {
+    services: Arc<S>,
     jobs: Mutex<HashMap<Key, Job>>,
     /// Box (physical pixels) the Screen stage must cover.
     screen: Mutex<(u32, u32)>,
-    device: DeviceSlot,
-    tile: Mutex<u32>,
-    results: Mutex<Sender<Loaded>>,
-    hwnd: AtomicIsize,
+    device: DeviceSlot<D>,
+    results: Mutex<Sender<Loaded<D::Image>>>,
     /// Threads for decoding the image the user waits for (priority 0).
     decode_threads: usize,
-    /// The first decoded image went to the window for the GDI first frame.
+    /// The first decoded image went to the platform's early display.
     first_frame_sent: AtomicBool,
-    first_frame_target: Mutex<Option<crate::first_frame::Target>>,
-    color: Mutex<Option<Arc<crate::color::ColorManager>>>,
+    color: Mutex<Option<Arc<ColorManager>>>,
 }
 
-impl Shared {
-    fn wait_device(&self, cancel: &CancelToken) -> Option<ID3D11Device> {
+impl<D: Device, S: Services> Shared<D, S> {
+    fn wait_device(&self, cancel: &CancelToken) -> Option<Arc<D>> {
         let mut d = self.device.device.lock().unwrap();
         while d.is_none() {
             if cancel.is_cancelled() {
@@ -137,54 +126,62 @@ impl Shared {
         d.clone()
     }
 
-    fn send(&self, l: Loaded) {
+    fn send(&self, l: Loaded<D::Image>) {
         let _ = self.results.lock().unwrap().send(l);
-        let hwnd = self.hwnd.load(Ordering::Relaxed);
-        if hwnd != 0 {
-            let _ = unsafe {
-                PostMessageW(Some(HWND(hwnd as *mut _)), WM_LOADED, WPARAM(0), LPARAM(0))
-            };
-        }
+        self.services.wake(Wake::Loaded);
     }
 }
 
-pub struct Loader {
+pub struct Loader<D: Device, S> {
     sched: Scheduler<IoOut>,
-    shared: Arc<Shared>,
-    pub results: Receiver<Loaded>,
+    shared: Arc<Shared<D, S>>,
+    pub results: Receiver<Loaded<D::Image>>,
 }
 
 /// Job classes.
 pub const CLASS_VIEW: u8 = 0;
 
-impl Loader {
+impl<D: Device, S: Services> Loader<D, S> {
     /// `decode_threads`: how many threads may decode the visible image;
     /// prefetch decodes stay on their worker.
-    pub fn new(io_threads: usize, cpu_threads: usize, decode_threads: usize) -> Loader {
-        // blinzel-jpeg's helper threads run like the workers.
-        blinzel_jpeg::set_thread_init(|| threads::tune_current_thread(Kind::Latency));
+    pub fn new(
+        services: Arc<S>,
+        io_threads: usize,
+        cpu_threads: usize,
+        decode_threads: usize,
+    ) -> Loader<D, S> {
+        // blinzel-jpeg's helper threads run like the workers. It takes a
+        // plain function, so the platform's tuning goes through a global.
+        let tune = services.clone();
+        let _ = TUNE.set(Box::new(move || tune.tune_thread(true)));
+        blinzel_jpeg::set_thread_init(|| {
+            if let Some(t) = TUNE.get() {
+                t()
+            }
+        });
         let (tx, rx) = channel();
         let shared = Arc::new(Shared {
+            services,
             jobs: Mutex::new(HashMap::new()),
             screen: Mutex::new((1920, 1080)),
-            device: DeviceSlot::default(),
-            tile: Mutex::new(DEFAULT_TILE),
+            device: DeviceSlot {
+                device: Mutex::new(None),
+                ready: Condvar::new(),
+            },
             results: Mutex::new(tx),
-            hwnd: AtomicIsize::new(0),
             decode_threads: decode_threads.max(1),
             first_frame_sent: AtomicBool::new(false),
-            first_frame_target: Mutex::new(None),
             color: Mutex::new(None),
         });
-        let (s_io, s_cpu) = (shared.clone(), shared.clone());
+        let (s_io, s_cpu, s_tune) = (shared.clone(), shared.clone(), shared.clone());
         let sched = Scheduler::new(
             Config {
                 io_threads,
                 cpu_threads,
                 // Both pools sit on the path to the image the user waits
-                // for (thumbnails will get their own background pool).
-                on_thread_start: Some(Box::new(|_: Role, _| {
-                    threads::tune_current_thread(Kind::Latency)
+                // for (thumbnails have their own background pool).
+                on_thread_start: Some(Box::new(move |_: Role, _| {
+                    s_tune.services.tune_thread(true)
                 })),
             },
             move |key, cancel| io_stage(&s_io, key, cancel),
@@ -197,22 +194,12 @@ impl Loader {
         }
     }
 
-    /// Lets the loader render the GDI first frame itself (see first_frame).
-    pub fn set_first_frame_target(&self, t: crate::first_frame::Target) {
-        *self.shared.first_frame_target.lock().unwrap() = Some(t);
-    }
-
-    /// Colour management for the GDI first frame.
-    pub fn set_color(&self, color: Arc<crate::color::ColorManager>) {
+    /// Colour management: transforms build while images decode.
+    pub fn set_color(&self, color: Arc<ColorManager>) {
         *self.shared.color.lock().unwrap() = Some(color);
     }
 
-    pub fn set_hwnd(&self, hwnd: HWND) {
-        self.shared.hwnd.store(hwnd.0 as isize, Ordering::Relaxed);
-    }
-
-    pub fn set_device(&self, device: ID3D11Device, max_texture: u32) {
-        *self.shared.tile.lock().unwrap() = DEFAULT_TILE.min(max_texture);
+    pub fn set_device(&self, device: Arc<D>) {
         *self.shared.device.device.lock().unwrap() = Some(device);
         self.shared.device.ready.notify_all();
     }
@@ -259,10 +246,17 @@ impl Loader {
     }
 }
 
-fn io_stage(shared: &Shared, key: Key, _cancel: &CancelToken) -> Option<IoOut> {
+/// How blinzel-jpeg's helper threads are tuned.
+static TUNE: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+fn io_stage<D: Device, S: Services>(
+    shared: &Shared<D, S>,
+    key: Key,
+    _cancel: &CancelToken,
+) -> Option<IoOut> {
     let path = shared.jobs.lock().unwrap().get(&key)?.path.clone();
     let t = Instant::now();
-    match io::read_file(&path) {
+    match shared.services.read_file(&path) {
         Ok(data) => Some(IoOut {
             data,
             read_ms: t.elapsed().as_secs_f64() * 1e3,
@@ -285,7 +279,12 @@ fn io_stage(shared: &Shared, key: Key, _cancel: &CancelToken) -> Option<IoOut> {
     }
 }
 
-fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
+fn cpu_stage<D: Device, S: Services>(
+    shared: &Shared<D, S>,
+    key: Key,
+    input: IoOut,
+    cancel: &CancelToken,
+) {
     let Some(job) = shared.jobs.lock().unwrap().get(&key).cloned() else {
         return;
     };
@@ -302,7 +301,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
             upload_ms: 0.0,
         })
     };
-    let probe = match wic::probe_any(data) {
+    let probe = match shared.services.probe(data) {
         Ok(p) => p,
         Err(e) => return fail(e.to_string(), None),
     };
@@ -318,7 +317,6 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     let fit_scale = (sw as f64 / ow as f64).min(sh as f64 / oh as f64);
     // Stored-orientation size that covers the screen box.
     let fit = needed_decode_size((probe.width, probe.height), fit_scale);
-    let tile = *shared.tile.lock().unwrap();
 
     let deliver =
         |stage: Stage, img: blinzel_core::pixel::Image, decode_ms: f64, probe: &Probe| -> bool {
@@ -326,65 +324,27 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
                 return false;
             }
             let img = Arc::new(img);
-            // The device is still starting: the window shows this image through
-            // GDI meanwhile (see first_frame).
-            let hwnd = shared.hwnd.load(Ordering::Relaxed);
+            // The device is still starting: the platform may show this
+            // image another way meanwhile (Windows: through GDI).
             if job.priority == 0
-                && hwnd != 0
+                && shared.services.wants_early_image()
                 && shared.device.device.lock().unwrap().is_none()
                 && !shared.first_frame_sent.swap(true, Ordering::Relaxed)
             {
-                // Rendered here, in parallel with the UI thread showing the
-                // window, when the layout does not depend on the image size.
-                let target = *shared.first_frame_target.lock().unwrap();
-                let color = shared.color.lock().unwrap().clone();
-                let lut = color.and_then(|c| c.lut(probe.icc.as_ref()));
-                let rendered = target
-                    .filter(|t| t.view.mode != blinzel_core::layout::ViewMode::FitWindowToImage)
-                    .map(|t| {
-                        let bits = crate::first_frame::render(
-                            &img,
-                            probe.orientation,
-                            t.client,
-                            &t.view,
-                            t.background,
-                            lut.clone(),
-                        );
-                        (bits, t.client)
-                    });
-                let ff = Box::new(crate::first_frame::FirstFrame {
-                    image: img.clone(),
-                    orientation: probe.orientation,
-                    rendered,
-                    lut,
-                });
-                let ptr = Box::into_raw(ff);
-                blinzel_core::timing::mark("first_frame_posted");
-                unsafe {
-                    if PostMessageW(
-                        Some(HWND(hwnd as *mut _)),
-                        crate::first_frame::WM_FIRST_FRAME,
-                        WPARAM(0),
-                        LPARAM(ptr as isize),
-                    )
-                    .is_err()
-                    {
-                        drop(Box::from_raw(ptr));
-                    }
-                }
+                shared.services.early_image(&img, probe);
             }
             let Some(device) = shared.wait_device(cancel) else {
                 return false;
             };
             let t = Instant::now();
-            let gpu = upload(&device, &img, probe.orientation, tile);
+            let gpu = device.upload(&img, probe.orientation);
             let upload_ms = t.elapsed().as_secs_f64() * 1e3;
             drop(img); // back to the buffer pool before signalling
             shared.send(Loaded {
                 cache_id: job.cache_id,
                 stage,
                 probe: Some(probe.clone()),
-                image: gpu.map(Arc::new).map_err(|e| e.message()),
+                image: gpu.map(Arc::new),
                 animation: None,
                 read_ms: input.read_ms,
                 decode_ms,
@@ -414,7 +374,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
                 deliver(job.stage, img, t.elapsed().as_secs_f64() * 1e3, &probe);
                 return;
             }
-            Err(e) => debug_log(&format!("raw preview: {e}")),
+            Err(e) => shared.services.log(&format!("raw preview: {e}")),
         }
     }
 
@@ -438,7 +398,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
                     return;
                 }
             }
-            Err(e) => debug_log(&format!("preview: {e}")),
+            Err(e) => shared.services.log(&format!("preview: {e}")),
         }
     }
     if cancel.is_cancelled() {
@@ -457,7 +417,7 @@ fn cpu_stage(shared: &Shared, key: Key, input: IoOut, cancel: &CancelToken) {
     } else {
         1
     };
-    match wic::decode_any_with(data, req, decode_threads) {
+    match shared.services.decode(data, req, decode_threads) {
         Ok(img) => {
             // A raw's probe estimates the developed size; WIC knows it.
             let probe = if probe.is_raw() {
@@ -490,8 +450,8 @@ pub fn covering_raw_preview(
 /// Decodes the frames of an animated image and uploads each as soon as it
 /// is ready. From the second frame on the window gets the frames so far
 /// (every [`ANIM_UPDATE`]), so playback starts while the rest decodes.
-fn animation_stage(
-    shared: &Shared,
+fn animation_stage<D: Device, S: Services>(
+    shared: &Shared<D, S>,
     job: &Job,
     data: &[u8],
     probe: Probe,
@@ -508,7 +468,7 @@ fn animation_stage(
             Format::Jxl => jxl::stream_animation,
             _ => return,
         };
-    let send = |frames: &[(Arc<GpuImage>, u32)], plays, complete, upload_ms| {
+    let send = |frames: &[(Arc<D::Image>, u32)], plays, complete, upload_ms| {
         shared.send(Loaded {
             cache_id: job.cache_id,
             stage: Stage::Anim,
@@ -526,7 +486,7 @@ fn animation_stage(
             upload_ms,
         })
     };
-    let mut frames: Vec<(Arc<GpuImage>, u32)> = Vec::new();
+    let mut frames: Vec<(Arc<D::Image>, u32)> = Vec::new();
     let mut device = None;
     let mut upload_ms = 0.0;
     let mut sent = None::<Instant>;
@@ -539,9 +499,8 @@ fn animation_stage(
         }
         let Some(d) = &device else { return false };
         let tu = Instant::now();
-        let tile = *shared.tile.lock().unwrap();
         // Out of GPU memory: play the frames uploaded so far.
-        let Ok(gpu) = upload(d, &f.image, probe.orientation, tile) else {
+        let Ok(gpu) = d.upload(&f.image, probe.orientation) else {
             return false;
         };
         upload_ms += tu.elapsed().as_secs_f64() * 1e3;

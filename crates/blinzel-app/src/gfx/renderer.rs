@@ -38,42 +38,7 @@ struct DrawCb {
     cms: [f32; 4],
 }
 
-/// Colour with straight alpha, 0..1.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rgba(pub f32, pub f32, pub f32, pub f32);
-
-impl Rgba {
-    pub fn from_u8(c: [u8; 3], a: f32) -> Rgba {
-        Rgba(
-            c[0] as f32 / 255.0,
-            c[1] as f32 / 255.0,
-            c[2] as f32 / 255.0,
-            a,
-        )
-    }
-}
-
-/// UI primitives in client pixels.
-#[derive(Clone, Debug)]
-pub enum Shape {
-    Fill {
-        rect: Rect,
-        radius: f32,
-        color: Rgba,
-    },
-    Outline {
-        rect: Rect,
-        thickness: f32,
-        radius: f32,
-        color: Rgba,
-    },
-    Line {
-        a: (f32, f32),
-        b: (f32, f32),
-        thickness: f32,
-        color: Rgba,
-    },
-}
+pub use blinzel_ui::gfx::{Rgba, Shape};
 
 pub struct Renderer {
     vs: ID3D11VertexShader,
@@ -368,12 +333,13 @@ impl Renderer {
         }
     }
 
-    /// Draws an atlas thumbnail into `dest` (client pixels), oriented, with
-    /// opacity `alpha`.
+    /// Draws an atlas thumbnail (`t` on `page`) into `dest` (client
+    /// pixels), oriented, with opacity `alpha`.
     pub fn draw_thumb(
         &self,
         ctx: &ID3D11DeviceContext,
-        t: &super::atlas::Placed,
+        page: &super::atlas::Page,
+        t: &blinzel_ui::gfx::Placed,
         dest: &Rect,
         alpha: f32,
     ) {
@@ -387,9 +353,12 @@ impl Renderer {
         unsafe {
             ctx.PSSetShader(&self.ps_overlay, None);
             ctx.OMSetBlendState(&self.blend_premul, None, 0xFFFF_FFFF);
-            ctx.PSSetShaderResources(0, Some(&[Some(t.y.clone()), Some(t.cbcr.clone())]));
+            ctx.PSSetShaderResources(
+                0,
+                Some(&[Some(page.y.1.clone()), Some(page.cbcr.1.clone())]),
+            );
         }
-        let page = super::atlas::PAGE as f32;
+        let page_size = blinzel_ui::gfx::PAGE as f32;
         let (cw, ch) = (t.size.0.div_ceil(2) as f32, t.size.1.div_ceil(2) as f32);
         let cb = DrawCb {
             m0: [xform.a as f32, xform.b as f32, xform.c as f32, 0.0],
@@ -398,8 +367,8 @@ impl Renderer {
             tex0: [
                 -(t.origin.0 as f32),
                 -(t.origin.1 as f32),
-                1.0 / page,
-                1.0 / page,
+                1.0 / page_size,
+                1.0 / page_size,
             ],
             tex1: [w as f32, h as f32, cw, ch],
             view: self.view_vec(1.0, 1.0),

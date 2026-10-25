@@ -99,6 +99,7 @@ Reihenfolge der Stufen:
 | Crate | Inhalt | Stand |
 |---|---|---|
 | `blinzel-core` | Pixelpuffer, Pufferpool, Formaterkennung, Decoder (JPEG/turbojpeg, PNG, GIF, eigener BMP), EXIF/MPF, Layout, Auswahl, natsort, Dateiliste, Scheduler, LRU, CPU-Referenz-Renderer, Timing, Settings, Export | 🟡 (auf Linux getestet) |
+| `blinzel-ui` | Plattformunabhängige Oberfläche: Zustandsautomat `App`, Loader, Thumbnail-Pool, Raster/Filmstreifen, Menümodell, Farbmanagement-Cache, Einstellungsdatei. Spricht nur mit den Traits in `backend.rs` (`Device`, `Canvas`, `Host`, `Services`), die jede Plattform-Hülle in `blinzel-app` nativ umsetzt (Windows: Direct3D 11/Win32). | 🟡 (auf Linux getestet; Windows unverändert) |
 | `blinzel-jpeg` | strenger Marker-Parser; paralleler Decoder (Huffman, 8 Bit, sequentiell und progressive) in YCbCr-Planes, byte-identisch mit libjpeg-turbo | 🟡 |
 | `blinzel-i18n` | `i18n/*.toml` → statische Tabellen (DE/EN) | 🟡 |
 | `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |

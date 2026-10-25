@@ -22,10 +22,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::app::{Action, App, CursorKind, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, monitor_rect};
-use crate::chrome::Button;
+use blinzel_ui::app::Action;
+use blinzel_ui::backend::{CursorKind, Key};
+use blinzel_ui::chrome::Button;
+use blinzel_ui::settings_store;
+
+use crate::backend::{
+    App, TIMER_ANIM, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, WM_LOADED, WM_THUMB, monitor_rect,
+};
 use crate::instance::Request;
-use crate::loader::WM_LOADED;
 use crate::resident::{self, WM_TRAY};
 use crate::{clipboard, instance, menu, platform};
 
@@ -360,9 +365,9 @@ fn handle(
         WM_XBUTTONUP => {
             let which = hi_word(wp.0 as isize);
             actions.extend(app.command(if which == 1 {
-                menu::Cmd::Prev
+                blinzel_ui::menu::Cmd::Prev
             } else {
-                menu::Cmd::Next
+                blinzel_ui::menu::Cmd::Next
             }));
             Outcome::Result(LRESULT(1))
         }
@@ -395,7 +400,9 @@ fn handle(
             if msg == WM_SYSKEYDOWN && vk != VK_F10.0 {
                 return Outcome::Default; // Alt+F4 and friends
             }
-            match app.key(vk, key_down(VK_CONTROL), key_down(VK_SHIFT)) {
+            let handled =
+                key_of(vk).and_then(|k| app.key(k, key_down(VK_CONTROL), key_down(VK_SHIFT)));
+            match handled {
                 Some(a) => {
                     actions.extend(a);
                     done
@@ -412,7 +419,7 @@ fn handle(
             }
             done
         }
-        WM_TIMER if wp.0 == crate::app::TIMER_ANIM => {
+        WM_TIMER if wp.0 == TIMER_ANIM => {
             app.on_anim_timer();
             done
         }
@@ -444,7 +451,7 @@ fn handle(
             app.on_dir_changed();
             done
         }
-        crate::thumbs::WM_THUMB => {
+        WM_THUMB => {
             app.on_thumbs();
             done
         }
@@ -531,6 +538,35 @@ fn handle(
         }
         _ => Outcome::Default,
     }
+}
+
+/// The UI's key for a virtual-key code.
+fn key_of(vk: u16) -> Option<Key> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    Some(match VIRTUAL_KEY(vk) {
+        VK_LEFT => Key::Left,
+        VK_RIGHT => Key::Right,
+        VK_UP => Key::Up,
+        VK_DOWN => Key::Down,
+        VK_PRIOR => Key::PageUp,
+        VK_NEXT => Key::PageDown,
+        VK_HOME => Key::Home,
+        VK_END => Key::End,
+        VK_SPACE => Key::Space,
+        VK_BACK => Key::Backspace,
+        VK_RETURN => Key::Enter,
+        VK_ESCAPE => Key::Escape,
+        VK_DELETE => Key::Delete,
+        VK_F10 => Key::F10,
+        VK_F11 => Key::F11,
+        VK_APPS => Key::Menu,
+        VK_ADD | VK_OEM_PLUS => Key::Plus,
+        VK_SUBTRACT | VK_OEM_MINUS => Key::Minus,
+        _ if (0x30..=0x39).contains(&vk) => Key::Digit((vk - 0x30) as u8),
+        _ if (VK_NUMPAD0.0..=VK_NUMPAD9.0).contains(&vk) => Key::Digit((vk - VK_NUMPAD0.0) as u8),
+        _ if (0x41..=0x5A).contains(&vk) => Key::Letter(vk as u8 as char),
+        _ => return None,
+    })
 }
 
 fn set_cursor(kind: CursorKind) {
@@ -797,7 +833,7 @@ fn exit(hwnd: HWND) {
         // saved.
         if !a.hidden {
             remember_placement(hwnd, a);
-            crate::settings_store::save(&a.settings);
+            settings_store::save(&a.settings);
         }
         a.clip.take()
     })
@@ -819,7 +855,7 @@ fn hide_window(hwnd: HWND) {
     }
     with_app(|a| {
         remember_placement(hwnd, a);
-        crate::settings_store::save(&a.settings);
+        settings_store::save(&a.settings);
     });
     set_cloak(hwnd, true);
     unsafe {
@@ -1030,7 +1066,7 @@ pub fn register_class(
 
 /// Reads the source, exports the cutout and writes it atomically (temp
 /// file + rename). Returns the message for the notice toast.
-fn save_cutout(job: &crate::app::SaveJob, target: &std::path::Path) -> String {
+fn save_cutout(job: &blinzel_ui::app::SaveJob, target: &std::path::Path) -> String {
     use blinzel_core::export::{SaveFormat, export};
     use blinzel_i18n::{Msg, trf};
     let name = target
