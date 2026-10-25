@@ -9,45 +9,17 @@
 
 use std::sync::{Arc, Mutex};
 
-use blinzel_core::cpuref::taps;
 use blinzel_core::geom::{Affine, Orientation, Rect};
-use blinzel_core::layout::texels_per_pixel;
 use blinzel_core::lut::Lut3d;
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 use blinzel_core::thumb::Planes;
 use blinzel_ui::backend::{Canvas, Device};
+use blinzel_ui::draws::{self, DrawCb, ImageKind, TileGeom};
 use blinzel_ui::gfx::{
     AtlasPages, DEFAULT_TILE, ImageInfo, PAGE, Placed, Rgba, Shape, TilePlan, plan_tiles,
 };
 
 use super::text::TextCache;
-
-/// Mirror of the WGSL `Draw` uniforms.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct DrawCb {
-    m0: [f32; 4],
-    m1: [f32; 4],
-    rect: [f32; 4],
-    tex0: [f32; 4],
-    tex1: [f32; 4],
-    view: [f32; 4],
-    color: [f32; 4],
-    params: [f32; 4],
-    cms: [f32; 4],
-}
-
-impl DrawCb {
-    fn bytes(&self) -> &[u8] {
-        // SAFETY: plain f32 arrays without padding.
-        unsafe {
-            std::slice::from_raw_parts(
-                (self as *const DrawCb).cast::<u8>(),
-                std::mem::size_of::<DrawCb>(),
-            )
-        }
-    }
-}
 
 /// Uniform slots are this far apart (wgpu's dynamic-offset alignment).
 const CB_STRIDE: u64 = 256;
@@ -366,24 +338,14 @@ fn tex_binding(binding: u32, view: &wgpu::TextureView) -> wgpu::BindGroupEntry<'
 
 // ------------------------------------------------------------------ images
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    Rgba { opaque: bool },
-    Gray,
-    Ycc { sub_h: u8, sub_v: u8 },
-}
-
 struct Tile {
-    rect: [u32; 4],
-    /// Origin and size of the main texture in plane texels.
-    main: ((u32, u32), (u32, u32)),
-    chroma: Option<((u32, u32), (u32, u32))>,
+    geom: TileGeom,
     group: wgpu::BindGroup,
 }
 
 /// An image stage resident on the GPU.
 pub struct WgpuImage {
-    kind: Kind,
+    kind: ImageKind,
     width: u32,
     height: u32,
     full: (u32, u32),
@@ -443,24 +405,6 @@ pub fn instance() -> wgpu::Instance {
     })
 }
 
-fn f16(v: f32) -> u16 {
-    // Values in 0..1: no infinities or NaNs to care about.
-    let bits = v.clamp(0.0, 1.0).to_bits();
-    let exp = ((bits >> 23) & 0xFF) as i32 - 127 + 15;
-    let mant = bits & 0x7F_FFFF;
-    if exp <= 0 {
-        // Subnormal (or zero).
-        if exp < -10 {
-            return 0;
-        }
-        let m = (mant | 0x80_0000) >> (1 - exp);
-        return ((m + 0x1000) >> 13) as u16;
-    }
-    let h = ((exp as u32) << 10) | (mant >> 13);
-    // Round to nearest.
-    (h + ((mant >> 12) & 1)) as u16
-}
-
 impl Device for WgpuDevice {
     type Image = WgpuImage;
     type Lut = WgpuLut;
@@ -487,15 +431,17 @@ impl Device for WgpuDevice {
                     let v = t.create_view(&Default::default());
                     bytes += area(main) * bpp;
                     tiles.push(Tile {
-                        rect,
-                        main: ((main[0], main[1]), (main[2] - main[0], main[3] - main[1])),
-                        chroma: None,
+                        geom: TileGeom {
+                            rect,
+                            main: ((main[0], main[1]), (main[2] - main[0], main[3] - main[1])),
+                            chroma: None,
+                        },
                         group: g.textures([&v, &v, &v]),
                     });
                 }
                 match format {
-                    PackedFormat::Gray8 => Kind::Gray,
-                    _ => Kind::Rgba {
+                    PackedFormat::Gray8 => ImageKind::Gray,
+                    _ => ImageKind::Rgba {
                         opaque: *alpha == Alpha::Opaque,
                     },
                 }
@@ -509,9 +455,11 @@ impl Device for WgpuDevice {
                     let tcr = g.plane_texture(cr, 1, r8, c);
                     bytes += area(main) + 2 * area(c);
                     tiles.push(Tile {
-                        rect,
-                        main: ((main[0], main[1]), (main[2] - main[0], main[3] - main[1])),
-                        chroma: Some(((c[0], c[1]), (c[2] - c[0], c[3] - c[1]))),
+                        geom: TileGeom {
+                            rect,
+                            main: ((main[0], main[1]), (main[2] - main[0], main[3] - main[1])),
+                            chroma: Some(((c[0], c[1]), (c[2] - c[0], c[3] - c[1]))),
+                        },
                         group: g.textures([
                             &ty.create_view(&Default::default()),
                             &tcb.create_view(&Default::default()),
@@ -519,7 +467,7 @@ impl Device for WgpuDevice {
                         ]),
                     });
                 }
-                Kind::Ycc {
+                ImageKind::Ycc {
                     sub_h: sub.h,
                     sub_v: sub.v,
                 }
@@ -539,18 +487,7 @@ impl Device for WgpuDevice {
     fn upload_lut(&self, lut: &Lut3d) -> Result<WgpuLut, String> {
         let g = &self.gpu;
         let n = lut.size() as u32;
-        let texels: Vec<u16> = lut
-            .nodes()
-            .iter()
-            .flat_map(|c| {
-                [
-                    f16(c[0] as f32 / 65535.0),
-                    f16(c[1] as f32 / 65535.0),
-                    f16(c[2] as f32 / 65535.0),
-                    f16(1.0),
-                ]
-            })
-            .collect();
+        let texels = draws::lut_texels(lut);
         let size = wgpu::Extent3d {
             width: n,
             height: n,
@@ -692,15 +629,6 @@ impl WgpuCanvas {
             config.height = self.size.1;
             surface.configure(&self.gpu.device, config);
         }
-    }
-
-    fn view_vec(&self, footprint: f32, taps: f32) -> [f32; 4] {
-        [
-            2.0 / self.size.0 as f32,
-            2.0 / self.size.1 as f32,
-            footprint,
-            taps,
-        ]
     }
 
     fn overlay(&mut self, cb: DrawCb, textures: Option<wgpu::BindGroup>) {
@@ -888,60 +816,21 @@ impl Canvas for WgpuCanvas {
         bg: Rgba,
         lut: Option<&WgpuLut>,
     ) {
-        let footprint = texels_per_pixel(xform);
-        let cms = match lut {
-            Some(l) => {
-                let n = l.size as f32;
-                [1.0, (n - 1.0) / n, 0.5 / n, 0.0]
-            }
-            None => [0.0; 4],
-        };
-        let n = taps(footprint);
-        let (mode, sub, opaque) = match img.kind {
-            Kind::Rgba { opaque } => (0.0, (1.0, 1.0), opaque),
-            Kind::Gray => (1.0, (1.0, 1.0), true),
-            Kind::Ycc { sub_h, sub_v } => (2.0, (sub_h as f32, sub_v as f32), true),
-        };
-        let bounds = Rect::new(0.0, 0.0, img.width as f64, img.height as f64);
-        let Some(visible) = content.intersect(&bounds) else {
-            return;
-        };
-        for tile in &img.tiles {
-            let r = tile.rect;
-            let tr = Rect::new(
-                r[0] as f64,
-                r[1] as f64,
-                (r[2] - r[0]) as f64,
-                (r[3] - r[1]) as f64,
-            );
-            let Some(q) = tr.intersect(&visible) else {
-                continue;
-            };
-            let (origin, size) = tile.main;
-            let chroma = match tile.chroma {
-                Some((o, s)) => [o.0 as f32, o.1 as f32, 1.0 / s.0 as f32, 1.0 / s.1 as f32],
-                None => [0.0, 0.0, 1.0, 1.0],
-            };
-            let cb = DrawCb {
-                m0: [xform.a as f32, xform.b as f32, xform.c as f32, 0.0],
-                m1: [xform.d as f32, xform.e as f32, xform.f as f32, 0.0],
-                rect: [q.x as f32, q.y as f32, q.right() as f32, q.bottom() as f32],
-                tex0: [
-                    origin.0 as f32,
-                    origin.1 as f32,
-                    1.0 / size.0 as f32,
-                    1.0 / size.1 as f32,
-                ],
-                tex1: chroma,
-                view: self.view_vec(footprint as f32, n as f32),
-                color: [bg.0, bg.1, bg.2, 1.0],
-                params: [sub.0, sub.1, mode, if opaque { 1.0 } else { 0.0 }],
-                cms,
-            };
+        let tiles: Vec<TileGeom> = img.tiles.iter().map(|t| t.geom).collect();
+        for (i, cb) in draws::image(
+            img.kind,
+            (img.width, img.height),
+            &tiles,
+            xform,
+            content,
+            bg,
+            lut.map(|l| l.size),
+            self.size,
+        ) {
             self.draws.push(DrawCmd {
                 pipe: Pipe::Image,
                 cb,
-                textures: Some(tile.group.clone()),
+                textures: Some(img.tiles[i].group.clone()),
                 lut: lut.map(|l| l.group.clone()),
             });
         }
@@ -949,46 +838,7 @@ impl Canvas for WgpuCanvas {
 
     fn draw_shapes(&mut self, shapes: &[Shape]) {
         for s in shapes {
-            let (bounds, geom, color, params) = match *s {
-                Shape::Fill {
-                    rect,
-                    radius,
-                    color,
-                } => (rect, rect_vec(&rect), color, [0.0, 0.0, radius, 0.0]),
-                Shape::Outline {
-                    rect,
-                    thickness,
-                    radius,
-                    color,
-                } => {
-                    let g = thickness as f64 / 2.0 + 1.0;
-                    let b = Rect::new(rect.x - g, rect.y - g, rect.w + 2.0 * g, rect.h + 2.0 * g);
-                    (b, rect_vec(&rect), color, [2.0, thickness, radius, 0.0])
-                }
-                Shape::Line {
-                    a,
-                    b,
-                    thickness,
-                    color,
-                } => {
-                    let g = thickness / 2.0 + 1.0;
-                    let r = Rect::from_points(
-                        ((a.0.min(b.0) - g) as f64, (a.1.min(b.1) - g) as f64),
-                        ((a.0.max(b.0) + g) as f64, (a.1.max(b.1) + g) as f64),
-                    );
-                    (r, [a.0, a.1, b.0, b.1], color, [1.0, thickness, 0.0, 0.0])
-                }
-            };
-            let cb = DrawCb {
-                m0: [1.0, 0.0, 0.0, 0.0],
-                m1: [0.0, 1.0, 0.0, 0.0],
-                rect: rect_vec(&bounds),
-                tex1: geom,
-                view: self.view_vec(1.0, 1.0),
-                color: [color.0, color.1, color.2, color.3],
-                params,
-                ..Default::default()
-            };
+            let cb = draws::shape(s, self.size);
             self.overlay(cb, None);
         }
     }
@@ -998,32 +848,7 @@ impl Canvas for WgpuCanvas {
             return;
         };
         let group = page.group.clone();
-        let (w, h) = (t.size.0 as f64, t.size.1 as f64);
-        let (ow, oh) = t.orientation.oriented_size(w, h);
-        let xform = t
-            .orientation
-            .transform(w, h)
-            .then(&Affine::scale(dest.w / ow, dest.h / oh))
-            .then(&Affine::translate(dest.x, dest.y));
-        let page_size = PAGE as f32;
-        let (cw, ch) = (t.size.0.div_ceil(2) as f32, t.size.1.div_ceil(2) as f32);
-        let cb = DrawCb {
-            m0: [xform.a as f32, xform.b as f32, xform.c as f32, 0.0],
-            m1: [xform.d as f32, xform.e as f32, xform.f as f32, 0.0],
-            rect: [0.0, 0.0, w as f32, h as f32],
-            tex0: [
-                -(t.origin.0 as f32),
-                -(t.origin.1 as f32),
-                1.0 / page_size,
-                1.0 / page_size,
-            ],
-            tex1: [w as f32, h as f32, cw, ch],
-            view: self.view_vec(1.0, 1.0),
-            color: [1.0, 1.0, 1.0, alpha],
-            params: [4.0, 0.0, 0.0, 0.0],
-            ..Default::default()
-        };
-        self.overlay(cb, Some(group));
+        self.overlay(draws::thumb(t, dest, alpha, self.size), Some(group));
     }
 
     fn text_size(&mut self, text: &str, px: f32, max_width: f32) -> Option<(u32, u32)> {
@@ -1037,21 +862,7 @@ impl Canvas for WgpuCanvas {
             return;
         };
         let (group, size) = (t.group.clone(), t.size);
-        let cb = DrawCb {
-            m0: [1.0, 0.0, 0.0, 0.0],
-            m1: [0.0, 1.0, 0.0, 0.0],
-            rect: [pos.0, pos.1, pos.0 + size.0 as f32, pos.1 + size.1 as f32],
-            tex0: [
-                pos.0,
-                pos.1,
-                1.0 / size.0.max(1) as f32,
-                1.0 / size.1.max(1) as f32,
-            ],
-            view: self.view_vec(1.0, 1.0),
-            color: [color.0, color.1, color.2, color.3],
-            params: [3.0, 0.0, 0.0, 0.0],
-            ..Default::default()
-        };
+        let cb = draws::text(pos, size, color, self.size);
         self.overlay(cb, Some(group));
     }
 
@@ -1151,10 +962,6 @@ impl Canvas for WgpuCanvas {
             self.configure();
         }
     }
-}
-
-fn rect_vec(r: &Rect) -> [f32; 4] {
-    [r.x as f32, r.y as f32, r.right() as f32, r.bottom() as f32]
 }
 
 /// Text textures by (text, size, wrap width).

@@ -272,6 +272,7 @@ impl<B: Backend> App<B> {
             scale: self.scale(),
             client: (self.client.0 as f64, self.client.1 as f64),
             rtl: blinzel_i18n::is_rtl(),
+            system_buttons: cfg!(target_os = "macos"),
         }
     }
 

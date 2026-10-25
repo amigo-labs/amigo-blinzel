@@ -1,9 +1,17 @@
 //! amigo-blinzel's platform shells around `blinzel-ui`: Windows (Win32,
-//! Direct3D 11) and Linux (winit, wgpu).
+//! Direct3D 11), Linux (winit, wgpu) and macOS (AppKit, Metal).
 
+#[cfg(unix)]
+pub mod curl;
+#[cfg(unix)]
+pub mod lcms;
 #[cfg(all(unix, not(target_os = "macos")))]
 pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod notices_text;
+#[cfg(unix)]
+pub mod selfupdate;
 
 #[cfg(windows)]
 pub mod backend;

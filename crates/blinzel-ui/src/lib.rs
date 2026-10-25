@@ -10,6 +10,7 @@ pub mod browse;
 pub mod chrome;
 pub mod color;
 pub mod dirs;
+pub mod draws;
 pub mod files;
 pub mod gfx;
 pub mod loader;

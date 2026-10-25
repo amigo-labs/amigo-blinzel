@@ -12,6 +12,8 @@ position = "{index} / {total}"
 
 menu_open = "Open…"
 menu_view = "View"
+# The macOS menu bar menu with the viewer's commands.
+menu_image = "Image"
 view_fit_window_to_image = "Fit window to image (original size)"
 view_fit_image_to_window = "Fit image to window"
 view_actual_size = "100 % (actual pixels)"

@@ -9,6 +9,7 @@ position = "{index} / {total}"
 
 menu_open = "Öffnen…"
 menu_view = "Ansicht"
+menu_image = "Bild"
 view_fit_window_to_image = "Fenster an Bild anpassen (Originalgröße)"
 view_fit_image_to_window = "Bild an Fenster anpassen"
 view_actual_size = "100 % (Originalpixel)"

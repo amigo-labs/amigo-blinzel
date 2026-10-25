@@ -36,6 +36,11 @@ pub fn linux_asset_name(arch: &str) -> String {
     format!("amigo-blinzel-linux-{arch}")
 }
 
+/// The zipped macOS app bundle (universal: Apple silicon and Intel).
+pub fn macos_asset_name() -> String {
+    "amigo-blinzel-macos.zip".into()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Version {
     pub major: u32,

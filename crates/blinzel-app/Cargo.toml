@@ -27,8 +27,9 @@ blinzel-i18n.workspace = true
 blinzel-jpeg.workspace = true
 blinzel-ui.workspace = true
 
-# AVIF with dav1d's assembly; ARM64 uses the Rust fallbacks.
-[target.'cfg(target_arch = "x86_64")'.dependencies]
+# AVIF with dav1d's assembly: x86-64 everywhere, ARM64 where clang or gcc
+# build it (MSVC does not; Windows on ARM uses the Rust fallbacks).
+[target.'cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", not(windows))))'.dependencies]
 blinzel-core = { workspace = true, features = ["av1-asm"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
@@ -42,6 +43,21 @@ trash.workspace = true
 notify.workspace = true
 lcms2.workspace = true
 x11rb.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+objc2-metal.workspace = true
+objc2-quartz-core.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-graphics.workspace = true
+objc2-core-text.workspace = true
+objc2-image-io.workspace = true
+block2.workspace = true
+dispatch2.workspace = true
+notify.workspace = true
+lcms2.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics.workspace = true
