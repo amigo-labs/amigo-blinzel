@@ -254,6 +254,7 @@ impl App {
         Chrome {
             scale: self.scale(),
             client: (self.client.0 as f64, self.client.1 as f64),
+            rtl: blinzel_i18n::is_rtl(),
         }
     }
 
@@ -1223,18 +1224,29 @@ impl App {
         Rect::new(l.crop_origin.0, l.crop_origin.1, l.content.0, l.content.1)
     }
 
+    /// The menu below its button: from the button's outer corner, which is
+    /// the right one in right-to-left languages (the menu opens leftwards).
+    fn menu_at_button(&self) -> Action {
+        let r = self.chrome().rect(Button::Menu);
+        let x = if blinzel_i18n::is_rtl() {
+            r.right()
+        } else {
+            r.x
+        };
+        let mut pt = windows::Win32::Foundation::POINT {
+            x: x as i32,
+            y: r.bottom() as i32,
+        };
+        unsafe {
+            let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
+        }
+        Action::ShowMenu { x: pt.x, y: pt.y }
+    }
+
     pub fn mouse_down(&mut self, p: (f64, f64), shift: bool, middle: bool) -> Vec<Action> {
         if !middle && !self.fullscreen && self.chrome().hit(p) == Some(Button::Menu) {
             self.pressed = None;
-            let r = self.chrome().rect(Button::Menu);
-            let mut pt = windows::Win32::Foundation::POINT {
-                x: r.x as i32,
-                y: r.bottom() as i32,
-            };
-            unsafe {
-                let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
-            }
-            return vec![Action::ShowMenu { x: pt.x, y: pt.y }];
+            return vec![self.menu_at_button()];
         }
         if let Some(handled) = self.browse_click(p) {
             return handled;
@@ -1483,6 +1495,9 @@ impl App {
             VK_LEFT if overflow && !ctrl => pan(self, -1.0, 0.0),
             VK_UP if overflow => pan(self, 0.0, -1.0),
             VK_DOWN if overflow => pan(self, 0.0, 1.0),
+            // Right-to-left languages page leftwards.
+            VK_RIGHT if blinzel_i18n::is_rtl() => self.command(Cmd::Prev),
+            VK_LEFT if blinzel_i18n::is_rtl() => self.command(Cmd::Next),
             VK_RIGHT | VK_NEXT | VK_SPACE | VK_DOWN => self.command(Cmd::Next),
             VK_LEFT | VK_PRIOR | VK_BACK | VK_UP => self.command(Cmd::Prev),
             VK_HOME => self.command(Cmd::First),
@@ -1514,17 +1529,7 @@ impl App {
             VK_W if ctrl => vec![Action::Close],
             VK_DELETE => self.command(Cmd::Recycle),
             VK_ESCAPE => self.escape(),
-            VK_F10 | VK_APPS => {
-                let r = self.chrome().rect(Button::Menu);
-                let mut pt = windows::Win32::Foundation::POINT {
-                    x: r.x as i32,
-                    y: r.bottom() as i32,
-                };
-                unsafe {
-                    let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
-                }
-                vec![Action::ShowMenu { x: pt.x, y: pt.y }]
-            }
+            VK_F10 | VK_APPS => vec![self.menu_at_button()],
             _ => return None,
         };
         Some(a)

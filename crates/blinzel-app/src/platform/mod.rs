@@ -35,6 +35,17 @@ pub fn process_created() -> Option<i64> {
     Some(((t[0].dwHighDateTime as i64) << 32) | t[0].dwLowDateTime as i64)
 }
 
+/// Message box flags for the UI language: right-aligned, right-to-left
+/// reading for right-to-left languages.
+pub fn message_box_direction() -> windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE {
+    use windows::Win32::UI::WindowsAndMessaging::{MB_RIGHT, MB_RTLREADING};
+    if blinzel_i18n::is_rtl() {
+        MB_RIGHT | MB_RTLREADING
+    } else {
+        Default::default()
+    }
+}
+
 /// Writes to the debugger output (visible in DebugView / WPA), never blocks.
 pub fn debug_log(msg: &str) {
     let w = wide(format!("[blinzel] {msg}\n"));

@@ -26,7 +26,7 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_TEXT_METRICS, IDWriteFactory, IDWriteTextFormat,
+    DWRITE_READING_DIRECTION_RIGHT_TO_LEFT, DWRITE_TEXT_METRICS, IDWriteFactory, IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
@@ -83,7 +83,7 @@ fn text_format(
     px: f32,
     bold: bool,
 ) -> windows::core::Result<IDWriteTextFormat> {
-    unsafe {
+    let format = unsafe {
         dw.CreateTextFormat(
             &HSTRING::from(FONT),
             None,
@@ -96,8 +96,12 @@ fn text_format(
             DWRITE_FONT_STRETCH_NORMAL,
             px,
             w!(""),
-        )
+        )?
+    };
+    if blinzel_i18n::is_rtl() {
+        unsafe { format.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)? };
     }
+    Ok(format)
 }
 
 /// Loads the text DLLs and warms the font cache off the UI thread.
@@ -122,7 +126,8 @@ pub struct Text {
     device: ID3D11Device,
     d2d: ID2D1DeviceContext,
     dwrite: IDWriteFactory,
-    formats: HashMap<(u32, bool), IDWriteTextFormat>,
+    /// By size, weight and right-to-left (the language can change).
+    formats: HashMap<(u32, bool, bool), IDWriteTextFormat>,
     cache: HashMap<(String, u32, bool), TextTex>,
 }
 
@@ -181,7 +186,7 @@ impl Text {
         max_width: f32,
         bold: bool,
     ) -> windows::core::Result<TextTex> {
-        let fkey = ((px * 10.0) as u32, bold);
+        let fkey = ((px * 10.0) as u32, bold, blinzel_i18n::is_rtl());
         if !self.formats.contains_key(&fkey) {
             self.formats
                 .insert(fkey, text_format(&self.dwrite, px, bold)?);

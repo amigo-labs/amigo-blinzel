@@ -213,7 +213,7 @@ Grundsatz: Bilddateien werden nie überschrieben. Gespeichert wird nur über „
 - 🟡 Fehlende Keys fallen auf Englisch zurück (Build-Warnung). Platzhalterfehler brechen den Build ab.
 - 🟡 Sprachwahl über `GetUserPreferredUILanguages`; im Menü überschreibbar, ohne Neustart.
 - 🟡 Plural-Regeln (CLDR-Familien).
-- ⬜ RTL-Sprachen.
+- 🟡 RTL-Sprachen: `[meta] direction = "rtl"` in `i18n/<sprache>.toml` ergibt `Lang::is_rtl()`. Dann spiegelt die App die Bedienelemente (Menü rechts, Fensterknöpfe links), öffnet Menüs gespiegelt (`TPM_LAYOUTRTL`) von der rechten Kante, setzt die Leserichtung von DirectWrite und der Meldungsfenster (`MB_RTLREADING`) und tauscht ← und → beim Blättern. Offen: Filmstreifen/Raster und der Setup-Dialog bleiben links-nach-rechts; eine RTL-Sprache liefern wir noch nicht aus (Übersetzung von Muttersprachlern nötig).
 
 ## 9. Plattform: Windows 11 ab 24H2
 

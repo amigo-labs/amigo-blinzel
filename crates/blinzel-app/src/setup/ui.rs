@@ -61,7 +61,12 @@ pub fn message(text: &str, error: bool) {
         MB_ICONINFORMATION
     };
     unsafe {
-        MessageBoxW(None, PCWSTR(t.as_ptr()), PCWSTR(c.as_ptr()), icon | MB_OK);
+        MessageBoxW(
+            None,
+            PCWSTR(t.as_ptr()),
+            PCWSTR(c.as_ptr()),
+            icon | MB_OK | crate::platform::message_box_direction(),
+        );
     }
 }
 
@@ -118,7 +123,7 @@ fn fallback(layout: &Layout, exe: &Path) -> i32 {
             None,
             PCWSTR(t.as_ptr()),
             PCWSTR(c.as_ptr()),
-            MB_OKCANCEL | MB_ICONQUESTION,
+            MB_OKCANCEL | MB_ICONQUESTION | crate::platform::message_box_direction(),
         )
     };
     if answer != IDOK {

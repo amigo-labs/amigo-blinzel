@@ -8,8 +8,8 @@ use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS,
     MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW, SM_MENUDROPALIGNMENT,
-    SetForegroundWindow, SetMenuDefaultItem, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-    TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenuEx, WM_NULL,
+    SetForegroundWindow, SetMenuDefaultItem, TPM_BOTTOMALIGN, TPM_LAYOUTRTL, TPM_LEFTALIGN,
+    TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenuEx, WM_NULL,
 };
 use windows::core::{PCSTR, PCWSTR, w};
 
@@ -468,10 +468,16 @@ fn build(s: &MenuState) -> Option<HMENU> {
 pub fn show(hwnd: HWND, x: i32, y: i32, state: &MenuState) -> Option<Cmd> {
     enable_dark_menus(hwnd);
     let menu = build(state)?;
+    // Right-to-left: mirrored items, opening leftwards from (x, y).
+    let direction = if blinzel_i18n::is_rtl() {
+        TPM_LAYOUTRTL | TPM_RIGHTALIGN
+    } else {
+        TPM_LEFTALIGN
+    };
     let id = unsafe {
         TrackPopupMenuEx(
             menu,
-            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN).0,
+            (TPM_RETURNCMD | TPM_RIGHTBUTTON | direction | TPM_TOPALIGN).0,
             x,
             y,
             hwnd,
@@ -497,13 +503,18 @@ pub fn show_tray(hwnd: HWND, x: i32, y: i32) -> Option<Cmd> {
     } else {
         TPM_LEFTALIGN
     };
+    let rtl = if blinzel_i18n::is_rtl() {
+        TPM_LAYOUTRTL
+    } else {
+        Default::default()
+    };
     let id = unsafe {
         let _ = SetMenuDefaultItem(m.menu, Cmd::ShowWindow.id(), 0);
         // Otherwise the menu stays open when the user clicks elsewhere.
         let _ = SetForegroundWindow(hwnd);
         let id = TrackPopupMenuEx(
             m.menu,
-            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | horizontal).0,
+            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | horizontal | rtl).0,
             x,
             y,
             hwnd,

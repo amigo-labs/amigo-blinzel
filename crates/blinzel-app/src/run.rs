@@ -124,7 +124,7 @@ fn fatal(msg: &str) -> i32 {
             None,
             PCWSTR(text.as_ptr()),
             PCWSTR(caption.as_ptr()),
-            MB_ICONERROR | MB_OK,
+            MB_ICONERROR | MB_OK | crate::platform::message_box_direction(),
         );
     }
     1
