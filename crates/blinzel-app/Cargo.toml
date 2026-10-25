@@ -24,6 +24,10 @@ blinzel-core.workspace = true
 blinzel-i18n.workspace = true
 blinzel-jpeg.workspace = true
 
+# AVIF with dav1d's assembly; ARM64 uses the Rust fallbacks.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+blinzel-core = { workspace = true, features = ["av1-asm"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-numerics.workspace = true
 png.workspace = true

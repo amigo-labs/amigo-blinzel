@@ -11,6 +11,9 @@ publish.workspace = true
 default = ["turbojpeg"]
 # libjpeg-turbo as the JPEG baseline until blinzel-jpeg beats it (M3).
 turbojpeg = ["dep:turbojpeg-sys"]
+# dav1d's assembly for AVIF: needs NASM, and only builds on x86-64 (MSVC
+# cannot assemble the ARM64 files). The app and the benches enable it there.
+av1-asm = ["rav1d/asm"]
 
 [dependencies]
 blinzel-jpeg.workspace = true
@@ -24,10 +27,6 @@ tiff.workspace = true
 zune-heic.workspace = true
 rav1d.workspace = true
 ed25519-compact.workspace = true
-
-# dav1d's assembly (NASM) on x86-64 only; see the workspace manifest.
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-rav1d = { workspace = true, features = ["asm"] }
 
 [dev-dependencies]
 zune-jpegxl.workspace = true

@@ -28,8 +28,7 @@ jxl-render = "0.12.4"
 tiff = { version = "0.11.3", default-features = false, features = ["deflate", "lzw"] }
 zune-jpegxl = "0.5.2"
 zune-heic = "0.5.0"
-# AV1 for AVIF. The assembly needs NASM on x86-64; MSVC cannot build the
-# ARM64 assembly, so ARM64 uses the Rust fallbacks.
+# AV1 for AVIF; blinzel-core's `av1-asm` feature adds dav1d's assembly.
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # Verifies our own signature of release checksums (self-updater).
 ed25519-compact = { version = "2.1", default-features = false }
