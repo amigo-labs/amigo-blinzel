@@ -19,7 +19,7 @@ pub const FILE: &str = "THIRD-PARTY-NOTICES.txt";
 const TARGETS: [&str; 2] = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
 
 /// Most preferred first: the shortest text that still names the authors.
-const PREFERENCE: [&str; 7] = [
+const PREFERENCE: [&str; 8] = [
     "MIT",
     "Zlib",
     "BSD-2-Clause",
@@ -27,6 +27,8 @@ const PREFERENCE: [&str; 7] = [
     "Apache-2.0",
     "Unlicense",
     "0BSD",
+    // Public domain: no file is used, only a one-line note.
+    "CC0-1.0",
 ];
 
 const RULE: &str =
@@ -350,6 +352,10 @@ fn standard_text(id: &str, holder: &str) -> Result<String, String> {
     match id {
         "MIT" => Ok(format!("Copyright (c) {holder}\n\n{MIT_BODY}")),
         "BSD-3-Clause" => Ok(format!("Copyright (c) {holder}\n\n{BSD3_BODY}")),
+        "CC0-1.0" => Ok(format!(
+            "By {holder}, dedicated to the public domain under CC0 1.0 Universal\n\
+             (https://creativecommons.org/publicdomain/zero/1.0/)."
+        )),
         _ => Err(format!(
             "no licence file for {holder} and no standard {id} text"
         )),

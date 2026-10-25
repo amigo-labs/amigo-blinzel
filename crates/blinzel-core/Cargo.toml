@@ -22,7 +22,12 @@ jxl-oxide.workspace = true
 jxl-render.workspace = true
 tiff.workspace = true
 zune-heic.workspace = true
+rav1d.workspace = true
 ed25519-compact.workspace = true
+
+# dav1d's assembly (NASM) on x86-64 only; see the workspace manifest.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+rav1d = { workspace = true, features = ["asm"] }
 
 [dev-dependencies]
 zune-jpegxl.workspace = true

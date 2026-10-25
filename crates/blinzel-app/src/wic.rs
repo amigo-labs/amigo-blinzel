@@ -226,18 +226,34 @@ fn tiff_via_wic(data: &[u8], threads: usize) -> bool {
     detect(data) == Format::Tiff && (threads < 2 || blinzel_core::decode::tiff::strips(data) < 2)
 }
 
-/// HEIC: WIC goes first where Windows has an HEVC codec (the "HEVC Video
-/// Extensions"; hardware decoding on most GPUs). Without it WIC cannot open
-/// the file, and native decoding takes over for the rest of the process.
-/// Probe and decode take the same path: WIC reports the stored size plus an
-/// orientation, `zune-heic` already applies the rotation.
+/// HEIC and AVIF: WIC goes first where Windows has the codec (the "HEVC
+/// Video Extensions" and "AV1 Video Extension"; hardware decoding on most
+/// GPUs). Without it WIC cannot open the file, and native decoding takes
+/// over for the rest of the process. Probe and decode take the same path,
+/// since the two may treat the HEIF transformations differently.
 static HEIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
+static AVIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
 
-fn heif_via_wic(data: &[u8]) -> bool {
+/// The "codec missing" flag if `data` is HEIC or AVIF and WIC goes first.
+fn heif_via_wic(data: &[u8]) -> Option<&'static AtomicBool> {
     use blinzel_core::format::{Format, detect};
-    detect(data) == Format::Heif
-        && override_() != Some(Decoder::Native)
-        && !HEIF_WIC_MISSING.load(Ordering::Relaxed)
+    let missing = match detect(data) {
+        Format::Heif => &HEIF_WIC_MISSING,
+        Format::Avif => &AVIF_WIC_MISSING,
+        _ => return None,
+    };
+    (override_() != Some(Decoder::Native) && !missing.load(Ordering::Relaxed)).then_some(missing)
+}
+
+/// The colour profile from the HEIF header (WIC does not hand it out).
+fn heif_profile(data: &[u8]) -> Option<blinzel_core::icc::Profile> {
+    use blinzel_core::decode::{avif, heif};
+    use blinzel_core::format::{Format, detect};
+    let info = match detect(data) {
+        Format::Avif => avif::info(data),
+        _ => heif::info(data),
+    };
+    info.ok().and_then(|(_, _, icc)| icc)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -260,8 +276,8 @@ fn override_() -> Option<Decoder> {
 /// Native decoding first, WIC for everything else (and for JPEGs the
 /// native path rejects, e.g. 12-bit). Where WIC won the benchmark gate it
 /// goes first: lossy WebP stills once its codec is loaded (`WEBP_CODEC`),
-/// TIFFs that cannot decode in parallel. HEIC goes to WIC wherever it has
-/// a codec (`HEIF_WIC_MISSING`).
+/// TIFFs that cannot decode in parallel. HEIC and AVIF go to WIC wherever
+/// it has a codec (`HEIF_WIC_MISSING`, `AVIF_WIC_MISSING`).
 pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
     decode_any_with(data, req, 1)
 }
@@ -270,10 +286,10 @@ pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
 /// parallelize (JPEG); for the image the user waits for.
 pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
     let wic = || blinzel_core::decode::guard(|| decode(data, req));
-    if heif_via_wic(data) {
+    if let Some(missing) = heif_via_wic(data) {
         return match wic() {
             Err(DecodeError::Unsupported(_)) => {
-                HEIF_WIC_MISSING.store(true, Ordering::Relaxed);
+                missing.store(true, Ordering::Relaxed);
                 blinzel_core::decode::decode_with(data, req, threads)
             }
             r => r,
@@ -297,16 +313,13 @@ pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Imag
 }
 
 pub fn probe_any(data: &[u8]) -> Result<Probe> {
-    if heif_via_wic(data) {
+    if let Some(missing) = heif_via_wic(data) {
         match blinzel_core::decode::guard(|| probe(data)) {
             Ok(mut p) => {
-                // WIC does not hand out the profile; the header has it.
-                p.icc = blinzel_core::decode::heif::info(data)
-                    .ok()
-                    .and_then(|(_, _, icc)| icc);
+                p.icc = heif_profile(data);
                 return Ok(p);
             }
-            Err(DecodeError::Unsupported(_)) => HEIF_WIC_MISSING.store(true, Ordering::Relaxed),
+            Err(DecodeError::Unsupported(_)) => missing.store(true, Ordering::Relaxed),
             Err(e) => return Err(e),
         }
     }

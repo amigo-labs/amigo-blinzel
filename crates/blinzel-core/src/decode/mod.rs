@@ -1,6 +1,7 @@
 //! Format dispatch: probe headers, decode at the resolution that is needed,
 //! never let a broken file take the process down.
 
+pub mod avif;
 pub mod bmp;
 pub mod gif;
 pub mod heif;
@@ -177,6 +178,10 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
             let ((w, h), orientation, icc) = heif::info(data)?;
             (w, h, orientation, Vec::new(), icc)
         }
+        Format::Avif => {
+            let ((w, h), orientation, icc) = avif::info(data)?;
+            (w, h, orientation, Vec::new(), icc)
+        }
         Format::Tiff => match tiff::info(data) {
             Ok(((w, h), orientation, icc)) => (w, h, orientation, Vec::new(), icc),
             Err(DecodeError::Unsupported(_)) => raw_probe(data, format)?,
@@ -246,6 +251,7 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::WebP => finish(webp::decode(data)?, req),
         Format::Jxl => finish(jxl::decode(data, threads)?, req),
         Format::Heif => finish(heif::decode(data, threads)?, req),
+        Format::Avif => finish(avif::decode(data, threads)?, req),
         Format::Tiff => finish(tiff::decode(data, threads)?, req),
         other => Err(DecodeError::Unsupported(other)),
     }
