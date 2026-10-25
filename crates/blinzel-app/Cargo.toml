@@ -27,9 +27,10 @@ blinzel-i18n.workspace = true
 blinzel-jpeg.workspace = true
 blinzel-ui.workspace = true
 
-# AVIF with dav1d's assembly: x86-64 everywhere, ARM64 where clang or gcc
-# build it (MSVC does not; Windows on ARM uses the Rust fallbacks).
-[target.'cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", not(windows))))'.dependencies]
+# AVIF with dav1d's assembly on x86-64. ARM64 uses the Rust fallbacks: the
+# published rav1d lacks the header its ARM assembly includes
+# (src/arm/asm-offsets.h), and MSVC cannot build it anyway.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
 blinzel-core = { workspace = true, features = ["av1-asm"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]

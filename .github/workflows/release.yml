@@ -1,8 +1,10 @@
 name: Release
 
-# A tag v<version> builds both architectures on GitHub-hosted runners, writes
+# A tag v<version> builds every platform on GitHub-hosted runners (Windows
+# and Linux for x64 and ARM64, macOS as one universal app), writes
 # SHA256SUMS signed with our own Ed25519 key and creates a draft release.
-# The executables carry no Authenticode signature (docs/PLAN.md, section 10).
+# Nothing carries a code signing certificate (docs/PLAN.md, section 10):
+# no Authenticode, the Mac app is signed ad hoc and not notarized.
 #
 # Needed (docs/PLAN.md, section 14):
 #   secret   RELEASE_SIGNING_KEY       Ed25519 seed (blinzel-release keygen)
@@ -22,7 +24,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.arch }}
+    name: Windows ${{ matrix.arch }}
     runs-on: windows-2025
     permissions:
       contents: read
@@ -60,9 +62,70 @@ jobs:
           name: setup-${{ matrix.arch }}
           path: dist/amigo-blinzel-setup-${{ matrix.arch }}.exe
 
+  linux:
+    name: Linux ${{ matrix.arch }}
+    # The oldest supported Ubuntu: its glibc (2.35) sets the minimum.
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - run: sudo apt-get update && sudo apt-get install -y nasm
+      - run: cargo build --release --locked -p blinzel-app
+      # The bare executable for the updater, the archive for people.
+      - name: Package
+        run: |
+          mkdir -p dist/amigo-blinzel
+          cp target/release/blinzel dist/amigo-blinzel-linux-${{ matrix.arch }}
+          cp target/release/blinzel LICENSE THIRD-PARTY-NOTICES-linux.txt dist/amigo-blinzel/
+          tar -C dist -czf dist/amigo-blinzel-linux-${{ matrix.arch }}.tar.gz amigo-blinzel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            dist/amigo-blinzel-linux-${{ matrix.arch }}
+            dist/amigo-blinzel-linux-${{ matrix.arch }}.tar.gz
+
+  macos:
+    name: macOS (universal)
+    runs-on: macos-14
+    permissions:
+      contents: read
+    env:
+      # The oldest macOS the app supports (Info.plist says the same).
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup target add x86_64-apple-darwin
+      # NASM: libjpeg-turbo's and dav1d's x86-64 assembly.
+      - run: brew install nasm
+      - run: |
+          cargo build --release --locked -p blinzel-app --target aarch64-apple-darwin
+          cargo build --release --locked -p blinzel-app --target x86_64-apple-darwin
+      - name: App bundle
+        run: |
+          mkdir dist
+          cargo run --release --locked -p blinzel-release -- macos-bundle dist/amigo-blinzel.app \
+            target/aarch64-apple-darwin/release/blinzel target/x86_64-apple-darwin/release/blinzel
+          lipo -info dist/amigo-blinzel.app/Contents/MacOS/blinzel
+          codesign --verify --verbose dist/amigo-blinzel.app
+          ditto -c -k --keepParent dist/amigo-blinzel.app dist/amigo-blinzel-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/amigo-blinzel-macos.zip
+
   publish:
     name: Checksums and draft release
-    needs: build
+    needs: [build, linux, macos]
     runs-on: windows-2025
     permissions:
       contents: write
@@ -71,13 +134,12 @@ jobs:
       - run: rustup toolchain install && rustup show active-toolchain
       - uses: actions/download-artifact@v4
         with:
-          pattern: setup-*
           path: dist
           merge-multiple: true
       - name: SHA256SUMS
         shell: bash
         working-directory: dist
-        run: sha256sum amigo-blinzel-setup-*.exe > SHA256SUMS && cat SHA256SUMS
+        run: sha256sum amigo-blinzel-* > SHA256SUMS && cat SHA256SUMS
       - name: Sign SHA256SUMS
         shell: bash
         env:
@@ -92,5 +154,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" --draft --title "amigo-blinzel ${GITHUB_REF_NAME#v}" \
-            --generate-notes dist/amigo-blinzel-setup-*.exe dist/SHA256SUMS dist/SHA256SUMS.sig \
-            THIRD-PARTY-NOTICES.txt
+            --generate-notes dist/amigo-blinzel-* dist/SHA256SUMS dist/SHA256SUMS.sig \
+            THIRD-PARTY-NOTICES.txt THIRD-PARTY-NOTICES-linux.txt THIRD-PARTY-NOTICES-macos.txt
