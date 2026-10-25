@@ -101,6 +101,7 @@ version = "0.1.0"
 dependencies = [
  "blinzel-core",
  "ed25519-compact",
+ "toml",
 ]
 
 [[package]]

@@ -40,6 +40,7 @@ pub enum Cmd {
     Language(Option<Lang>),
     CheckUpdates,
     About,
+    Notices,
     ToggleResident,
     ToggleAutoUpdate,
     ToggleSingleInstance,
@@ -90,6 +91,7 @@ impl Cmd {
             Cmd::ToggleColorManagement => 30,
             Cmd::ToggleFilmstrip => 31,
             Cmd::ToggleGrid => 32,
+            Cmd::Notices => 33,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -110,7 +112,7 @@ impl Cmd {
     }
 }
 
-const ALL: [Cmd; 32] = [
+const ALL: [Cmd; 33] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -143,6 +145,7 @@ const ALL: [Cmd; 32] = [
     Cmd::ToggleColorManagement,
     Cmd::ToggleFilmstrip,
     Cmd::ToggleGrid,
+    Cmd::Notices,
 ];
 
 /// State the menu reflects.
@@ -454,6 +457,7 @@ fn build(s: &MenuState) -> Option<HMENU> {
         true,
     );
     m.item(Cmd::About, tr(Msg::MenuAbout), None, false, true);
+    m.item(Cmd::Notices, tr(Msg::MenuNotices), None, false, true);
     m.separator();
     m.item(Cmd::Exit, tr(Msg::Exit), Some("Alt+F4".into()), false, true);
     Some(m.menu)

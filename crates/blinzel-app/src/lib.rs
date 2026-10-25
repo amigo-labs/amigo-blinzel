@@ -26,6 +26,8 @@ pub mod loader;
 #[cfg(windows)]
 pub mod menu;
 #[cfg(windows)]
+pub mod notices;
+#[cfg(windows)]
 pub mod platform;
 #[cfg(windows)]
 pub mod resident;

@@ -9,4 +9,5 @@ The first version.
 - Own parallel JPEG decoder, byte-identical with libjpeg-turbo, for the visible image on all performance cores.
 - Prefetching in paging direction; embedded camera previews first.
 - German and English.
+- Third-party notices for every bundled library, in the menu and with each release.
 - Installs itself per user without administrator rights; silent updates with three checks and automatic rollback.

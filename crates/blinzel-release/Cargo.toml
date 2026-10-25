@@ -11,3 +11,4 @@ publish.workspace = true
 blinzel-core.workspace = true
 # Key generation needs the OS random number generator.
 ed25519-compact = { workspace = true, features = ["random"] }
+toml.workspace = true

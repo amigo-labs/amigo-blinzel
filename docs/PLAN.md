@@ -238,6 +238,7 @@ Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur C
 - 🟡 **Release-Assets** pro Release auf GitHub:
   - `amigo-blinzel-setup-x64.exe` und `amigo-blinzel-setup-arm64.exe`, das ist dieselbe Exe wie der Viewer.
   - `SHA256SUMS` und `SHA256SUMS.sig`.
+  - `THIRD-PARTY-NOTICES.txt` (dieselben Lizenztexte, die die Exe im Menü zeigt).
 - 🟡 **Installationsdialog:** Als Setup gestartet (Dateiname enthält `setup` oder `--install`), erscheint ein Dialog in Viewer-Optik, rahmenlos und mehrsprachig.
 - 🟡 **Installation pro Benutzer, ohne Admin**, nach `%LOCALAPPDATA%\Programs\amigo-blinzel\`:
   - Startmenü-Verknüpfung (`IShellLinkW`, AppUserModelID).
@@ -362,7 +363,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
 | **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
-| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF- und WebP-Animation, WebP nativ (Gate: verlustfrei und Animationen nativ, verlustbehaftet WIC sobald geladen), JPEG XL nativ (Gate bestanden, +1,7 MB), TIFF nativ mit parallelen Streifen (sonst WIC), RAW über eingebettete Vorschauen (Entwicklung weiter WIC); offen: AVIF, HEIC, Lizenzhinweise der eingebundenen Bibliotheken |
+| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF- und WebP-Animation, WebP nativ (Gate: verlustfrei und Animationen nativ, verlustbehaftet WIC sobald geladen), JPEG XL nativ (Gate bestanden, +1,7 MB), TIFF nativ mit parallelen Streifen (sonst WIC), RAW über eingebettete Vorschauen (Entwicklung weiter WIC), Lizenzhinweise der eingebundenen Bibliotheken (`THIRD-PARTY-NOTICES.txt`, Menü „Lizenzhinweise“); offen: AVIF, HEIC |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |

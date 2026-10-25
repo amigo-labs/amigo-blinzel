@@ -24,6 +24,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Fails when Cargo.lock changed without regenerating the notices.
+      - name: Third-party notices up to date
+        run: cargo run --locked -p blinzel-release -- notices --check
 
   windows:
     name: Windows (build, tests, WARP, bench)

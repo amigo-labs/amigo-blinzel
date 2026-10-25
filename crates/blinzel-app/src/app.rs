@@ -59,6 +59,8 @@ pub enum Action {
     SaveCutout(SaveJob),
     CheckUpdates,
     About,
+    /// Open the third-party licence texts.
+    Notices,
     /// Turn resident mode on or off (tray icon, start at sign-in).
     SetResident(bool),
     /// The tray icon's menu at a screen position.
@@ -1730,6 +1732,7 @@ impl App {
                 vec![]
             }
             Cmd::About => vec![Action::About],
+            Cmd::Notices => vec![Action::Notices],
             Cmd::SaveCutout => match self.save_job() {
                 Some(job) => vec![Action::SaveCutout(job)],
                 None => vec![],
