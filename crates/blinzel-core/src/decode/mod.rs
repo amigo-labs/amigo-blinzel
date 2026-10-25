@@ -1,8 +1,11 @@
 //! Format dispatch: probe headers, decode at the resolution that is needed,
 //! never let a broken file take the process down.
 
+pub mod avif;
 pub mod bmp;
 pub mod gif;
+#[cfg(feature = "heic")]
+pub mod heif;
 #[cfg(feature = "turbojpeg")]
 pub mod jpeg;
 pub mod jxl;
@@ -76,6 +79,34 @@ pub struct Animation {
     pub frames: Vec<AnimFrame>,
     /// How often the whole animation plays; `None` for ever.
     pub plays: Option<u32>,
+}
+
+/// What a streamed animation turned out to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnimInfo {
+    /// Frames handed to the sink (fewer than 2: a still image).
+    pub frames: usize,
+    /// How often the whole animation plays; `None` for ever.
+    pub plays: Option<u32>,
+}
+
+/// Receives an animation's frames as they are decoded; returns `false` to
+/// stop decoding (the frames so far are kept).
+pub type FrameSink<'a> = dyn FnMut(AnimFrame) -> bool + 'a;
+
+/// Collects a streamed animation; `None` for fewer than two frames.
+pub(crate) fn collect_animation(
+    stream: impl FnOnce(&mut FrameSink) -> Result<AnimInfo>,
+) -> Result<Option<Animation>> {
+    let mut frames = Vec::new();
+    let info = stream(&mut |f| {
+        frames.push(f);
+        true
+    })?;
+    Ok((info.frames >= 2).then_some(Animation {
+        frames,
+        plays: info.plays,
+    }))
 }
 
 /// Frame durations below 20 ms play at 100 ms, like in browsers (many
@@ -172,6 +203,15 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
             let ((w, h), orientation, icc) = jxl::info(data)?;
             (w, h, orientation, Vec::new(), icc)
         }
+        #[cfg(feature = "heic")]
+        Format::Heif => {
+            let ((w, h), orientation, icc) = heif::info(data)?;
+            (w, h, orientation, Vec::new(), icc)
+        }
+        Format::Avif => {
+            let ((w, h), orientation, icc) = avif::info(data)?;
+            (w, h, orientation, Vec::new(), icc)
+        }
         Format::Tiff => match tiff::info(data) {
             Ok(((w, h), orientation, icc)) => (w, h, orientation, Vec::new(), icc),
             Err(DecodeError::Unsupported(_)) => raw_probe(data, format)?,
@@ -240,6 +280,9 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::Bmp => finish(bmp::decode(data)?, req),
         Format::WebP => finish(webp::decode(data)?, req),
         Format::Jxl => finish(jxl::decode(data, threads)?, req),
+        #[cfg(feature = "heic")]
+        Format::Heif => finish(heif::decode(data, threads)?, req),
+        Format::Avif => finish(avif::decode(data, threads)?, req),
         Format::Tiff => finish(tiff::decode(data, threads)?, req),
         other => Err(DecodeError::Unsupported(other)),
     }
@@ -381,6 +424,23 @@ mod tests {
             probe(b"nothing"),
             Err(DecodeError::Unsupported(Format::Unknown))
         ));
+    }
+
+    /// Without the `heic` feature HEIC is left to the platform decoder; the
+    /// colour profile still comes from the container.
+    #[cfg(not(feature = "heic"))]
+    #[test]
+    fn heic_needs_the_feature() {
+        let data = include_bytes!("../../testdata/rgb-64x48.heic");
+        assert!(matches!(
+            decode(data, Request::Full),
+            Err(DecodeError::Unsupported(Format::Heif))
+        ));
+        assert!(matches!(
+            probe(data),
+            Err(DecodeError::Unsupported(Format::Heif))
+        ));
+        assert!(avif::container_profile(data).is_none());
     }
 
     #[test]

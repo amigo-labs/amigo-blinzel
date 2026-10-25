@@ -5,7 +5,8 @@
 //! directly at the requested size.
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use blinzel_core::decode::{DecodeError, Probe, Request, Result};
 use blinzel_core::geom::Orientation;
@@ -225,10 +226,54 @@ fn tiff_via_wic(data: &[u8], threads: usize) -> bool {
     detect(data) == Format::Tiff && (threads < 2 || blinzel_core::decode::tiff::strips(data) < 2)
 }
 
+/// HEIC and AVIF: WIC goes first where Windows has the codec (the "HEVC
+/// Video Extensions" and "AV1 Video Extension"; hardware decoding on most
+/// GPUs). Without it WIC cannot open the file, and native decoding takes
+/// over for the rest of the process (for HEIC only in builds with the
+/// `heic` feature, which is off because HEVC is covered by patents). Probe
+/// and decode take the same path, since the two may treat the HEIF
+/// transformations differently.
+static HEIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
+static AVIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
+
+/// The "codec missing" flag if `data` is HEIC or AVIF and WIC goes first.
+fn heif_via_wic(data: &[u8]) -> Option<&'static AtomicBool> {
+    use blinzel_core::format::{Format, detect};
+    let missing = match detect(data) {
+        Format::Heif => &HEIF_WIC_MISSING,
+        Format::Avif => &AVIF_WIC_MISSING,
+        _ => return None,
+    };
+    (override_() != Some(Decoder::Native) && !missing.load(Ordering::Relaxed)).then_some(missing)
+}
+
+/// The colour profile from the HEIF container (WIC does not hand it out).
+fn heif_profile(data: &[u8]) -> Option<blinzel_core::icc::Profile> {
+    blinzel_core::decode::avif::container_profile(data)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Decoder {
+    Native,
+    Wic,
+}
+
+/// `BLINZEL_DECODER=native` or `=wic`: for benchmark gates, the given
+/// decoder goes first wherever both can decode a file.
+fn override_() -> Option<Decoder> {
+    static D: OnceLock<Option<Decoder>> = OnceLock::new();
+    *D.get_or_init(|| match std::env::var("BLINZEL_DECODER").as_deref() {
+        Ok("native") => Some(Decoder::Native),
+        Ok("wic") => Some(Decoder::Wic),
+        _ => None,
+    })
+}
+
 /// Native decoding first, WIC for everything else (and for JPEGs the
 /// native path rejects, e.g. 12-bit). Where WIC won the benchmark gate it
 /// goes first: lossy WebP stills once its codec is loaded (`WEBP_CODEC`),
-/// TIFFs that cannot decode in parallel.
+/// TIFFs that cannot decode in parallel. HEIC and AVIF go to WIC wherever
+/// it has a codec (`HEIF_WIC_MISSING`, `AVIF_WIC_MISSING`).
 pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
     decode_any_with(data, req, 1)
 }
@@ -237,7 +282,20 @@ pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
 /// parallelize (JPEG); for the image the user waits for.
 pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
     let wic = || blinzel_core::decode::guard(|| decode(data, req));
-    if webp_via_wic(data) || tiff_via_wic(data, threads) {
+    if let Some(missing) = heif_via_wic(data) {
+        return match wic() {
+            Err(DecodeError::Unsupported(_)) => {
+                missing.store(true, Ordering::Relaxed);
+                blinzel_core::decode::decode_with(data, req, threads)
+            }
+            r => r,
+        };
+    }
+    let wic_first = match override_() {
+        Some(d) => d == Decoder::Wic,
+        None => webp_via_wic(data) || tiff_via_wic(data, threads),
+    };
+    if wic_first {
         return match wic() {
             Ok(img) => Ok(img),
             // Native as the fallback; WIC's error if both fail.
@@ -251,6 +309,16 @@ pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Imag
 }
 
 pub fn probe_any(data: &[u8]) -> Result<Probe> {
+    if let Some(missing) = heif_via_wic(data) {
+        match blinzel_core::decode::guard(|| probe(data)) {
+            Ok(mut p) => {
+                p.icc = heif_profile(data);
+                return Ok(p);
+            }
+            Err(DecodeError::Unsupported(_)) => missing.store(true, Ordering::Relaxed),
+            Err(e) => return Err(e),
+        }
+    }
     match blinzel_core::decode::probe(data) {
         Err(DecodeError::Unsupported(_)) => blinzel_core::decode::guard(|| probe(data)),
         r => r,

@@ -209,34 +209,51 @@ pub fn decode(data: &[u8], threads: usize) -> Result<Image> {
 /// Every frame of an animated JPEG XL as long as they fit into `budget`
 /// bytes; `None` for a still image.
 pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>> {
+    super::collect_animation(|sink| stream_animation(data, budget, sink))
+}
+
+/// Like [`decode_animation`], handing each keyframe to `sink` as soon as
+/// it is rendered.
+pub fn stream_animation(
+    data: &[u8],
+    budget: usize,
+    sink: &mut super::FrameSink,
+) -> Result<super::AnimInfo> {
+    let still = super::AnimInfo {
+        frames: 0,
+        plays: None,
+    };
     if header(data)?.image_header().metadata.animation.is_none() {
-        return Ok(None);
+        return Ok(still);
     }
     let img = load(data, 1)?;
     let Some(anim) = img.image_header().metadata.animation.as_ref() else {
-        return Ok(None);
+        return Ok(still);
     };
     let count = img.num_loaded_keyframes();
     let s = &img.image_header().size;
     let frame_bytes = s.width as usize * s.height as usize * 4;
     if count < 2 || anim.tps_numerator == 0 {
-        return Ok(None);
+        return Ok(still);
     }
-    let mut frames = Vec::new();
-    while frames.len() < count && (frames.len() + 1) * frame_bytes <= budget {
-        let render = img.render_frame(frames.len()).map_err(err)?;
+    let mut done = 0;
+    while done < count && (done + 1) * frame_bytes <= budget {
+        let render = img.render_frame(done).map_err(err)?;
         let ticks = render.duration() as u64;
         let ms = ticks * 1000 * anim.tps_denominator as u64 / anim.tps_numerator as u64;
-        frames.push(AnimFrame {
+        done += 1;
+        let more = sink(AnimFrame {
             image: image(&img, &render)?,
             delay_ms: super::min_delay_ms(ms.min(u32::MAX as u64) as u32),
         });
+        if !more {
+            break;
+        }
     }
-    if frames.len() < 2 {
-        return Ok(None);
-    }
-    let plays = (anim.num_loops > 0).then_some(anim.num_loops);
-    Ok(Some(Animation { frames, plays }))
+    Ok(super::AnimInfo {
+        frames: done,
+        plays: (anim.num_loops > 0).then_some(anim.num_loops),
+    })
 }
 
 #[cfg(test)]

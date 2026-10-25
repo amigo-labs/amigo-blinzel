@@ -17,6 +17,8 @@ struct Language {
     code: String,
     name: String,
     plural_rule: String,
+    /// Right-to-left script (`[meta] direction = "rtl"`).
+    rtl: bool,
     simple: BTreeMap<String, String>,
     plural: BTreeMap<String, BTreeMap<String, String>>,
 }
@@ -146,6 +148,10 @@ fn main() {
     for (ident, lang) in lang_idents.iter().zip(&langs) {
         let _ = writeln!(out, "            Lang::{ident} => {:?},", lang.name);
     }
+    out.push_str("        }\n    }\n    /// Written right to left (mirrored UI).\n    pub const fn is_rtl(self) -> bool {\n        match self {\n");
+    for (ident, lang) in lang_idents.iter().zip(&langs) {
+        let _ = writeln!(out, "            Lang::{ident} => {},", lang.rtl);
+    }
     out.push_str("        }\n    }\n    pub(crate) const fn plural_rule(self) -> crate::plural::Rule {\n        match self {\n");
     for (ident, lang) in lang_idents.iter().zip(&langs) {
         let _ = writeln!(
@@ -215,6 +221,17 @@ fn load(path: &Path) -> Language {
         .and_then(|v| v.as_str())
         .unwrap_or("auto")
         .to_owned();
+    let rtl = match meta
+        .and_then(|m| m.get("direction"))
+        .and_then(|v| v.as_str())
+    {
+        None | Some("ltr") => false,
+        Some("rtl") => true,
+        Some(d) => panic!(
+            "{}: [meta] direction must be \"ltr\" or \"rtl\", not {d:?}",
+            path.display()
+        ),
+    };
 
     let mut simple = BTreeMap::new();
     let mut plural = BTreeMap::new();
@@ -260,6 +277,7 @@ fn load(path: &Path) -> Language {
         code,
         name,
         plural_rule,
+        rtl,
         simple,
         plural,
     }

@@ -663,8 +663,14 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
                     Some(hwnd),
                     windows::core::PCWSTR(text.as_ptr()),
                     windows::core::PCWSTR(caption.as_ptr()),
-                    MB_ICONINFORMATION | MB_OK,
+                    MB_ICONINFORMATION | MB_OK | platform::message_box_direction(),
                 );
+            }
+            vec![]
+        }
+        Action::Notices => {
+            if let Err(e) = crate::notices::show(hwnd) {
+                platform::debug_log(&format!("notices: {e}"));
             }
             vec![]
         }

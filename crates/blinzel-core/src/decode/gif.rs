@@ -2,7 +2,9 @@
 //! animations every frame composited the way browsers do (transparency,
 //! disposal, minimum delay).
 
-use super::{AnimFrame, Animation, DecodeError, Result, check_size, min_delay_ms};
+use super::{
+    AnimFrame, AnimInfo, Animation, DecodeError, FrameSink, Result, check_size, min_delay_ms,
+};
 use crate::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 
 fn delay_ms(centiseconds: u16) -> u32 {
@@ -13,6 +15,12 @@ fn delay_ms(centiseconds: u16) -> u32 {
 /// fit into `budget` bytes (the rest is dropped); `None` for a single
 /// frame.
 pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>> {
+    super::collect_animation(|sink| stream_animation(data, budget, sink))
+}
+
+/// Like [`decode_animation`], handing each frame to `sink` as soon as it
+/// is composited.
+pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Result<AnimInfo> {
     let err = |e: gif::DecodingError| DecodeError::Corrupt(e.to_string());
     let mut opts = gif::DecodeOptions::new();
     opts.set_color_output(gif::ColorOutput::RGBA);
@@ -20,7 +28,7 @@ pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>>
     let (w, h) = (dec.width() as usize, dec.height() as usize);
     check_size(w as u64, h as u64)?;
     let mut canvas = vec![0u8; w * h * 4];
-    let mut frames = Vec::new();
+    let mut count = 0;
     let mut used = 0usize;
     while let Some(f) = dec.read_next_frame().map_err(err)? {
         if used + canvas.len() > budget {
@@ -52,7 +60,7 @@ pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>>
         let mut plane = Plane::new(w as u32, h as u32, 4);
         plane.data.copy_from_slice(&canvas);
         let opaque = canvas.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
-        frames.push(AnimFrame {
+        let more = sink(AnimFrame {
             image: Image {
                 pixels: Pixels::Packed {
                     plane,
@@ -71,7 +79,11 @@ pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>>
             },
             delay_ms: delay_ms(f.delay),
         });
+        count += 1;
         used += canvas.len();
+        if !more {
+            break;
+        }
         match (f.dispose, before) {
             (gif::DisposalMethod::Background, _) => {
                 for row in 0..fh.min(h.saturating_sub(fy)) {
@@ -82,14 +94,14 @@ pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>>
             _ => {}
         }
     }
-    if frames.len() < 2 {
-        return Ok(None);
-    }
     let plays = match dec.repeat() {
         gif::Repeat::Infinite => None,
         gif::Repeat::Finite(n) => Some(n as u32 + 1),
     };
-    Ok(Some(Animation { frames, plays }))
+    Ok(AnimInfo {
+        frames: count,
+        plays,
+    })
 }
 
 /// Logical screen size from the header.
@@ -279,6 +291,14 @@ mod tests {
         // Room for two frames of 4 × 2 × 4 bytes.
         let cut = decode_animation(&three, 2 * 32).unwrap().unwrap();
         assert_eq!(cut.frames.len(), 2);
+        // Streaming: frames arrive one by one, and the sink can stop.
+        let mut seen = 0;
+        let info = stream_animation(&three, usize::MAX, &mut |_| {
+            seen += 1;
+            seen < 2
+        })
+        .unwrap();
+        assert_eq!((seen, info.frames), (2, 2));
         assert_eq!(delay_ms(0), 100);
         assert_eq!(delay_ms(1), 100);
         assert_eq!(delay_ms(7), 70);

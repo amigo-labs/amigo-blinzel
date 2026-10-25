@@ -1,5 +1,6 @@
 //! The only visible UI: a hamburger button top left and minimize /
 //! maximize / close top right, drawn straight over the image (no bar).
+//! Right-to-left languages mirror both sides.
 //! Pure geometry; icons are SDF shapes, so the first frame needs no font.
 
 use blinzel_core::geom::Rect;
@@ -23,6 +24,8 @@ pub struct Chrome {
     /// Physical pixels per DIP.
     pub scale: f64,
     pub client: (f64, f64),
+    /// Mirrored for right-to-left languages.
+    pub rtl: bool,
 }
 
 impl Chrome {
@@ -33,11 +36,16 @@ impl Chrome {
     pub fn rect(&self, b: Button) -> Rect {
         let (w, h) = (BUTTON_W * self.scale, BUTTON_H * self.scale);
         let right = |i: f64| Rect::new(self.client.0 - w * i, 0.0, w, h);
-        match b {
+        let r = match b {
             Button::Menu => Rect::new(0.0, 0.0, w, h),
             Button::Close => right(1.0),
             Button::Maximize => right(2.0),
             Button::Minimize => right(3.0),
+        };
+        if self.rtl {
+            Rect::new(self.client.0 - r.right(), r.y, r.w, r.h)
+        } else {
+            r
         }
     }
 
@@ -167,6 +175,7 @@ mod tests {
         let c = Chrome {
             scale: 1.5,
             client: (1000.0, 600.0),
+            rtl: false,
         };
         assert_eq!(
             c.rect(Button::Close),
@@ -178,5 +187,18 @@ mod tests {
         assert_eq!(c.hit((500.0, 10.0)), None);
         assert_eq!(c.hit((990.0, 100.0)), None);
         assert!(!c.shapes(Some(Button::Close), None, false).is_empty());
+    }
+
+    #[test]
+    fn right_to_left_mirrors() {
+        let c = Chrome {
+            scale: 1.0,
+            client: (1000.0, 600.0),
+            rtl: true,
+        };
+        assert_eq!(c.rect(Button::Close), Rect::new(0.0, 0.0, 46.0, 32.0));
+        assert_eq!(c.rect(Button::Menu), Rect::new(954.0, 0.0, 46.0, 32.0));
+        assert_eq!(c.hit((990.0, 10.0)), Some(Button::Menu));
+        assert_eq!(c.hit((60.0, 10.0)), Some(Button::Maximize));
     }
 }

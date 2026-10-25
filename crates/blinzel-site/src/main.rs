@@ -67,6 +67,8 @@ impl Lang {
         match (self, key) {
             (Lang::De, "lang_name") => "Deutsch",
             (Lang::En, "lang_name") => "English",
+            (Lang::De, "skip") => "Zum Inhalt springen",
+            (Lang::En, "skip") => "Skip to content",
             (Lang::De, "pending") => {
                 "Die Referenzmessung steht noch aus. Sobald sie vorliegt, erscheinen hier die Zahlen mit Rohdaten."
             }
@@ -197,16 +199,27 @@ fn render(layout: &str, lang: Lang, pages: &[Page], page: &Page) -> String {
         .iter()
         .filter(|p| !NAV.contains(&p.slug))
         .map(|p| format!("<a href=\"{}\">{}</a>", url(lang, p.slug), p.title))
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .collect();
+    // A page that brings its own <h1> (the start page's hero) gets no
+    // generic page heading.
+    let heading = if page.body.contains("<h1") {
+        String::new()
+    } else {
+        format!("<div class=\"page-head\"><h1>{}</h1></div>", page.title)
+    };
     let other = lang.other();
     layout
         .replace("{{lang}}", lang.code())
+        .replace("{{slug}}", page.slug)
+        .replace("{{skip}}", lang.t("skip"))
+        .replace("{{version}}", env!("CARGO_PKG_VERSION"))
+        .replace("{{heading}}", &heading)
         .replace("{{title}}", &page.title)
         .replace("{{nav}}", &nav)
         .replace("{{footer}}", &footer)
         .replace("{{other_lang_url}}", &url(other, page.slug))
         .replace("{{other_lang_name}}", other.t("lang_name"))
+        .replace("{{other_lang}}", other.code())
         .replace("{{content}}", &page.body)
 }
 
@@ -309,10 +322,20 @@ mod tests {
         assert!(html.contains("ImageGlass"));
         for lang in ["de", "en"] {
             for p in PAGES {
+                let html = fs::read_to_string(dist.join(lang).join(format!("{p}.html")))
+                    .unwrap_or_else(|e| panic!("{lang}/{p}: {e}"));
+                // One heading per page (the start page brings its own), and
+                // privacy and code signing policy linked from every page.
+                assert_eq!(html.matches("<h1").count(), 1, "{lang}/{p}");
                 assert!(
-                    dist.join(lang).join(format!("{p}.html")).is_file(),
+                    html.contains(&format!("href=\"/{lang}/privacy\"")),
                     "{lang}/{p}"
                 );
+                assert!(
+                    html.contains(&format!("href=\"/{lang}/signing\"")),
+                    "{lang}/{p}"
+                );
+                assert!(!html.contains("{{"), "{lang}/{p}");
             }
         }
         let _ = fs::remove_dir_all(&tmp);

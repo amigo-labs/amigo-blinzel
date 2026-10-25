@@ -11,6 +11,12 @@ publish.workspace = true
 default = ["turbojpeg"]
 # libjpeg-turbo as the JPEG baseline until blinzel-jpeg beats it (M3).
 turbojpeg = ["dep:turbojpeg-sys"]
+# dav1d's assembly for AVIF: needs NASM, and only builds on x86-64 (MSVC
+# cannot assemble the ARM64 files). The app and the benches enable it there.
+av1-asm = ["rav1d/asm"]
+# Our own HEVC decoder for HEIC (zune-heic). Off by default: HEVC is
+# covered by patents, so release builds leave HEIC to Windows' codec.
+heic = ["dep:zune-heic"]
 
 [dependencies]
 blinzel-jpeg.workspace = true
@@ -21,6 +27,8 @@ image-webp.workspace = true
 jxl-oxide.workspace = true
 jxl-render.workspace = true
 tiff.workspace = true
+zune-heic = { workspace = true, optional = true }
+rav1d.workspace = true
 ed25519-compact.workspace = true
 
 [dev-dependencies]

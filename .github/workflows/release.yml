@@ -122,4 +122,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" --draft --title "amigo-blinzel ${GITHUB_REF_NAME#v}" \
-            --generate-notes dist/amigo-blinzel-setup-*.exe dist/SHA256SUMS dist/SHA256SUMS.sig
+            --generate-notes dist/amigo-blinzel-setup-*.exe dist/SHA256SUMS dist/SHA256SUMS.sig \
+            THIRD-PARTY-NOTICES.txt

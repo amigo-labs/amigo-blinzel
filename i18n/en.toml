@@ -88,6 +88,7 @@ setup_close = "Close"
 
 menu_check_updates = "Check for updates"
 menu_about = "About amigo-blinzel"
+menu_notices = "Third-party notices"
 about_body = "amigo-blinzel {version}\n{url}"
 update_current = "amigo-blinzel {version} is up to date."
 update_ready = "Version {version} is downloaded and active from the next start."

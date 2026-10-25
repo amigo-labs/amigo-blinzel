@@ -18,11 +18,17 @@ path = "src/lib.rs"
 [features]
 default = ["turbojpeg"]
 turbojpeg = ["blinzel-core/turbojpeg"]
+# Native HEIC where Windows has no HEVC codec; see blinzel-core's `heic`.
+heic = ["blinzel-core/heic"]
 
 [dependencies]
 blinzel-core.workspace = true
 blinzel-i18n.workspace = true
 blinzel-jpeg.workspace = true
+
+# AVIF with dav1d's assembly; ARM64 uses the Rust fallbacks.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+blinzel-core = { workspace = true, features = ["av1-asm"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics.workspace = true

@@ -4,24 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0d12" media="(prefers-color-scheme: dark)">
 <title>{{title}} · amigo-blinzel</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="alternate" hreflang="de" href="/de/">
 <link rel="alternate" hreflang="en" href="/en/">
 </head>
-<body>
-<header>
-<a class="brand" href="/{{lang}}/">amigo-blinzel</a>
+<body class="page-{{slug}}">
+<a class="skip" href="#main">{{skip}}</a>
+<header class="site-header">
+<div class="bar">
+<a class="brand" href="/{{lang}}/"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" class="logo-bg"/><path class="lid" d="M5 16c3-5.5 7-8 11-8s8 2.5 11 8c-3 5.5-7 8-11 8s-8-2.5-11-8z" fill="#fff"/><circle class="pupil" cx="16" cy="16" r="4.5"/></svg><span>amigo-blinzel</span></a>
 <nav>{{nav}}</nav>
-<a class="lang" href="{{other_lang_url}}">{{other_lang_name}}</a>
+<a class="lang" href="{{other_lang_url}}" hreflang="{{other_lang}}" lang="{{other_lang}}">{{other_lang_name}}</a>
+</div>
 </header>
-<main>
-<h1>{{title}}</h1>
+<main id="main">
+{{heading}}
 {{content}}
 </main>
-<footer>
-<p>{{footer}} · <a href="https://github.com/amigo-labs/amigo-blinzel">GitHub</a></p>
+<footer class="site-footer">
+<div class="foot">
+<p class="foot-brand"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" class="logo-bg"/><path d="M5 16c3-5.5 7-8 11-8s8 2.5 11 8c-3 5.5-7 8-11 8s-8-2.5-11-8z" fill="#fff"/><circle class="pupil" cx="16" cy="16" r="4.5"/></svg><span>amigo-blinzel {{version}}</span></p>
+<p class="foot-links">{{footer}}<a href="https://github.com/amigo-labs/amigo-blinzel">GitHub</a></p>
+</div>
 </footer>
 </body>
 </html>

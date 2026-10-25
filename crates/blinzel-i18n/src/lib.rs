@@ -27,6 +27,12 @@ pub fn lang() -> Lang {
     Lang::ALL[CURRENT.load(Ordering::Relaxed) as usize]
 }
 
+/// Whether the current language is written right to left: the window
+/// mirrors its controls, menus and text direction.
+pub fn is_rtl() -> bool {
+    lang().is_rtl()
+}
+
 /// Translates `msg` into the current language.
 #[inline]
 pub fn tr(msg: Msg) -> &'static str {
@@ -129,6 +135,14 @@ pub fn lang_from_code(code: &str) -> Option<Lang> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shipped_languages_are_left_to_right() {
+        // A right-to-left language sets `[meta] direction = "rtl"`.
+        for l in Lang::ALL {
+            assert!(!l.is_rtl(), "{}", l.code());
+        }
+    }
 
     fn placeholders(text: &str) -> Vec<&str> {
         let mut v = Vec::new();
