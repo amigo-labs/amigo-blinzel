@@ -327,6 +327,7 @@ dependencies = [
  "windows",
  "windows-numerics",
  "winit",
+ "x11rb",
 ]
 
 [[package]]

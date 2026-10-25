@@ -47,6 +47,7 @@ arboard = { version = "3.7.0", features = ["wayland-data-control"] }
 trash = "5.2.9"
 notify = "8.2.0"
 lcms2 = "6.2.0"
+x11rb = { version = "0.13.2", default-features = false, features = ["randr"] }
 # Only in the benches: the resampler gate.
 fast_image_resize = "6.1.0"
 # Verifies our own signature of release checksums (self-updater).

@@ -41,6 +41,7 @@ arboard.workspace = true
 trash.workspace = true
 notify.workspace = true
 lcms2.workspace = true
+x11rb.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics.workspace = true

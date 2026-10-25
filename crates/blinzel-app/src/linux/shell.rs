@@ -124,10 +124,8 @@ impl Services for LinuxServices {
         log(msg);
     }
 
-    fn display_target(&self, _monitor: isize) -> Option<Profile> {
-        // Neither X11 nor Wayland tell a client its monitor's profile in a
-        // portable way yet: images go to sRGB.
-        None
+    fn display_target(&self, monitor: isize) -> Option<Profile> {
+        super::color::display_target(monitor)
     }
 
     fn thumb_threads(&self) -> usize {
@@ -187,13 +185,9 @@ impl Host for LinuxHost {
 
     fn monitor(&self) -> Option<(isize, (u32, u32))> {
         let m = self.window.current_monitor()?;
-        let id = m.name().map_or(0, |n| {
-            n.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
-                (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
-            })
-        });
+        let id = m.name().map_or(0, |n| super::color::monitor_id(&n));
         let s = m.size();
-        Some((id as isize, (s.width, s.height)))
+        Some((id, (s.width, s.height)))
     }
 
     fn offer_clipboard(&self) -> bool {
