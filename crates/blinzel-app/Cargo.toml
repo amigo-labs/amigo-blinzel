@@ -18,6 +18,8 @@ path = "src/lib.rs"
 [features]
 default = ["turbojpeg"]
 turbojpeg = ["blinzel-core/turbojpeg"]
+# Native HEIC where Windows has no HEVC codec; see blinzel-core's `heic`.
+heic = ["blinzel-core/heic"]
 
 [dependencies]
 blinzel-core.workspace = true

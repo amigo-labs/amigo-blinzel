@@ -4,6 +4,7 @@
 pub mod avif;
 pub mod bmp;
 pub mod gif;
+#[cfg(feature = "heic")]
 pub mod heif;
 #[cfg(feature = "turbojpeg")]
 pub mod jpeg;
@@ -202,6 +203,7 @@ fn probe_inner(data: &[u8]) -> Result<Probe> {
             let ((w, h), orientation, icc) = jxl::info(data)?;
             (w, h, orientation, Vec::new(), icc)
         }
+        #[cfg(feature = "heic")]
         Format::Heif => {
             let ((w, h), orientation, icc) = heif::info(data)?;
             (w, h, orientation, Vec::new(), icc)
@@ -278,6 +280,7 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::Bmp => finish(bmp::decode(data)?, req),
         Format::WebP => finish(webp::decode(data)?, req),
         Format::Jxl => finish(jxl::decode(data, threads)?, req),
+        #[cfg(feature = "heic")]
         Format::Heif => finish(heif::decode(data, threads)?, req),
         Format::Avif => finish(avif::decode(data, threads)?, req),
         Format::Tiff => finish(tiff::decode(data, threads)?, req),
@@ -421,6 +424,23 @@ mod tests {
             probe(b"nothing"),
             Err(DecodeError::Unsupported(Format::Unknown))
         ));
+    }
+
+    /// Without the `heic` feature HEIC is left to the platform decoder; the
+    /// colour profile still comes from the container.
+    #[cfg(not(feature = "heic"))]
+    #[test]
+    fn heic_needs_the_feature() {
+        let data = include_bytes!("../../testdata/rgb-64x48.heic");
+        assert!(matches!(
+            decode(data, Request::Full),
+            Err(DecodeError::Unsupported(Format::Heif))
+        ));
+        assert!(matches!(
+            probe(data),
+            Err(DecodeError::Unsupported(Format::Heif))
+        ));
+        assert!(avif::container_profile(data).is_none());
     }
 
     #[test]

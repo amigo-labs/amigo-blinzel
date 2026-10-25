@@ -574,6 +574,21 @@ fn profile(colour: &Option<Colour>) -> Result<Option<Profile>> {
     }
 }
 
+/// The colour profile of the primary image of any HEIF file (HEIC too),
+/// from the container alone; `None` for sRGB or when unknown.
+pub fn container_profile(data: &[u8]) -> Option<Profile> {
+    let c = Container::parse(data).ok()?;
+    let mut colour = None;
+    for p in c.props_of(c.primary).ok()? {
+        if let Prop::Colr(col) = p
+            && (colour.is_none() || matches!(col, Colour::Icc(_)))
+        {
+            colour = Some(col.clone());
+        }
+    }
+    profile(&colour).ok().flatten()
+}
+
 /// Stored size (cropped), orientation and colour profile, from the
 /// container alone.
 pub fn info(data: &[u8]) -> Result<((u32, u32), Orientation, Option<Profile>)> {
@@ -1189,6 +1204,8 @@ mod tests {
     fn display_p3_gets_a_profile() {
         let probe = crate::decode::probe(P3).unwrap();
         assert!(probe.icc.is_some());
+        assert!(container_profile(P3).is_some());
+        assert!(container_profile(RGB420).is_none());
     }
 
     #[test]

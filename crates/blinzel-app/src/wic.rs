@@ -229,8 +229,10 @@ fn tiff_via_wic(data: &[u8], threads: usize) -> bool {
 /// HEIC and AVIF: WIC goes first where Windows has the codec (the "HEVC
 /// Video Extensions" and "AV1 Video Extension"; hardware decoding on most
 /// GPUs). Without it WIC cannot open the file, and native decoding takes
-/// over for the rest of the process. Probe and decode take the same path,
-/// since the two may treat the HEIF transformations differently.
+/// over for the rest of the process (for HEIC only in builds with the
+/// `heic` feature, which is off because HEVC is covered by patents). Probe
+/// and decode take the same path, since the two may treat the HEIF
+/// transformations differently.
 static HEIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
 static AVIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
 
@@ -245,15 +247,9 @@ fn heif_via_wic(data: &[u8]) -> Option<&'static AtomicBool> {
     (override_() != Some(Decoder::Native) && !missing.load(Ordering::Relaxed)).then_some(missing)
 }
 
-/// The colour profile from the HEIF header (WIC does not hand it out).
+/// The colour profile from the HEIF container (WIC does not hand it out).
 fn heif_profile(data: &[u8]) -> Option<blinzel_core::icc::Profile> {
-    use blinzel_core::decode::{avif, heif};
-    use blinzel_core::format::{Format, detect};
-    let info = match detect(data) {
-        Format::Avif => avif::info(data),
-        _ => heif::info(data),
-    };
-    info.ok().and_then(|(_, _, icc)| icc)
+    blinzel_core::decode::avif::container_profile(data)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
