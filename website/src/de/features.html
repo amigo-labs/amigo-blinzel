@@ -1,6 +1,6 @@
 <!-- title: Funktionen -->
 <h2>Bedienung</h2>
-<p>Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben Minimieren, Maximieren und Schließen. Alles andere steckt im Menü oder liegt auf einer Taste.</p>
+<p>Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben Minimieren, Maximieren und Schließen; auf dem Mac stehen dort die Fensterknöpfe des Systems, das Menü rechts und zusätzlich in der Menüleiste. Alles andere steckt im Menü oder liegt auf einer Taste; auf dem Mac gilt ⌘ statt Strg.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Taste / Maus</th><th>Aktion</th></tr></thead>
 <tbody>
@@ -9,7 +9,9 @@
 <tr><td>1 / 2 / 3</td><td>Fenster an Bild anpassen / Bild an Fenster anpassen / 100 %</td></tr>
 <tr><td>Mausrad, + / −, 0</td><td>Zoom um den Cursor, zurücksetzen</td></tr>
 <tr><td>Strg+C / Strg+X</td><td>Auswahl kopieren / Ansicht zuschneiden</td></tr>
-<tr><td>Strg+S</td><td>Ausschnitt speichern unter (JPEG verlustfrei, wo möglich)</td></tr>
+<tr><td>Strg+S</td><td>Ausschnitt speichern unter (JPEG verlustfrei, wo möglich; auch PNG, WebP, AVIF)</td></tr>
+<tr><td>G, Strg+Klick, Strg+A</td><td>Raster aller Bilder, Bilder markieren</td></tr>
+<tr><td>Strg+B</td><td><a href="/de/batch">Größe ändern</a> (markierte Bilder oder der ganze Ordner)</td></tr>
 <tr><td>R / L</td><td>drehen (nur Ansicht)</td></tr>
 <tr><td>F11, Doppelklick</td><td>Vollbild</td></tr>
 <tr><td>Entf</td><td>in den Papierkorb</td></tr>
@@ -18,14 +20,14 @@
 <h2>Bilddateien bleiben unberührt</h2>
 <p>amigo-blinzel verändert keine Bilddatei. Ausschnitte werden nur über „Speichern unter“ als neue Datei geschrieben. Bei JPEG-Quellen werden die Daten dabei, wenn möglich, verlustfrei übernommen statt neu kodiert.</p>
 <h2>Formate</h2>
-<p>JPEG, PNG, GIF und BMP mit eigenen Decodern; TIFF, HEIC, AVIF, WebP, JPEG XL und RAW über die Codecs von Windows, soweit installiert.</p>
+<p>JPEG, PNG, GIF, BMP, TIFF, WebP, AVIF und JPEG XL mit eigenen Decodern auf jeder Plattform. HEIC und Kamera-RAW unter Windows über die installierten Windows-Codecs, unter macOS über ImageIO (HEIC mit Apples Hardware-Decoder), unter Linux RAW über die eingebetteten Vorschauen.</p>
 <h2>Woher die Geschwindigkeit kommt</h2>
 <ul>
 <li>Decodieren in Bildschirmauflösung: JPEGs werden per DCT-Skalierung direkt in YCbCr-Ebenen decodiert; Farbumrechnung und Skalierung übernimmt die Grafikkarte.</li>
 <li>Ein eigener JPEG-Decoder verteilt das Huffman-Decoding auf alle Kerne, auch ohne Restart-Marker.</li>
 <li>Prefetch in Blätterrichtung, mit Prioritäten und Abbruch.</li>
 <li>Paralleler Start: Fenster, Grafikkarte und Decoder starten gleichzeitig.</li>
-<li>Win32 und Direct3D 11 mit vorkompilierten Shadern; eine einzige Exe von etwa 3 MB, keine Runtime.</li>
+<li>Nativ auf jeder Plattform: Win32 und Direct3D 11 unter Windows, AppKit und Metal unter macOS, Vulkan (wgpu) unter Linux. Keine Runtime, kein Framework dazwischen.</li>
 </ul>
 <h2>Installation und Updates</h2>
-<p>Die Exe installiert sich selbst, nur für dich und ohne Administratorrechte. Updates kommen still im Hintergrund, werden dreifach geprüft und sind beim nächsten Start aktiv.</p>
+<p>Unter Windows installiert sich die Exe selbst, unter Linux mit <code>blinzel --install</code>, jeweils nur für dich und ohne Administratorrechte; unter macOS ziehst du die App in „Programme“. Updates kommen still im Hintergrund, ihre Prüfsummen sind mit dem Release-Schlüssel des Projekts signiert, aktiv werden sie beim nächsten Start. <a href="/de/download">Download und Installation</a>.</p>

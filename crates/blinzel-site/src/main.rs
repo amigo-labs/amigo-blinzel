@@ -17,9 +17,10 @@ use std::path::{Path, PathBuf};
 use blinzel_core::json::Json;
 
 /// Pages in navigation order; `index` is the start page.
-const PAGES: [&str; 8] = [
+const PAGES: [&str; 9] = [
     "index",
     "features",
+    "batch",
     "compare",
     "benchmarks",
     "method",
@@ -29,9 +30,10 @@ const PAGES: [&str; 8] = [
 ];
 
 /// Shown in the navigation bar; the rest is linked from the footer.
-const NAV: [&str; 6] = [
+const NAV: [&str; 7] = [
     "index",
     "features",
+    "batch",
     "compare",
     "benchmarks",
     "method",
@@ -171,6 +173,9 @@ fn placeholder(
         "version" => env!("CARGO_PKG_VERSION").to_string(),
         "download:x64" => format!("{RELEASES}/amigo-blinzel-setup-x64.exe"),
         "download:arm64" => format!("{RELEASES}/amigo-blinzel-setup-arm64.exe"),
+        "download:macos" => format!("{RELEASES}/amigo-blinzel-macos.zip"),
+        "download:linux-x64" => format!("{RELEASES}/amigo-blinzel-linux-x64.tar.gz"),
+        "download:linux-arm64" => format!("{RELEASES}/amigo-blinzel-linux-arm64.tar.gz"),
         "download:sums" => format!("{RELEASES}/SHA256SUMS"),
         "changelog" => markdown::to_html(changelog),
         k if k.starts_with("race:") => match race {
