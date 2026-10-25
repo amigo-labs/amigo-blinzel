@@ -10,6 +10,10 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
+# The jobs only read the repository (and upload artifacts).
+permissions:
+  contents: read
+
 jobs:
   linux:
     name: Linux (core, app, fmt, clippy, tests)
