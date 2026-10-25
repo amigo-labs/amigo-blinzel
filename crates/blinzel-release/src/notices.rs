@@ -443,10 +443,7 @@ fn libwebp(libwebp_sys: &Path) -> Result<Notice, String> {
     Ok(Notice {
         covers: vec!["libwebp (https://chromium.googlesource.com/webm/libwebp)".into()],
         licence: "BSD-3-Clause".into(),
-        text: format!("{}
-
-
-{}", read("COPYING")?, read("PATENTS")?),
+        text: format!("{}\n\n\n{}", read("COPYING")?, read("PATENTS")?),
     })
 }
 
