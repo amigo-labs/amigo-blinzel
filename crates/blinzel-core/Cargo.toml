@@ -21,6 +21,7 @@ image-webp.workspace = true
 jxl-oxide.workspace = true
 jxl-render.workspace = true
 tiff.workspace = true
+zune-heic.workspace = true
 ed25519-compact.workspace = true
 
 [dev-dependencies]

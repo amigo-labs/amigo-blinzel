@@ -5,7 +5,8 @@
 //! directly at the requested size.
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use blinzel_core::decode::{DecodeError, Probe, Request, Result};
 use blinzel_core::geom::Orientation;
@@ -225,10 +226,42 @@ fn tiff_via_wic(data: &[u8], threads: usize) -> bool {
     detect(data) == Format::Tiff && (threads < 2 || blinzel_core::decode::tiff::strips(data) < 2)
 }
 
+/// HEIC: WIC goes first where Windows has an HEVC codec (the "HEVC Video
+/// Extensions"; hardware decoding on most GPUs). Without it WIC cannot open
+/// the file, and native decoding takes over for the rest of the process.
+/// Probe and decode take the same path: WIC reports the stored size plus an
+/// orientation, `zune-heic` already applies the rotation.
+static HEIF_WIC_MISSING: AtomicBool = AtomicBool::new(false);
+
+fn heif_via_wic(data: &[u8]) -> bool {
+    use blinzel_core::format::{Format, detect};
+    detect(data) == Format::Heif
+        && override_() != Some(Decoder::Native)
+        && !HEIF_WIC_MISSING.load(Ordering::Relaxed)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Decoder {
+    Native,
+    Wic,
+}
+
+/// `BLINZEL_DECODER=native` or `=wic`: for benchmark gates, the given
+/// decoder goes first wherever both can decode a file.
+fn override_() -> Option<Decoder> {
+    static D: OnceLock<Option<Decoder>> = OnceLock::new();
+    *D.get_or_init(|| match std::env::var("BLINZEL_DECODER").as_deref() {
+        Ok("native") => Some(Decoder::Native),
+        Ok("wic") => Some(Decoder::Wic),
+        _ => None,
+    })
+}
+
 /// Native decoding first, WIC for everything else (and for JPEGs the
 /// native path rejects, e.g. 12-bit). Where WIC won the benchmark gate it
 /// goes first: lossy WebP stills once its codec is loaded (`WEBP_CODEC`),
-/// TIFFs that cannot decode in parallel.
+/// TIFFs that cannot decode in parallel. HEIC goes to WIC wherever it has
+/// a codec (`HEIF_WIC_MISSING`).
 pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
     decode_any_with(data, req, 1)
 }
@@ -237,7 +270,20 @@ pub fn decode_any(data: &[u8], req: Request) -> Result<Image> {
 /// parallelize (JPEG); for the image the user waits for.
 pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
     let wic = || blinzel_core::decode::guard(|| decode(data, req));
-    if webp_via_wic(data) || tiff_via_wic(data, threads) {
+    if heif_via_wic(data) {
+        return match wic() {
+            Err(DecodeError::Unsupported(_)) => {
+                HEIF_WIC_MISSING.store(true, Ordering::Relaxed);
+                blinzel_core::decode::decode_with(data, req, threads)
+            }
+            r => r,
+        };
+    }
+    let wic_first = match override_() {
+        Some(d) => d == Decoder::Wic,
+        None => webp_via_wic(data) || tiff_via_wic(data, threads),
+    };
+    if wic_first {
         return match wic() {
             Ok(img) => Ok(img),
             // Native as the fallback; WIC's error if both fail.
@@ -251,6 +297,19 @@ pub fn decode_any_with(data: &[u8], req: Request, threads: usize) -> Result<Imag
 }
 
 pub fn probe_any(data: &[u8]) -> Result<Probe> {
+    if heif_via_wic(data) {
+        match blinzel_core::decode::guard(|| probe(data)) {
+            Ok(mut p) => {
+                // WIC does not hand out the profile; the header has it.
+                p.icc = blinzel_core::decode::heif::info(data)
+                    .ok()
+                    .and_then(|(_, _, icc)| icc);
+                return Ok(p);
+            }
+            Err(DecodeError::Unsupported(_)) => HEIF_WIC_MISSING.store(true, Ordering::Relaxed),
+            Err(e) => return Err(e),
+        }
+    }
     match blinzel_core::decode::probe(data) {
         Err(DecodeError::Unsupported(_)) => blinzel_core::decode::guard(|| probe(data)),
         r => r,
