@@ -354,7 +354,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - Der Loader hat dafür die Stufe `Anim`, nur für das aktuelle Bild und erst, wenn dessen Probe GIF sagt: Das erste Bild erscheint wie bisher sofort, die Animation läuft an, sobald alle Frames auf der GPU sind (480 × 270: 1,2 ms je Frame decodieren). Ein Timer schaltet die Frames weiter; beim Wechsel des Bildes wird die Animation verworfen.
 - 🟡 **WebP:** `decode::webp::decode_animation` (`image-webp` komponiert die Frames selbst), gleiche Regeln für Verzögerungen, Wiederholungen und das 256-MB-Budget; die Stufe `Anim` gilt jetzt für GIF und WebP. Ein stilles WebP meldet die Stufe als Standbild.
 - 🟡 **JPEG XL:** `decode::jxl::decode_animation` rendert jedes Keyframe (Dauer aus Ticks und `tps`, Wiederholungen aus dem Header), gleiche Regeln und Budget. Stille Dateien prüft schon der Header.
-- Offen: Frames schon während des Decodierens abspielen.
+- 🟡 **Abspielen während des Decodierens:** Die Decoder liefern jeden Frame einzeln (`stream_animation` mit Frame-Callback), der Loader lädt ihn sofort auf die GPU und schickt ab dem zweiten Frame alle 200 ms den Stand. Die Wiedergabe startet damit nach zwei Frames; erreicht sie den letzten bisher decodierten, hält sie dort und läuft mit der nächsten Lieferung weiter. Ein Decode-Fehler mittendrin beendet die Animation mit den Frames bis dahin. Sichtprüfung offen (große GIFs).
 
 ## 12. Meilensteine
 

@@ -169,6 +169,9 @@ pub struct App {
     /// Frame shown and complete plays so far.
     anim_frame: usize,
     anim_plays: u32,
+    /// The timer reached the last frame decoded so far; the next delivery
+    /// of frames continues playback.
+    anim_waiting: bool,
     pub dpi: u32,
     pub client: (u32, u32),
     direction: isize,
@@ -231,6 +234,7 @@ impl App {
             animations: HashMap::new(),
             anim_frame: 0,
             anim_plays: 0,
+            anim_waiting: false,
             dpi,
             client,
             direction: 1,
@@ -485,6 +489,7 @@ impl App {
     fn stop_animation(&mut self) {
         self.anim_frame = 0;
         self.anim_plays = 0;
+        self.anim_waiting = false;
         unsafe {
             let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(self.hwnd), TIMER_ANIM);
         }
@@ -530,6 +535,11 @@ impl App {
         }
         let Some(a) = self.animation() else { return };
         let next = self.anim_frame + 1;
+        if next == a.frames.len() && !a.complete {
+            // Still decoding: hold this frame until more arrive.
+            self.anim_waiting = true;
+            return;
+        }
         if next == a.frames.len() {
             self.anim_plays += 1;
             if a.plays.is_some_and(|p| self.anim_plays >= p) {
@@ -618,7 +628,12 @@ impl App {
                     | blinzel_core::format::Format::Jxl
             )
         });
-        if may_animate && !self.animations.contains_key(&cur.cache_id) {
+        // Wanted until complete: a growing animation is still decoding.
+        let anim_done = self
+            .animations
+            .get(&cur.cache_id)
+            .is_some_and(|a| a.as_ref().is_none_or(|a| a.complete));
+        if may_animate && !anim_done {
             jobs.push(Job {
                 path: cur.path.clone(),
                 cache_id: cur.cache_id,
@@ -700,12 +715,25 @@ impl App {
             }
             if stage == Stage::Anim {
                 if Some(cache_id) == current_id {
-                    if let Some(a) = &animation {
+                    // Later deliveries of a growing animation keep playing.
+                    let playing = matches!(self.animations.get(&cache_id), Some(Some(_)));
+                    let first = animation
+                        .as_ref()
+                        .filter(|_| !playing)
+                        .map(|a| a.frames[0].1);
+                    // A still result after frames were shown keeps them.
+                    if animation.is_some() || !playing {
+                        self.animations.insert(cache_id, animation);
+                    }
+                    if let Some(delay) = first {
                         self.anim_frame = 0;
                         self.anim_plays = 0;
-                        self.schedule_frame(a.frames[0].1);
+                        self.anim_waiting = false;
+                        self.schedule_frame(delay);
+                    } else if self.anim_waiting {
+                        self.anim_waiting = false;
+                        self.on_anim_timer();
                     }
-                    self.animations.insert(cache_id, animation);
                     changed_current = true;
                 }
                 continue;

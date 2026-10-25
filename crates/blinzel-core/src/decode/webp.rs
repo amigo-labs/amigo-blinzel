@@ -114,9 +114,23 @@ pub fn decode(data: &[u8]) -> Result<Image> {
 /// Every frame of an animated WebP as long as they fit into `budget`
 /// bytes; `None` for a still image.
 pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>> {
+    super::collect_animation(|sink| stream_animation(data, budget, sink))
+}
+
+/// Like [`decode_animation`], handing each frame to `sink` as soon as it
+/// is decoded.
+pub fn stream_animation(
+    data: &[u8],
+    budget: usize,
+    sink: &mut super::FrameSink,
+) -> Result<super::AnimInfo> {
     let mut dec = open(data)?;
+    let still = super::AnimInfo {
+        frames: 0,
+        plays: None,
+    };
     if !dec.is_animated() || dec.num_frames() < 2 {
-        return Ok(None);
+        return Ok(still);
     }
     let size = dec.dimensions();
     let alpha = dec.has_alpha();
@@ -129,22 +143,26 @@ pub fn decode_animation(data: &[u8], budget: usize) -> Result<Option<Animation>>
             })?
     ];
     let frame_bytes = size.0 as usize * size.1 as usize * 4;
-    let mut frames = Vec::new();
-    while frames.len() < dec.num_frames() as usize && (frames.len() + 1) * frame_bytes <= budget {
+    let mut count = 0;
+    while count < dec.num_frames() as usize && (count + 1) * frame_bytes <= budget {
         let ms = dec.read_frame(&mut buf).map_err(err)?;
-        frames.push(AnimFrame {
+        count += 1;
+        let more = sink(AnimFrame {
             image: image(&buf, size, alpha),
             delay_ms: super::min_delay_ms(ms),
         });
-    }
-    if frames.len() < 2 {
-        return Ok(None);
+        if !more {
+            break;
+        }
     }
     let plays = match dec.loop_count() {
         LoopCount::Forever => None,
         LoopCount::Times(n) => Some(n.get() as u32),
     };
-    Ok(Some(Animation { frames, plays }))
+    Ok(super::AnimInfo {
+        frames: count,
+        plays,
+    })
 }
 
 #[cfg(test)]

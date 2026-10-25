@@ -80,6 +80,34 @@ pub struct Animation {
     pub plays: Option<u32>,
 }
 
+/// What a streamed animation turned out to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnimInfo {
+    /// Frames handed to the sink (fewer than 2: a still image).
+    pub frames: usize,
+    /// How often the whole animation plays; `None` for ever.
+    pub plays: Option<u32>,
+}
+
+/// Receives an animation's frames as they are decoded; returns `false` to
+/// stop decoding (the frames so far are kept).
+pub type FrameSink<'a> = dyn FnMut(AnimFrame) -> bool + 'a;
+
+/// Collects a streamed animation; `None` for fewer than two frames.
+pub(crate) fn collect_animation(
+    stream: impl FnOnce(&mut FrameSink) -> Result<AnimInfo>,
+) -> Result<Option<Animation>> {
+    let mut frames = Vec::new();
+    let info = stream(&mut |f| {
+        frames.push(f);
+        true
+    })?;
+    Ok((info.frames >= 2).then_some(Animation {
+        frames,
+        plays: info.plays,
+    }))
+}
+
 /// Frame durations below 20 ms play at 100 ms, like in browsers (many
 /// files say 0).
 pub fn min_delay_ms(ms: u32) -> u32 {

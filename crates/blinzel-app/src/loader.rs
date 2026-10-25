@@ -47,7 +47,13 @@ pub struct GpuAnimation {
     pub frames: Vec<(Arc<GpuImage>, u32)>,
     /// How often the whole animation plays; `None` for ever.
     pub plays: Option<u32>,
+    /// All frames are here; otherwise more follow in a later `Loaded`.
+    pub complete: bool,
 }
+
+/// How often an animation still being decoded goes to the window with the
+/// frames so far.
+const ANIM_UPDATE: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Texture/job key: the file's cache id with the stage in the low bits.
 pub fn key(cache_id: u64, stage: Stage) -> Key {
@@ -481,7 +487,9 @@ pub fn covering_raw_preview(
         .then_some(p)
 }
 
-/// Decodes every frame of an animated image and uploads them.
+/// Decodes the frames of an animated image and uploads each as soon as it
+/// is ready. From the second frame on the window gets the frames so far
+/// (every [`ANIM_UPDATE`]), so playback starts while the rest decodes.
 fn animation_stage(
     shared: &Shared,
     job: &Job,
@@ -491,45 +499,65 @@ fn animation_stage(
     cancel: &CancelToken,
 ) {
     let t = Instant::now();
-    use blinzel_core::decode::{gif, jxl, webp};
+    use blinzel_core::decode::{AnimFrame, FrameSink, gif, jxl, webp};
     use blinzel_core::format::Format;
-    let decoded = match probe.format {
-        Format::Gif => gif::decode_animation(data, ANIM_BUDGET).ok().flatten(),
-        Format::WebP => webp::decode_animation(data, ANIM_BUDGET).ok().flatten(),
-        Format::Jxl => jxl::decode_animation(data, ANIM_BUDGET).ok().flatten(),
-        _ => None,
+    let stream: fn(&[u8], usize, &mut FrameSink) -> blinzel_core::decode::Result<_> =
+        match probe.format {
+            Format::Gif => gif::stream_animation,
+            Format::WebP => webp::stream_animation,
+            Format::Jxl => jxl::stream_animation,
+            _ => return,
+        };
+    let send = |frames: &[(Arc<GpuImage>, u32)], plays, complete, upload_ms| {
+        shared.send(Loaded {
+            cache_id: job.cache_id,
+            stage: Stage::Anim,
+            probe: Some(probe.clone()),
+            image: Err("animation stage".into()),
+            animation: (frames.len() >= 2).then(|| {
+                Arc::new(GpuAnimation {
+                    frames: frames.to_vec(),
+                    plays,
+                    complete,
+                })
+            }),
+            read_ms,
+            decode_ms: t.elapsed().as_secs_f64() * 1e3,
+            upload_ms,
+        })
     };
-    let decode_ms = t.elapsed().as_secs_f64() * 1e3;
-    let t = Instant::now();
-    let animation = decoded.and_then(|a| {
-        let device = shared.wait_device(cancel)?;
+    let mut frames: Vec<(Arc<GpuImage>, u32)> = Vec::new();
+    let mut device = None;
+    let mut upload_ms = 0.0;
+    let mut sent = None::<Instant>;
+    let info = stream(data, ANIM_BUDGET, &mut |f: AnimFrame| {
+        if cancel.is_cancelled() {
+            return false;
+        }
+        if device.is_none() {
+            device = shared.wait_device(cancel);
+        }
+        let Some(d) = &device else { return false };
+        let tu = Instant::now();
         let tile = *shared.tile.lock().unwrap();
-        let frames = a
-            .frames
-            .into_iter()
-            .map(|f| {
-                let gpu = upload(&device, &f.image, probe.orientation, tile).ok()?;
-                Some((Arc::new(gpu), f.delay_ms))
-            })
-            .collect::<Option<Vec<_>>>()?;
-        Some(Arc::new(GpuAnimation {
-            frames,
-            plays: a.plays,
-        }))
+        // Out of GPU memory: play the frames uploaded so far.
+        let Ok(gpu) = upload(d, &f.image, probe.orientation, tile) else {
+            return false;
+        };
+        upload_ms += tu.elapsed().as_secs_f64() * 1e3;
+        frames.push((Arc::new(gpu), f.delay_ms));
+        if frames.len() >= 2 && sent.is_none_or(|s| s.elapsed() >= ANIM_UPDATE) {
+            send(&frames, None, false, upload_ms);
+            sent = Some(Instant::now());
+        }
+        true
     });
     if cancel.is_cancelled() {
         return;
     }
-    shared.send(Loaded {
-        cache_id: job.cache_id,
-        stage: Stage::Anim,
-        probe: Some(probe),
-        image: Err("animation stage".into()),
-        animation,
-        read_ms,
-        decode_ms,
-        upload_ms: t.elapsed().as_secs_f64() * 1e3,
-    });
+    // A decode error ends the animation with the frames decoded so far.
+    let plays = info.ok().and_then(|i| i.plays);
+    send(&frames, plays, true, upload_ms);
 }
 
 #[cfg(test)]
