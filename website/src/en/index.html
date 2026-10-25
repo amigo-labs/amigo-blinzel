@@ -1,15 +1,22 @@
 <!-- title: Home -->
+<section class="hero">
+<div class="hero-text">
+<p class="eyebrow">Version {{version}} · Windows 11 · x64 and ARM64</p>
+<h1>See your images <span class="accent">without the wait.</span></h1>
 <p class="lead">An image viewer for Windows 11 with one goal: maximum speed when opening and paging through images. No toolbars, no ads, no telemetry.</p>
 <div class="cta">
 <a class="button" href="{{download:x64}}">Download (x64)</a>
 <a class="button secondary" href="/en/download">ARM64 and details</a>
 </div>
-<div class="grid">
-<div class="card"><h3>Instantly there</h3><p>The window appears with the image already on it. Images are decoded only as large as the screen needs.</p></div>
-<div class="card"><h3>Paging without waiting</h3><p>The next images are ready as GPU textures ahead of time, in the direction you page.</p></div>
-<div class="card"><h3>Own JPEG decoder</h3><p>Parallel on all cores and byte-identical with libjpeg-turbo.</p></div>
-<div class="card"><h3>Verifiable</h3><p>Every number on this site comes from an open measuring tool. Raw data and method are published.</p></div>
+</div>
+<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 520 420"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b5cd6"/><stop offset=".55" stop-color="#9a6fe0"/><stop offset="1" stop-color="#f4a77a"/></linearGradient><linearGradient id="lake" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a4fb8"/><stop offset="1" stop-color="#1d2a6b"/></linearGradient><clipPath id="win"><rect x="20" y="16" width="480" height="316" rx="14"/></clipPath></defs><g class="win"><rect x="20" y="16" width="480" height="316" rx="14" fill="#11141b"/><g clip-path="url(#win)"><rect x="20" y="16" width="480" height="316" fill="url(#sky)"/><circle cx="356" cy="150" r="38" fill="#ffd9a8"/><path d="M20 262 120 170l58 52 74-88 104 104 52-40 92 64v70H20z" fill="#3a2f7a"/><path d="M20 290l90-58 70 40 96-62 92 66 62-30 70 44v42H20z" fill="#24205a"/><rect x="20" y="296" width="480" height="36" fill="url(#lake)"/><path d="M40 40h16M40 46h16M40 52h16" stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".85"/><path d="M418 46h12M450 40h10v10h-10zM476 40l10 10M486 40l-10 10" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".85"/></g></g><g class="strip"><rect x="92" y="352" width="60" height="44" rx="8" fill="#e5484d"/><rect x="164" y="352" width="60" height="44" rx="8" fill="#7c5cff"/><rect x="236" y="352" width="60" height="44" rx="8" fill="#12a594"/><rect x="308" y="352" width="60" height="44" rx="8" fill="#f5a524"/><rect x="380" y="352" width="60" height="44" rx="8" fill="#0090ff"/><rect class="cursor" x="159" y="347" width="70" height="54" rx="11"/></g><g class="key"><rect x="430" y="270" width="64" height="58" rx="12"/><path d="M450 299h24m-9-9 9 9-9 9" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></g></svg></div>
+</section>
+<div class="grid features-grid">
+<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span><h3>Instantly there</h3><p>The window appears with the image already on it. Images are decoded only as large as the screen needs.</p></div>
+<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M19.5 7v10M22.5 9.5v5"/></svg></span><h3>Paging without waiting</h3><p>The next images are ready as GPU textures ahead of time, in the direction you page.</p></div>
+<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></span><h3>Own JPEG decoder</h3><p>Parallel on all cores and byte-identical with libjpeg-turbo.</p></div>
+<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span><h3>Verifiable</h3><p>Every number on this site comes from an open measuring tool. Raw data and method are published.</p></div>
 </div>
 <h2>Measured</h2>
 {{race:open_warm}}
-<p><a href="/en/benchmarks">All measurements</a> · <a href="/en/method">How we measure</a></p>
+<p class="more"><a href="/en/benchmarks">All measurements</a> · <a href="/en/method">How we measure</a></p>

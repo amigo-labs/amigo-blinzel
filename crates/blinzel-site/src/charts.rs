@@ -34,35 +34,40 @@ fn ms(v: f64, sep: &str) -> String {
 
 const OURS: &str = "amigo-blinzel";
 
-/// A horizontal bar chart; `rows` are (label, value, value text).
+/// A horizontal bar chart; `rows` are (label, value, value text). Each row
+/// is a label and its value above a bar on a full-width track, so long
+/// viewer names never collide with the bars on a phone.
 fn bars(title: &str, rows: &[(String, f64, String)]) -> String {
     // Narrow enough that the text stays legible when a phone scales it down.
     const W: f64 = 480.0;
-    const LABEL: f64 = 150.0;
-    const ROW: f64 = 30.0;
+    const ROW: f64 = 52.0;
+    const BAR: f64 = 12.0;
     let max = rows.iter().map(|r| r.1).fold(0.0, f64::max).max(1e-9);
-    let h = ROW * rows.len() as f64 + 8.0;
+    let h = ROW * rows.len() as f64 - 10.0;
     let mut svg = format!(
-        "<svg class=\"chart\" viewBox=\"0 0 {W} {h}\" role=\"img\" aria-label=\"{}\">",
+        "<figure class=\"chart-card\"><svg class=\"chart\" viewBox=\"0 0 {W} {h}\" role=\"img\" aria-label=\"{}\">",
         esc(title)
     );
     for (i, (label, value, text)) in rows.iter().enumerate() {
-        let y = 4.0 + ROW * i as f64;
-        let w = ((W - LABEL - 80.0) * value / max).max(2.0);
-        let class = if label == OURS { "bar ours" } else { "bar" };
+        let y = ROW * i as f64;
+        let w = (W * value / max).max(BAR);
+        let ours = if label == OURS { " ours" } else { "" };
         svg += &format!(
-            "<text x=\"0\" y=\"{:.1}\" class=\"label\">{}</text>\
-             <rect x=\"{LABEL}\" y=\"{:.1}\" width=\"{w:.1}\" height=\"20\" rx=\"3\" class=\"{class}\"/>\
-             <text x=\"{:.1}\" y=\"{:.1}\" class=\"value\">{}</text>",
-            y + 15.0,
+            "<g class=\"row{ours}\">\
+             <text x=\"0\" y=\"{:.1}\" class=\"label\">{}</text>\
+             <text x=\"{W}\" y=\"{:.1}\" text-anchor=\"end\" class=\"value\">{}</text>\
+             <rect x=\"0\" y=\"{:.1}\" width=\"{W}\" height=\"{BAR}\" rx=\"6\" class=\"track\"/>\
+             <rect x=\"0\" y=\"{:.1}\" width=\"{w:.1}\" height=\"{BAR}\" rx=\"6\" class=\"bar{ours}\"/>\
+             </g>",
+            y + 20.0,
             esc(label),
-            y,
-            LABEL + w + 8.0,
-            y + 15.0,
-            esc(text)
+            y + 20.0,
+            esc(text),
+            y + 30.0,
+            y + 30.0,
         );
     }
-    svg + "</svg>"
+    svg + "</svg></figure>"
 }
 
 fn viewers(race: &Json) -> Result<&[Json], String> {
@@ -126,7 +131,7 @@ pub fn race(kind: &str, race: &Json, t: impl Fn(&str) -> &'static str) -> Result
                 _ => "–".into(),
             };
             let mut html = format!(
-                "<table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>",
+                "<div class=\"table-wrap\"><table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>",
                 t("viewer"),
                 t("version"),
                 t("open_warm"),
@@ -149,7 +154,7 @@ pub fn race(kind: &str, race: &Json, t: impl Fn(&str) -> &'static str) -> Result
                 );
             }
             html += &format!(
-                "</tbody></table><p class=\"note\">{} · <a href=\"/race.json\">{}</a></p>",
+                "</tbody></table></div><p class=\"note\">{} · <a href=\"/race.json\">{}</a></p>",
                 t("median"),
                 t("raw")
             );
@@ -171,7 +176,7 @@ pub fn race(kind: &str, race: &Json, t: impl Fn(&str) -> &'static str) -> Result
                         "" => k.as_str(),
                         l => l,
                     };
-                    format!("<dt>{}</dt><dd>{}</dd>", esc(label), esc(&v))
+                    format!("<div><dt>{}</dt><dd>{}</dd></div>", esc(label), esc(&v))
                 })
                 .collect();
             Ok(format!("<dl class=\"machine\">{items}</dl>"))
