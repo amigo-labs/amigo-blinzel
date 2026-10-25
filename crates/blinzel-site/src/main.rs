@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use blinzel_core::json::Json;
 
 /// Pages in navigation order; `index` is the start page.
-const PAGES: [&str; 9] = [
+const PAGES: [&str; 8] = [
     "index",
     "features",
     "compare",
@@ -26,7 +26,6 @@ const PAGES: [&str; 9] = [
     "download",
     "changelog",
     "privacy",
-    "signing",
 ];
 
 /// Shown in the navigation bar; the rest is linked from the footer.
@@ -325,14 +324,10 @@ mod tests {
                 let html = fs::read_to_string(dist.join(lang).join(format!("{p}.html")))
                     .unwrap_or_else(|e| panic!("{lang}/{p}: {e}"));
                 // One heading per page (the start page brings its own), and
-                // privacy and code signing policy linked from every page.
+                // the privacy page linked from every page.
                 assert_eq!(html.matches("<h1").count(), 1, "{lang}/{p}");
                 assert!(
                     html.contains(&format!("href=\"/{lang}/privacy\"")),
-                    "{lang}/{p}"
-                );
-                assert!(
-                    html.contains(&format!("href=\"/{lang}/signing\"")),
                     "{lang}/{p}"
                 );
                 assert!(!html.contains("{{"), "{lang}/{p}");

@@ -10,4 +10,4 @@ The first version.
 - Prefetching in paging direction; embedded camera previews first.
 - German and English.
 - Third-party notices for every bundled library, in the menu and with each release.
-- Installs itself per user without administrator rights; silent updates with three checks and automatic rollback.
+- Installs itself per user without administrator rights; silent updates, verified against the project's own Ed25519 release key, with automatic rollback. Releases carry no code signing certificate.

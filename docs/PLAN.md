@@ -33,7 +33,7 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Speichern | Bilddateien werden nie verändert; **Ausschnitt optional speichern** (Strg+S, „Speichern unter“) |
 | Maus | kontextabhängig: Bild passt → Links-Ziehen wählt aus; Bild größer → Links-Ziehen verschiebt, Umschalt+Ziehen wählt aus |
 | Installer | kein Installer-Framework; die Exe installiert sich selbst |
-| Signatur | **SignPath Foundation** (kostenlos für Open Source) |
+| Signatur | **kein Code-Signing** (kein Authenticode, keine Apple-Notarisierung); Herkunftsnachweis ist die eigene Ed25519-Signatur der Prüfsummen |
 | Updates | **still im Hintergrund**: höchstens 1× täglich prüfen, signiertes Update laden, verifizieren, beim nächsten Start aktiv |
 | Website | **Cloudflare Workers** (statische Assets), mit Wettbewerbsvergleich und Benchmarks |
 
@@ -253,27 +253,20 @@ Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur C
 - 🟡 **Versionsprüfung im Setup:** Build < 26100 → abbrechen mit Meldung.
 - 🟡 **winget-Manifest**; ein PR an winget-pkgs nach jedem Release, optional automatisiert.
 
-### Signierung über SignPath Foundation
+### Keine Code-Signatur
 
-Voraussetzungen, die bei dir liegen:
-1. ✅ OSI-Lizenz: **MIT** (`LICENSE`). Das Repo ist öffentlich ✅.
-2. ⬜ Erster Release ohne Authenticode (Release-Schlüssel nötig, siehe Abschnitt 14): Die Foundation signiert nur Projekte, die in der zu signierenden Form schon veröffentlicht sind.
-3. ⬜ Antrag bei der SignPath Foundation (signpath.org/apply). Code-Signing-Policy und Datenschutz stehen auf der Website und sind auf jeder Seite verlinkt; das Setup nennt die Update-Prüfung und wie man sie abschaltet.
-4. ⬜ In SignPath Projekt, Artefakt-Konfiguration und Signing-Policy nach `packaging/signpath/README.md` anlegen; Secret `SIGNPATH_API_TOKEN` und Variable `SIGNPATH_ORGANIZATION_ID` ins Repo.
-
-Umsetzung:
-- 🟡 Release-Workflow bei Tag `v*` auf GitHub-gehosteten Runnern (SignPath prüft die Build-Herkunft):
+- ✅ **Entschieden:** Releases werden nicht mit einem Code-Signing-Zertifikat signiert (kein SignPath, kein Authenticode, auf dem Mac keine Notarisierung). Folge: Windows SmartScreen warnt beim ersten Start („Weitere Informationen“ → „Trotzdem ausführen“); die Download-Seite erklärt das.
+- 🟡 Release-Workflow bei Tag `v*` auf GitHub-gehosteten Runnern:
   1. x64 und ARM64 bauen.
-  2. Signieren über `signpath/github-action-submit-signing-request` (mit manueller Freigabe in SignPath).
-  3. `SHA256SUMS` erzeugen und mit Ed25519 signieren.
-  4. Release als Entwurf anlegen und veröffentlichen.
-- 🟡 **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest. Grund: Das SignPath-Foundation-Zertifikat signiert viele Open-Source-Projekte. Authenticode allein beweist also nicht, dass es *unsere* Exe ist.
+  2. `SHA256SUMS` erzeugen und mit Ed25519 signieren.
+  3. Release als Entwurf anlegen und veröffentlichen.
+- 🟡 **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest. Sie ist der einzige Herkunftsnachweis: Der Updater installiert nur, was mit dem Release-Schlüssel signiert ist.
 
 **Umsetzung (Branch `m7-install`):**
 - `blinzel-app/src/setup/`: Moduserkennung, Installation über ein `Layout` (echte Pfade oder Sandbox für Tests), Registry-Hilfe nur für HKCU, Startmenü-Verknüpfung mit AppUserModelID `amigo-labs.amigo-blinzel`, Setup-Fenster mit Renderer und DirectWrite des Viewers (ohne Direct3D: Meldungsfenster).
 - Exit-Codes des Setups: 0 installiert, 1 fehlgeschlagen, 2 Windows zu alt, 3 abgebrochen.
 - `packaging/winget/`: Vorlagen der drei Manifeste (Scope user, Silent-Schalter, ProductCode = Uninstall-Schlüssel).
-- `.github/workflows/release.yml`: baut x64 und ARM64, signiert mit SignPath nur, wenn die Variable `SIGNPATH_ORGANIZATION_ID` gesetzt ist, erzeugt und signiert `SHA256SUMS`, legt einen Release-Entwurf an.
+- `.github/workflows/release.yml`: baut x64 und ARM64, erzeugt und signiert `SHA256SUMS`, legt einen Release-Entwurf an.
 - Test `blinzel-app/tests/setup.rs`: Installation, Update an Ort und Stelle und Deinstallation in einer Sandbox (Temp-Ordner, eigener HKCU-Zweig).
 
 ### Self-Updater (still im Hintergrund)
@@ -282,10 +275,9 @@ Umsetzung:
   - Höchstens 1× pro Tag, frühestens 10 s nach dem Start, auf einem Hintergrund-Thread (nie auf dem kritischen Pfad).
   - Quelle: `GET https://api.github.com/repos/amigo-labs/amigo-blinzel/releases/latest` über WinHTTP, das per `LoadLibrary` geladen wird und den Proxy des Systems nutzt.
 - 🟡 **Laden** des passenden Assets (x64/ARM64) plus `SHA256SUMS(.sig)` nach `%LOCALAPPDATA%\amigo-blinzel\updates\`.
-- 🟡 **Prüfen in drei Schritten:**
+- 🟡 **Prüfen in zwei Schritten:**
   1. Ed25519-Signatur der Prüfsummen.
   2. SHA-256 der Exe.
-  3. Authenticode über `WinVerifyTrust`.
 
   Erst dann wird getauscht.
 - 🟡 **Tauschen:**
@@ -297,17 +289,16 @@ Umsetzung:
 
 **Umsetzung:**
 - Entscheidungen ohne Windows in `blinzel-core::update` (Version, Release-JSON über einen kleinen eigenen JSON-Leser, `SHA256SUMS`, Ed25519 über `ed25519-compact`, Zeitplan, Startzähler) mit Unit-Tests.
-- Windows-Teil in `blinzel-app/src/update.rs`: WinHTTP, `BCryptHash` und `WinVerifyTrust` werden erst bei Bedarf geladen. Nur eine installierte Kopie aktualisiert sich; Entwickler- und portable Builds nie.
+- Windows-Teil in `blinzel-app/src/update.rs`: WinHTTP und `BCryptHash` werden erst bei Bedarf geladen. Nur eine installierte Kopie aktualisiert sich; Entwickler- und portable Builds nie.
 - `blinzel-release keygen | sign | verify` für den eigenen Signaturschlüssel.
 - **Solange der öffentliche Schlüssel fehlt** (`RELEASE_KEY = None` in `update.rs`), prüft und installiert der Updater nichts. Erzeugen: `cargo run -p blinzel-release -- keygen <datei>`, den Inhalt der Datei als Secret `RELEASE_SIGNING_KEY` hinterlegen, die Datei löschen, die ausgegebene Zeile in `update.rs` eintragen.
-- Bis SignPath eingerichtet ist, sind Releases nicht Authenticode-signiert, und der Updater lehnt sie ab (Schritt 3). Das ist Absicht.
 
 ## 11. Website und Wettbewerbsvergleich (M8)
 
 ### Website auf Cloudflare Workers
 
 - 🟡 `website/`: statisches HTML/CSS mit minimalem JS, extrem schnell (passend zum Produkt), Deutsch und Englisch.
-  - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz, Code-Signing-Policy (für SignPath).
+  - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz.
   - Charts werden beim Build als Inline-SVG aus den Benchmark-JSONs erzeugt; keine Chart-Library im Browser.
   - Der Download-Link zeigt auf `releases/latest/download/amigo-blinzel-setup-x64.exe` (stabile URL).
 - 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml` im Repo-Wurzelverzeichnis).
@@ -367,13 +358,13 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
 | **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF- und WebP-Animation, WebP nativ (Gate: verlustfrei und Animationen nativ, verlustbehaftet WIC sobald geladen), JPEG XL nativ (Gate bestanden, +1,7 MB), TIFF nativ mit parallelen Streifen (sonst WIC), RAW über eingebettete Vorschauen (Entwicklung weiter WIC), Lizenzhinweise der eingebundenen Bibliotheken (`THIRD-PARTY-NOTICES.txt`, Menü „Lizenzhinweise“), AVIF (`rav1d`) nativ, solange WIC ohne Codec ist, HEIC (`zune-heic`) ebenso, aber nur mit dem Feature `heic` (Standard aus, HEVC-Patente); offen: Gate HEIC/AVIF gegen WIC unter Windows |
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
-| **M7** | Setup-Exe, SignPath-Signatur, Release-Workflow, Self-Updater, winget | signiert, keine SmartScreen-Warnung, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Lizenz, SignPath, Release-Schlüssel, erster Release |
+| **M7** | Setup-Exe, Release-Workflow, Self-Updater, winget | Prüfsummen signiert, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |
 
 **Reihenfolge:**
 1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
 2. M3.
-3. M7, damit Releases früh signiert verteilt werden können.
+3. M7, damit Releases früh verteilt werden können.
 4. M8 (Website mit ersten Vergleichszahlen für Öffnen und Blättern).
 5. M4, M5, M6. Die Website-Zahlen werden mit jedem Meilenstein ergänzt.
 
@@ -397,12 +388,11 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
   - Ansichtsmodi, Snap-Layouts, Menü per Maus und Tastatur, Sprachwechsel.
   - Auswahl → Einfügen in Paint/Word/GIMP; Strg+X/Esc; Strg+S mit beiden Pfaden (verlustfrei und neu kodiert).
   - Papierkorb, Drag & Drop, Einzelinstanz.
-- **Release (M7):** Signatur prüfen (Eigenschaften → Digitale Signaturen); Update-Pfad von v0.x.y nach v0.x.y+1 auf einer sauberen VM.
+- **Release (M7):** SmartScreen-Hinweis beim ersten Start wie auf der Download-Seite beschrieben; Update-Pfad von v0.x.y nach v0.x.y+1 auf einer sauberen VM.
 
 ## 14. Offene Punkte, die bei dir liegen
 
 - ✅ Lizenz: MIT.
-- ⬜ SignPath-Foundation-Antrag nach dem ersten Release (Abschnitt 10) sowie `SIGNPATH_API_TOKEN` (Secret) und die Org-ID (Variable `SIGNPATH_ORGANIZATION_ID`).
 - ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-app/src/update.rs`.
 - 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
@@ -527,7 +517,7 @@ Grenze: Der letzte Y-Verfeinerungsscan (3,7 MB) läuft allein ca. 100 ms. Ohne K
 
 Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichauf mit turbo (1,01×), mit 16 Threads 4,1×.
 
-**M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit drei Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Release-Schlüssel, SignPath) und der erste echte Release.
+**M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Release-Schlüssel) und der erste echte Release.
 
 **Startzeit (echte GPU, Radeon 680M, 24-MP-JPEG, Prozessstart → erstes Bild):**
 

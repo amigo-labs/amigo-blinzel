@@ -1,11 +1,11 @@
 //! Self-update decisions, independent of Windows (M7): versions, the GitHub
 //! release JSON, `SHA256SUMS` with its Ed25519 signature, the daily
-//! schedule and the start counter that triggers a rollback. The Windows
-//! side (download, Authenticode, file swap) lives in the app.
+//! schedule and the start counter that triggers a rollback. The platform
+//! side (download, file swap) lives in the app.
 //!
-//! Why our own signature on top of Authenticode: the SignPath Foundation
-//! certificate signs many open source projects, so a valid Authenticode
-//! signature alone does not prove that an executable is ours.
+//! Releases carry no code signing certificate, so the Ed25519 signature of
+//! `SHA256SUMS` with our own release key is what proves an executable is
+//! ours.
 
 use std::fmt;
 
