@@ -7,7 +7,7 @@ Dieses Dokument ist die verbindliche Planung. Am Ende wird jeder Punkt gegen die
 - 🟡 umgesetzt, Verifikation (CI oder manuell unter Windows) steht aus
 - ⬜ offen
 
-Stand: 2026-10-23. Der aktuelle Arbeitsstand für die nächste Session steht in [Abschnitt 16](#16-übergabe-nächste-schritte).
+Stand: 2026-10-25. Der aktuelle Arbeitsstand für die nächste Session steht in [Abschnitt 16](#16-übergabe-nächste-schritte).
 
 ---
 
@@ -22,17 +22,18 @@ IrfanView und ImageGlass sind zu langsam. amigo-blinzel soll beim **Öffnen**, b
 | Thema | Entscheidung |
 |---|---|
 | Sprache | Rust |
-| Plattform | **Nur Windows 11 ab 24H2** (Build 26100+), x64 und ARM64. Nur Versionen mit Microsoft-Support. |
-| Formate | alle inkl. RAW; native Decoder per Benchmark-Gate, sonst WIC |
+| Plattform | **Windows 11 ab 24H2** (Build 26100+, x64 und ARM64; nur Versionen mit Microsoft-Support), **macOS ab 14** (eine Universal-App für Apple Silicon und Intel) und **Linux** (x64 und ARM64, Wayland und X11, glibc ab 2.35). Je Plattform eine native Hülle um dieselbe Oberfläche (`blinzel-ui`): Win32 + Direct3D 11, AppKit + Metal, winit + wgpu (Vulkan, GL ES). |
+| Formate | alle inkl. RAW; native Decoder per Benchmark-Gate, sonst der System-Decoder (WIC unter Windows, ImageIO unter macOS; Linux hat keinen, RAW dort über eingebettete Vorschauen) |
 | Thumbnails | Filmstreifen + Raster-Browser, beide standardmäßig aus |
 | Resident-Modus | optional (Tray, warm gehalten) |
-| UI | rahmenlos, keine Leisten; links oben ☰, rechts oben Min/Max/Schließen, alles andere im Menü |
+| UI | rahmenlos, keine Leisten; links oben ☰, rechts oben Min/Max/Schließen, alles andere im Menü. macOS: die Fensterknöpfe des Systems links, ☰ rechts, alle Befehle zusätzlich in der Menüleiste |
 | Ansichtsmodi | Fenster an Bild anpassen (Originalgröße), Bild an Fenster anpassen, 100 % |
 | Sprachen | mehrsprachig, Start mit Deutsch + Englisch |
 | Auswahl | Rechteck; Strg+C kopiert; Strg+X = kopieren + Ansicht zuschneiden |
 | Speichern | Bilddateien werden nie verändert; **Ausschnitt optional speichern** (Strg+S, „Speichern unter“) |
+| Stapelverarbeitung | **Größe ändern für viele Bilder**, nur in der App (kein CLI): JPEG, PNG, WebP, AVIF oder wie Quelle; Metadaten behalten, Umbenennen per Muster, Zuschneiden auf ein Seitenverhältnis, Nachschärfen |
 | Maus | kontextabhängig: Bild passt → Links-Ziehen wählt aus; Bild größer → Links-Ziehen verschiebt, Umschalt+Ziehen wählt aus |
-| Installer | kein Installer-Framework; die Exe installiert sich selbst |
+| Installer | kein Installer-Framework; Windows: die Exe installiert sich selbst; Linux: `blinzel --install` pro Benutzer; macOS: die App in „Programme“ ziehen |
 | Signatur | **kein Code-Signing** (kein Authenticode, keine Apple-Notarisierung); Herkunftsnachweis ist die eigene Ed25519-Signatur der Prüfsummen |
 | Updates | **still im Hintergrund**: höchstens 1× täglich prüfen, signiertes Update laden, verifizieren, beim nächsten Start aktiv |
 | Website | **Cloudflare Workers** (statische Assets), mit Wettbewerbsvergleich und Benchmarks |
@@ -103,7 +104,8 @@ Reihenfolge der Stufen:
 | `blinzel-jpeg` | strenger Marker-Parser; paralleler Decoder (Huffman, 8 Bit, sequentiell und progressive) in YCbCr-Planes, byte-identisch mit libjpeg-turbo | 🟡 |
 | `blinzel-i18n` | `i18n/*.toml` → statische Tabellen (DE/EN) | 🟡 |
 | `blinzel-bench` | Korpus + Library-vs-Eigenbau-Benches (JSON) | 🟡 |
-| `blinzel-app` | `blinzel.exe`: Fenster, Chrome, Menü, D3D11-Renderer, Loader, WIC, Zwischenablage, Dialoge, `--bench` | 🟡 |
+| `blinzel-app` | Die drei Hüllen um `blinzel-ui`. Windows (`blinzel.exe`): Win32-Fenster, Menü, D3D11-Renderer, WIC, Zwischenablage, Dialoge, Setup, Updater, `--bench`. Linux (`src/linux/`): winit, wgpu-Renderer (`blinzel.wgsl`), cosmic-text, rfd, arboard, notify, Little CMS, X11-Bildschirmprofil, `--install`. macOS (`src/macos/`): AppKit, Metal-Renderer (`blinzel.metal`), Core Text, ImageIO, Menüleiste, NSPasteboard. Gemeinsam für Linux und macOS: Updater-Ablauf (`selfupdate.rs`), Downloads über `curl`, Little CMS (`lcms.rs`). | 🟡 |
+| `blinzel-release` | Release-Werkzeug: Ed25519-Schlüssel und Signatur der Prüfsummen, Lizenzhinweise je Plattform (`THIRD-PARTY-NOTICES*.txt`), das macOS-App-Bundle (`macos-bundle`) | 🟡 |
 | `blinzel-race` | Wettbewerbs-Benchmark (M8): Testbilder mit Farbsignatur, Desktop Duplication auf allen Monitoren, Öffnen/Weiter/Dauerfeuer | 🟡 |
 | `website/` + `blinzel-site` | Website für Cloudflare Workers (M8): statisch, DE/EN, Diagramme als Inline-SVG aus `website/data/race.json` | 🟡 |
 
@@ -236,7 +238,9 @@ Grundsatz wie oben: Quelldateien bleiben unverändert. Jede Ausgabe ist eine neu
 - 🟡 Plural-Regeln (CLDR-Familien).
 - 🟡 RTL-Sprachen: `[meta] direction = "rtl"` in `i18n/<sprache>.toml` ergibt `Lang::is_rtl()`. Dann spiegelt die App die Bedienelemente (Menü rechts, Fensterknöpfe links), öffnet Menüs gespiegelt (`TPM_LAYOUTRTL`) von der rechten Kante, setzt die Leserichtung von DirectWrite und der Meldungsfenster (`MB_RTLREADING`) und tauscht ← und → beim Blättern. Offen: Filmstreifen/Raster und der Setup-Dialog bleiben links-nach-rechts; eine RTL-Sprache liefern wir noch nicht aus (Übersetzung von Muttersprachlern nötig).
 
-## 9. Plattform: Windows 11 ab 24H2
+## 9. Plattformen
+
+### Windows 11 ab 24H2
 
 Nur Versionen mit Microsoft-Support. Stand Oktober 2026:
 
@@ -253,6 +257,24 @@ Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur C
 - 🟡 Anwendungsmanifest: supportedOS, PerMonitorV2, longPathAware, UTF-8-Codepage.
 - 🟡 ARM64-Build im CI (cross von x64); Tests laufen auf x64.
 - Ohne Fallbacks nutzbar: EcoQoS, CPU-Sets, Snap-Layouts, Dark-Mode-Attribute, WIC-Codecs für HEIF, AVIF und WebP (soweit die Store-Erweiterungen installiert sind).
+
+### macOS und Linux (M10, M11)
+
+Die Hüllen setzen dieselben Traits um wie Windows (`Device`, `Canvas`, `Host`, `Services` in `blinzel-ui/src/backend.rs`). Die Uniforms jedes Zeichenaufrufs kommen für wgpu und Metal aus `blinzel_ui::draws`; die Shader sind Zeile-für-Zeile-Ports von `blinzel.hlsl` und werden wie WARP gegen den CPU-Referenz-Renderer geprüft (lavapipe im Linux-CI, das Metal-Gerät des macOS-Runners).
+
+**Linux:**
+- 🟡 Rahmenloses winit-Fenster (Ränder ziehen die Größe, der obere Streifen verschiebt), Menü und Dialoge von der App selbst gezeichnet, Dateidialoge über das xdg-Portal (rfd), Papierkorb, Zwischenablage, Ordner beobachten (inotify), Einzelinstanz über einen Unix-Socket.
+- 🟡 Farbmanagement über Little CMS; Ziel ist unter X11 das Profil, das colord oder KDE als `_ICC_PROFILE` am Root-Fenster veröffentlichen (über RandR dem Monitor des Fensters zugeordnet). Wayland hat dafür noch kein Protokoll: dort sRGB.
+- 🟡 `blinzel --install` / `--uninstall`: `~/.local/share/amigo-blinzel/`, Link `~/.local/bin/blinzel`, Desktop-Eintrag mit MIME-Typen, Icon; app id/WM_CLASS passen zum Eintrag.
+- 🟡 Updater wie unter Windows für die installierte Kopie; Asset `amigo-blinzel-linux-<arch>` (die nackte Datei), Downloads über `curl`.
+- Nicht unter Linux: Resident-Modus und Tray.
+
+**macOS:**
+- 🟡 NSWindow mit Inhalt unter der transparenten Titelleiste, `CAMetalLayer` als Ebene der Ansicht, Menüleiste (Programm-Menü und „Bild“, beim Öffnen aus dem Menübaum gefüllt) und Kontextmenü als NSMenu, NSOpenPanel/NSSavePanel, Papierkorb, Zwischenablage (PNG), Ordner beobachten (FSEvents), Dateien aus dem Finder über `application:openURLs:`, Drag & Drop.
+- 🟡 ImageIO als System-Decoder: HEIC zuerst dort (Hardware-HEVC, Apples Lizenz), RAW, TIFF und Übriges als Rückfall; verkleinerte Anfragen über den Thumbnail-Pfad.
+- 🟡 Farbmanagement: Ziel ist das Profil des Bildschirms (`CGDisplayCopyColorSpace`); die Metal-Ebene hat keinen eigenen Farbraum, macOS zeigt ihre Pixel also unverändert, wie unter Windows.
+- 🟡 App-Bundle (`blinzel-release macos-bundle`): Info.plist mit Dokumenttypen, Icon (ICNS aus dem Icon-Generator), Universal-Binary per `lipo`, ad hoc signiert, nicht notarisiert. Updater tauscht das Bundle, das vorige bleibt für den Rollback daneben.
+- dav1d-Assembler nur auf x86-64: Das veröffentlichte `rav1d` enthält `src/arm/asm-offsets.h` nicht, das seine ARM-Assembler-Dateien einbinden. ARM64 (Mac und Linux) nutzt die Rust-Fallbacks.
 
 ## 10. Installation, Updates, Signierung (M7)
 
@@ -381,6 +403,9 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 | **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
 | **M7** | Setup-Exe, Release-Workflow, Self-Updater, winget | Prüfsummen signiert, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Release-Schlüssel, erster Release |
 | **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; offen: Referenzmessung, Gegenlesen der Tabelle, Cloudflare-Secrets |
+| **M9** | Stapelverarbeitung: Engine, Dialog, Mehrfachauswahl | schneller als ImageMagick; Quellen nie überschrieben | 🟡 Engine und Dialog fertig, 8,6 statt 2,1 Bilder/s; offen: Sichtprüfung unter Windows und macOS, Vergleich mit vipsthumbnail/XnConvert |
+| **M10** | Linux-Hülle (winit + wgpu), Installation, Updater | Golden-Test auf lavapipe, Start bis zum ersten Bild im CI | 🟡 fertig, im CI geprüft (Xvfb); offen: Sichtprüfung unter Wayland, Startzeiten messen |
+| **M11** | macOS-Hülle (AppKit + Metal), App-Bundle, Updater | Metal-Golden-Test, Start bis zum ersten Bild im CI | 🟡 fertig, im macOS-CI gebaut; offen: Sichtprüfung auf einem Mac (Finder, HEIC, Farbprofil, Menüleiste), Startzeiten messen |
 
 **Reihenfolge:**
 1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
@@ -409,6 +434,10 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
   - Ansichtsmodi, Snap-Layouts, Menü per Maus und Tastatur, Sprachwechsel.
   - Auswahl → Einfügen in Paint/Word/GIMP; Strg+X/Esc; Strg+S mit beiden Pfaden (verlustfrei und neu kodiert).
   - Papierkorb, Drag & Drop, Einzelinstanz.
+- **Linux-CI:** Golden-Test der wgpu-Shader auf lavapipe, Start bis zum ersten Bild unter Xvfb, Bildschirmprofil über `_ICC_PROFILE` auf Xvfb, Lizenzhinweise aktuell.
+- **macOS-CI (macos-14):** Clippy und Tests, Metal-Golden-Test, App-Bundle mit Signaturprüfung, Start bis zum ersten Bild.
+- **Manuell auf einem Mac:** Öffnen aus dem Finder und per Drag & Drop, HEIC über ImageIO, Farbprofil eines P3-Bildschirms, Menüleiste und Kontextmenü, Stapelverarbeitung, Gatekeeper-Hinweis beim ersten Start.
+- **Manuell unter Linux:** GNOME (Wayland) und KDE (X11): Start, Fensterbewegung, Dateidialog, Zwischenablage, `--install`.
 - **Release (M7):** SmartScreen-Hinweis beim ersten Start wie auf der Download-Seite beschrieben; Update-Pfad von v0.x.y nach v0.x.y+1 auf einer sauberen VM.
 
 ## 14. Offene Punkte, die bei dir liegen
@@ -419,7 +448,8 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
 - ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
 - ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
-- ✅ HEVC-Patente: entschieden, der eigene HEVC-Decoder (`zune-heic`) steckt hinter dem Cargo-Feature `heic` und ist standardmäßig aus; Releases enthalten ihn nicht, HEIC läuft dort über WIC. Wer selbst baut, schaltet ihn mit `cargo build --release -p blinzel-app --features heic` ein (dann fehlen seine Lizenztexte in `THIRD-PARTY-NOTICES.txt`, die nur den Standard-Build abdeckt).
+- ⬜ Erster manueller Test auf einem Mac und unter Linux (siehe Verifikation).
+- ✅ HEVC-Patente: entschieden, der eigene HEVC-Decoder (`zune-heic`) steckt hinter dem Cargo-Feature `heic` und ist standardmäßig aus; Releases enthalten ihn nicht, HEIC läuft dort über WIC. Wer selbst baut, schaltet ihn mit `cargo build --release -p blinzel-app --features heic` ein (dann fehlen seine Lizenztexte in den `THIRD-PARTY-NOTICES*.txt`, die nur den Standard-Build abdecken).
 - ⬜ Gate HEIC und AVIF unter Windows messen: `set BLINZEL_DECODER=native` bzw. `=wic`, dann `blinzel.exe --bench <ordner>` mit 12/24-MP-Dateien, abwechselnd.
 
 ## 15. Messwerte (Stand)
@@ -503,6 +533,8 @@ Die gepackten Kernels sind speichergebunden. Gewinnt AVX2 dort 0,5–1,5 ms, sin
 Das bestätigt die lokale Messung. Bei 1/8 bringt SIMD libjpeg-turbo auf dem Runner gar nichts mehr.
 
 ## 16. Übergabe: nächste Schritte
+
+**Stand (2026-10-25), PR #22:** Code-Signing entfernt; `blinzel-ui` als plattformunabhängige Oberfläche; Stapelverarbeitung (M9); Linux-Hülle (M10) und macOS-Hülle (M11) mit Installation, Updater, CI- und Release-Jobs; Lizenzhinweise je Plattform; Website mit Downloads für drei Plattformen. Offen sind die Sichtprüfungen aus Abschnitt 13 und die Punkte in Abschnitt 14.
 
 **Stand (2026-10-23):**
 - PR #1–#3 sind gemergt.
