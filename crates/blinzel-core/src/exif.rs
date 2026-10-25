@@ -51,6 +51,33 @@ impl<'a> Tiff<'a> {
         })
     }
 
+    #[cfg(feature = "batch")]
+    pub(crate) fn little_endian(&self) -> bool {
+        self.le
+    }
+
+    #[cfg(feature = "batch")]
+    /// A u16 in this block's byte order from `b` (which must hold it).
+    pub(crate) fn u16_at(&self, b: &[u8], at: usize) -> u16 {
+        let b = [b[at], b[at + 1]];
+        if self.le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    }
+
+    #[cfg(feature = "batch")]
+    /// A u32 in this block's byte order from `b` (which must hold it).
+    pub(crate) fn u32_at(&self, b: &[u8], at: usize) -> u32 {
+        let b = [b[at], b[at + 1], b[at + 2], b[at + 3]];
+        if self.le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    }
+
     pub(crate) fn first_ifd(&self) -> Option<usize> {
         self.u32(4).map(|o| o as usize)
     }

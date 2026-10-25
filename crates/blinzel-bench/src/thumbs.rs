@@ -130,7 +130,7 @@ fn parallel<T: Sync, R: Send>(
 }
 
 /// `count` different noisy 12-MP JPEGs in `dir` (kept between runs).
-fn corpus(dir: &Path, count: usize) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn corpus(dir: &Path, count: usize) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let base = testimg::rgb(W, H);
     let files: Vec<PathBuf> = (0..count)

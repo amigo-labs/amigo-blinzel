@@ -9,12 +9,13 @@ publish.workspace = true
 
 [dependencies]
 # The benches measure the optional HEIC decoder too (not distributed).
-blinzel-core = { workspace = true, features = ["turbojpeg", "heic"] }
+blinzel-core = { workspace = true, features = ["turbojpeg", "heic", "batch"] }
 blinzel-jpeg.workspace = true
 zune-jpeg.workspace = true
 zune-png.workspace = true
 zune-core.workspace = true
 png.workspace = true
+fast_image_resize.workspace = true
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 blinzel-core = { workspace = true, features = ["av1-asm"] }

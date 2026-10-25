@@ -30,6 +30,12 @@ zune-jpegxl = "0.5.2"
 zune-heic = "0.5.0"
 # AV1 for AVIF; blinzel-core's `av1-asm` feature adds dav1d's assembly.
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# Batch encoders: WebP (libwebp, built with cc) and AVIF (rav1e). rav1e's
+# assembly is added by blinzel-core's `av1-asm` feature, like dav1d's.
+libwebp-sys = "0.14.4"
+ravif = { version = "0.13.0", default-features = false }
+# Only in the benches: the resampler gate.
+fast_image_resize = "6.1.0"
 # Verifies our own signature of release checksums (self-updater).
 ed25519-compact = { version = "2.1", default-features = false }
 toml = "0.9"

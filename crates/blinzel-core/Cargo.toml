@@ -13,10 +13,12 @@ default = ["turbojpeg"]
 turbojpeg = ["dep:turbojpeg-sys"]
 # dav1d's assembly for AVIF: needs NASM, and only builds on x86-64 (MSVC
 # cannot assemble the ARM64 files). The app and the benches enable it there.
-av1-asm = ["rav1d/asm"]
+av1-asm = ["rav1d/asm", "ravif?/asm"]
 # Our own HEVC decoder for HEIC (zune-heic). Off by default: HEVC is
 # covered by patents, so release builds leave HEIC to Windows' codec.
 heic = ["dep:zune-heic"]
+# Batch resizing (`batch` module) with its WebP and AVIF encoders.
+batch = ["dep:libwebp-sys", "dep:ravif"]
 
 [dependencies]
 blinzel-jpeg.workspace = true
@@ -30,6 +32,8 @@ tiff.workspace = true
 zune-heic = { workspace = true, optional = true }
 rav1d.workspace = true
 ed25519-compact.workspace = true
+libwebp-sys = { workspace = true, optional = true }
+ravif = { workspace = true, optional = true }
 
 [dev-dependencies]
 zune-jpegxl.workspace = true
