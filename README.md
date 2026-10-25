@@ -86,4 +86,4 @@ Unter Linux laufen alle plattformunabhängigen Tests. `cargo xwin check --target
 
 ## Lizenz
 
-[MIT](LICENSE). Die Lizenztexte der Bibliotheken in `blinzel.exe` (libjpeg-turbo, Rust-Crates) stehen in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) und im Menü unter „Lizenzhinweise“. Nach einer Änderung an `Cargo.lock` erneuert `cargo run -p blinzel-release -- notices` die Datei; CI prüft das.
+[MIT](LICENSE). Die Lizenztexte der eingebauten Bibliotheken (libjpeg-turbo, libwebp, Little CMS, Rust-Crates) stehen je Plattform in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) (Windows), [THIRD-PARTY-NOTICES-linux.txt](THIRD-PARTY-NOTICES-linux.txt) und [THIRD-PARTY-NOTICES-macos.txt](THIRD-PARTY-NOTICES-macos.txt) und im Menü unter „Lizenzhinweise“. Nach einer Änderung an `Cargo.lock` erneuert `cargo run -p blinzel-release -- notices` die Dateien; CI prüft das.

@@ -1,32 +1,60 @@
-//! `THIRD-PARTY-NOTICES.txt`: the licence texts of everything linked into
-//! `blinzel.exe` (both Windows targets, without build-only and proc-macro
-//! crates), plus libjpeg-turbo and the Rust standard library.
+//! The third-party notices: the licence texts of everything linked into
+//! the viewer (both architectures, without build-only and proc-macro
+//! crates), plus the bundled C libraries and the Rust standard library.
+//! One file per platform ([`PLATFORMS`]), each embedded in that platform's
+//! executable and shipped with its release.
 //!
 //! The crate list comes from `cargo tree`, the texts from the crates'
 //! sources in Cargo's registry. Of an `A OR B` choice the notice uses the
-//! first licence in [`PREFERENCE`] that the crate ships a text for; a crate
-//! without any licence file gets the standard text with its authors. An
-//! unknown licence (or an `AND`/`WITH` expression) stops the generator, so a
-//! new dependency is looked at by a person.
+//! most preferred option ([`PREFERENCE`]) that the crate ships texts for;
+//! `A AND B` reproduces both. A crate without any licence file gets the
+//! standard text with its authors. An unknown licence (or a `WITH`
+//! exception) stops the generator, so a new dependency is looked at by a
+//! person.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub const FILE: &str = "THIRD-PARTY-NOTICES.txt";
+/// A platform's notices file (in the workspace root), what the executable
+/// is called there, and its targets.
+pub struct Platform {
+    pub file: &'static str,
+    executable: &'static str,
+    targets: [&'static str; 2],
+}
 
-const TARGETS: [&str; 2] = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
+pub const PLATFORMS: [Platform; 3] = [
+    Platform {
+        file: "THIRD-PARTY-NOTICES.txt",
+        executable: "blinzel.exe",
+        targets: ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"],
+    },
+    Platform {
+        file: "THIRD-PARTY-NOTICES-linux.txt",
+        executable: "The Linux build",
+        targets: ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"],
+    },
+    Platform {
+        file: "THIRD-PARTY-NOTICES-macos.txt",
+        executable: "The macOS app",
+        targets: ["x86_64-apple-darwin", "aarch64-apple-darwin"],
+    },
+];
 
 /// Most preferred first: the shortest text that still names the authors.
-const PREFERENCE: [&str; 8] = [
+const PREFERENCE: [&str; 10] = [
     "MIT",
+    "ISC",
     "Zlib",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "Apache-2.0",
     "Unlicense",
     "0BSD",
+    // Unicode data tables (unicode-ident).
+    "Unicode-3.0",
     // Public domain: no file is used, only a one-line note.
     "CC0-1.0",
 ];
@@ -50,9 +78,18 @@ struct Notice {
     text: String,
 }
 
-/// Writes the notices to `out`, or with `check` fails if `out` differs.
-pub fn run(root: &Path, out: &Path, check: bool) -> Result<(), String> {
-    let text = generate(root)?;
+/// Writes every platform's notices, or with `check` fails if one differs.
+pub fn run_all(root: &Path, check: bool) -> Result<(), String> {
+    for p in &PLATFORMS {
+        run(root, p, check)?;
+    }
+    Ok(())
+}
+
+/// Writes `platform`'s notices, or with `check` fails if its file differs.
+fn run(root: &Path, platform: &Platform, check: bool) -> Result<(), String> {
+    let out = &root.join(platform.file);
+    let text = generate(root, platform)?;
     if check {
         let current = fs::read_to_string(out).unwrap_or_default();
         if current.replace("\r\n", "\n") != text {
@@ -69,17 +106,20 @@ pub fn run(root: &Path, out: &Path, check: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn generate(root: &Path) -> Result<String, String> {
+fn generate(root: &Path, platform: &Platform) -> Result<String, String> {
     let registry = registry_src()?;
     let mut notices = Vec::new();
     let mut crates: BTreeMap<String, Notice> = BTreeMap::new();
-    for p in linked_packages(root)? {
+    for p in linked_packages(root, &platform.targets)? {
         let dir = find_source(&registry, &p)?;
         if p.name == "turbojpeg-sys" {
             notices.push(libjpeg_turbo(&dir)?);
         }
         if p.name == "libwebp-sys" {
             notices.push(libwebp(&dir)?);
+        }
+        if p.name == "lcms2-sys" {
+            notices.push(little_cms(&dir)?);
         }
         let mut n = crate_notice(&p, &dir)?;
         // A patent grant shipped next to the licence (rav1e: the AV1
@@ -105,17 +145,18 @@ fn generate(root: &Path) -> Result<String, String> {
     notices.extend(crates);
 
     let mut s = String::new();
-    s.push_str(
+    s.push_str(&format!(
         "amigo-blinzel: third-party notices\n\
          \n\
-         amigo-blinzel is released under the MIT licence (see LICENSE). blinzel.exe\n\
+         amigo-blinzel is released under the MIT licence (see LICENSE). {}\n\
          also contains the software listed below, under the licences reproduced\n\
          here.\n\
          \n\
          This software is based in part on the work of the Independent JPEG Group.\n\
          \n\
          Generated by `cargo run -p blinzel-release -- notices`; do not edit.\n",
-    );
+        platform.executable
+    ));
     for n in &notices {
         s.push('\n');
         s.push_str(RULE);
@@ -133,9 +174,9 @@ fn generate(root: &Path) -> Result<String, String> {
     Ok(s)
 }
 
-/// Every package linked into `blinzel-app` on either Windows target, except
-/// the workspace's own crates.
-fn linked_packages(root: &Path) -> Result<Vec<Package>, String> {
+/// Every package linked into `blinzel-app` on `targets`, except the
+/// workspace's own crates.
+fn linked_packages(root: &Path, targets: &[&str]) -> Result<Vec<Package>, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = Command::new(cargo);
     cmd.current_dir(root).args([
@@ -150,7 +191,7 @@ fn linked_packages(root: &Path) -> Result<Vec<Package>, String> {
         "--format",
         "{p}",
     ]);
-    for t in TARGETS {
+    for t in targets {
         cmd.args(["--target", t]);
     }
     let out = cmd.output().map_err(|e| format!("cargo tree: {e}"))?;
@@ -248,47 +289,111 @@ fn crate_notice(p: &Package, dir: &Path) -> Result<Notice, String> {
     };
 
     let files = licence_files(dir)?;
-    for id in &choices {
-        if let Some(text) = files.get(*id) {
+    // The first option with a file for each of its licences, else the
+    // first one with standard texts.
+    let option = choices
+        .iter()
+        .find(|option| option.iter().all(|id| files.contains_key(id)))
+        .unwrap_or(&choices[0]);
+    let mut texts = Vec::new();
+    for id in option {
+        texts.push(match files.get(id) {
             // Many MIT files are the bare template: name the authors.
-            let text = if names_holder(text) {
-                text.clone()
-            } else {
-                format!("Copyright (c) {holder}\n\n{text}")
-            };
-            return Ok(Notice {
-                covers: vec![heading],
-                licence: id.to_string(),
-                text,
-            });
-        }
+            Some(text) if names_holder(text) => text.clone(),
+            Some(text) => format!("Copyright (c) {holder}\n\n{text}"),
+            None => standard_text(id, &holder)?,
+        });
     }
-    // No file for any choice: the standard text with the authors.
-    let id = choices[0];
     Ok(Notice {
         covers: vec![heading],
-        licence: id.to_string(),
-        text: standard_text(id, &holder)?,
+        licence: option.join(" AND "),
+        text: texts.join("\n\n\n"),
     })
 }
 
-/// The choices of an SPDX expression (`A OR B`, old style `A/B`), most
-/// preferred first; `None` for anything else or an unknown licence.
-fn alternatives(expr: &str) -> Option<Vec<&'static str>> {
-    if expr.contains(" AND ") || expr.contains(" WITH ") {
+/// The options of an SPDX expression (`A OR B`, `A AND B`, parentheses,
+/// old style `A/B`), each the licences that apply together, most
+/// preferred first. Options with an unknown licence or a `WITH` exception
+/// are left out; `None` if none is left.
+fn alternatives(expr: &str) -> Option<Vec<Vec<&'static str>>> {
+    let spaced = expr
+        .replace('(', " ( ")
+        .replace(')', " ) ")
+        .replace('/', " OR ");
+    let tokens: Vec<&str> = spaced.split_whitespace().collect();
+    let (mut options, rest) = spdx_or(&tokens)?;
+    if !rest.is_empty() || options.is_empty() {
         return None;
     }
-    let ids: Vec<&str> = expr
-        .split(" OR ")
-        .flat_map(|s| s.split('/'))
-        .map(|s| s.trim().trim_matches(|c| c == '(' || c == ')'))
-        .collect();
-    let mut known = Vec::new();
-    for id in ids {
-        known.push(*PREFERENCE.iter().find(|p| **p == id)?);
+    for o in &mut options {
+        o.sort_by_key(|id| rank(id));
+        o.dedup();
     }
-    known.sort_by_key(|id| PREFERENCE.iter().position(|p| p == id));
-    Some(known)
+    // By the least preferred licence each option needs, then the next.
+    options.sort_by_key(|o| {
+        let mut r: Vec<usize> = o.iter().map(|id| rank(id)).collect();
+        r.sort_unstable_by(|a, b| b.cmp(a));
+        r
+    });
+    options.dedup();
+    Some(options)
+}
+
+fn rank(id: &str) -> usize {
+    PREFERENCE
+        .iter()
+        .position(|p| *p == id)
+        .unwrap_or(usize::MAX)
+}
+
+type Dnf = Vec<Vec<&'static str>>;
+
+/// `term (OR term)*`
+fn spdx_or<'a>(t: &'a [&'a str]) -> Option<(Dnf, &'a [&'a str])> {
+    let (mut out, mut rest) = spdx_and(t)?;
+    while rest.first() == Some(&"OR") {
+        let (more, r) = spdx_and(&rest[1..])?;
+        out.extend(more);
+        rest = r;
+    }
+    Some((out, rest))
+}
+
+/// `factor (AND factor)*`: every combination of the factors' options.
+fn spdx_and<'a>(t: &'a [&'a str]) -> Option<(Dnf, &'a [&'a str])> {
+    let (mut out, mut rest) = spdx_factor(t)?;
+    while rest.first() == Some(&"AND") {
+        let (more, r) = spdx_factor(&rest[1..])?;
+        out = out
+            .iter()
+            .flat_map(|a| {
+                more.iter().map(move |b| {
+                    let mut c = a.clone();
+                    c.extend(b);
+                    c
+                })
+            })
+            .collect();
+        rest = r;
+    }
+    Some((out, rest))
+}
+
+/// A licence id (no options if unknown or with an exception) or a
+/// parenthesised expression.
+fn spdx_factor<'a>(t: &'a [&'a str]) -> Option<(Dnf, &'a [&'a str])> {
+    match *t.first()? {
+        "(" => {
+            let (inner, rest) = spdx_or(&t[1..])?;
+            (rest.first() == Some(&")")).then(|| (inner, &rest[1..]))
+        }
+        "OR" | "AND" | ")" | "WITH" => None,
+        _ if t.get(1) == Some(&"WITH") => Some((Vec::new(), t.get(3..)?)),
+        id => {
+            let known = PREFERENCE.iter().find(|p| **p == id);
+            Some((known.map(|k| vec![*k]).into_iter().collect(), &t[1..]))
+        }
+    }
 }
 
 /// The licence texts in a crate's root, by the licence they contain.
@@ -324,8 +429,15 @@ fn licence_files(dir: &Path) -> Result<BTreeMap<&'static str, String>, String> {
 
 fn classify(text: &str) -> Option<&'static str> {
     let has = |s: &str| text.contains(s);
-    if has("Permission is hereby granted, free of charge") {
+    // Before MIT: the Unicode licence uses the same grant.
+    if has("UNICODE LICENSE V3") {
+        Some("Unicode-3.0")
+    } else if has("Permission is hereby granted, free of charge") {
         Some("MIT")
+    } else if has("Permission to use, copy, modify, and/or distribute this software")
+        && has("provided that the above copyright notice")
+    {
+        Some("ISC")
     } else if has("Altered source versions must be plainly marked") {
         Some("Zlib")
     } else if has("Redistribution and use in source and binary forms") {
@@ -360,6 +472,10 @@ fn standard_text(id: &str, holder: &str) -> Result<String, String> {
     match id {
         "MIT" => Ok(format!("Copyright (c) {holder}\n\n{MIT_BODY}")),
         "BSD-3-Clause" => Ok(format!("Copyright (c) {holder}\n\n{BSD3_BODY}")),
+        "Apache-2.0" => Ok(format!(
+            "Copyright (c) {holder}\n\n{}",
+            normalize(include_str!("../licenses/Apache-2.0.txt"))
+        )),
         "CC0-1.0" => Ok(format!(
             "By {holder}, dedicated to the public domain under CC0 1.0 Universal\n\
              (https://creativecommons.org/publicdomain/zero/1.0/)."
@@ -447,6 +563,33 @@ fn libwebp(libwebp_sys: &Path) -> Result<Notice, String> {
     })
 }
 
+/// Little CMS (Linux, macOS), built from the sources bundled in lcms2-sys.
+fn little_cms(lcms2_sys: &Path) -> Result<Notice, String> {
+    let dir = lcms2_sys.join("vendor");
+    let read = |f: &str| {
+        fs::read_to_string(dir.join(f)).map_err(|e| format!("{}/{f}: {e}", dir.display()))
+    };
+    let header = read("include/lcms2.h")?;
+    let version = header
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("#define LCMS_VERSION")?
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+        .ok_or("Little CMS: version not found in lcms2.h")?;
+    Ok(Notice {
+        covers: vec![format!(
+            "Little CMS {}.{} (https://www.littlecms.com)",
+            version / 1000,
+            version % 1000 / 10
+        )],
+        licence: "MIT".into(),
+        text: normalize(&read("LICENSE")?),
+    })
+}
+
 const MIT_BODY: &str = "\
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the \"Software\"), to deal
@@ -500,18 +643,37 @@ mod tests {
     fn alternatives_prefer_mit_and_reject_unknown() {
         assert_eq!(
             alternatives("Apache-2.0 OR MIT"),
-            Some(vec!["MIT", "Apache-2.0"])
+            Some(vec![vec!["MIT"], vec!["Apache-2.0"]])
         );
         assert_eq!(
             alternatives("BSD-3-Clause/MIT"),
-            Some(vec!["MIT", "BSD-3-Clause"])
+            Some(vec![vec!["MIT"], vec!["BSD-3-Clause"]])
         );
         assert_eq!(
             alternatives("Unlicense OR MIT"),
-            Some(vec!["MIT", "Unlicense"])
+            Some(vec![vec!["MIT"], vec!["Unlicense"]])
         );
-        assert_eq!(alternatives("MIT AND Unicode-3.0"), None);
+        assert_eq!(
+            alternatives("Apache-2.0 AND MIT"),
+            Some(vec![vec!["MIT", "Apache-2.0"]])
+        );
+        assert_eq!(
+            alternatives("(MIT OR Apache-2.0) AND Zlib"),
+            Some(vec![vec!["MIT", "Zlib"], vec!["Zlib", "Apache-2.0"]])
+        );
+        assert_eq!(
+            alternatives("MIT AND Unicode-3.0"),
+            Some(vec![vec!["MIT", "Unicode-3.0"]])
+        );
+        assert_eq!(alternatives("MIT AND GPL-3.0-only"), None);
         assert_eq!(alternatives("GPL-3.0-only"), None);
+        assert_eq!(alternatives("Apache-2.0 WITH LLVM-exception"), None);
+        assert_eq!(
+            alternatives("Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"),
+            Some(vec![vec!["MIT"], vec!["Apache-2.0"]])
+        );
+        assert_eq!(alternatives("GPL-2.0 OR MIT"), Some(vec![vec!["MIT"]]));
+        assert_eq!(alternatives("(MIT"), None);
     }
 
     #[test]

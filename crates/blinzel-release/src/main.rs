@@ -4,7 +4,7 @@
 //! blinzel-release keygen <secret-key-file>   new key pair; prints the public key
 //! blinzel-release sign <file> <out.sig>      signs with $RELEASE_SIGNING_KEY (hex seed)
 //! blinzel-release verify <file> <sig> <public-key-hex>
-//! blinzel-release notices [--check]          writes (or checks) THIRD-PARTY-NOTICES.txt
+//! blinzel-release notices [--check]          writes (or checks) THIRD-PARTY-NOTICES*.txt
 //! blinzel-release macos-bundle <out.app> <blinzel>...
 //!                                            the macOS app bundle (universal with
 //!                                            one executable per architecture)
@@ -57,11 +57,11 @@ fn usage() -> String {
         .into()
 }
 
-/// The notices file lives in the workspace root, next to `LICENSE`.
+/// The notices files live in the workspace root, next to `LICENSE`.
 fn notices(check: bool) -> Result<(), String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let root = fs::canonicalize(&root).map_err(|e| format!("{}: {e}", root.display()))?;
-    notices::run(&root, &root.join(notices::FILE), check)
+    notices::run_all(&root, check)
 }
 
 fn keygen(path: &str) -> Result<(), String> {
