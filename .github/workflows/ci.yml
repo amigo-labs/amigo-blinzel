@@ -41,6 +41,29 @@ jobs:
       - name: Third-party notices up to date
         run: cargo run --locked -p blinzel-release -- notices --check
 
+  macos:
+    name: macOS (app, Metal, bundle)
+    # Apple silicon, macOS 14: the oldest macOS the viewer supports.
+    runs-on: macos-14
+    env:
+      # The Metal golden test must find a device (the runner's virtual GPU).
+      BLINZEL_REQUIRE_GPU: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release --all-targets -- -D warnings
+      - run: cargo test -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release
+      # The app bundle starts, shows a test image and exits.
+      - name: App bundle and smoke test (window, first frame)
+        run: |
+          cargo build --release -p blinzel-app
+          cargo run --release -p blinzel-release -- macos-bundle target/amigo-blinzel.app target/release/blinzel
+          codesign --verify --verbose target/amigo-blinzel.app
+          perl -e 'alarm 120; exec @ARGV' target/amigo-blinzel.app/Contents/MacOS/blinzel \
+            crates/blinzel-core/testdata/rgb420-64x48.avif --exit-after-first-frame --json startup.json
+          cat startup.json
+
   windows:
     name: Windows (build, tests, WARP, bench)
     # Windows Server 2025 = build 26100, the same base as Windows 11 24H2.
