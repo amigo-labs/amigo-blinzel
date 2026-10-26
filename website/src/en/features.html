@@ -1,5 +1,5 @@
 <!-- title: Features -->
-<!-- description: Controls, shortcuts, screenshots and formats of amigo-blinzel, and where the speed comes from. -->
+<!-- description: Controls, shortcuts, screenshots and formats of amigo-blinzel, and how they work. -->
 <h2>Controls</h2>
 <p>There are no toolbars. The menu (☰) sits top left; minimize, maximize and close sit top right. On a Mac the system's window buttons sit there, the menu goes right and is in the menu bar as well. Everything else is in the menu or on a key; on a Mac ⌘ replaces Ctrl.</p>
 <div class="table-wrap"><table>
@@ -12,7 +12,7 @@
 <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>X</kbd></td><td>copy selection / crop the view</td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>save cutout as (lossless JPEG where possible; also PNG, WebP, AVIF)</td></tr>
 <tr><td><kbd>G</kbd>, <kbd>Ctrl</kbd>+click, <kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>grid of all images, mark images</td></tr>
-<tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td><a href="/en/batch">resize images</a> (the marked ones or the whole folder)</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td><a href="/en/batch">resize images</a> (drag images and folders into the dialog)</td></tr>
 <tr><td><kbd>E</kbd></td><td>Edit with the editor you chose (e.g. Paint.NET, GIMP, Photoshop); “Open with…” in the menu</td></tr>
 <tr><td><kbd>R</kbd> / <kbd>L</kbd></td><td>rotate (view only)</td></tr>
 <tr><td><kbd>F11</kbd>, double-click</td><td>full screen</td></tr>
@@ -29,7 +29,7 @@
 <div><h3>Through the system</h3><ul class="badges system"><li>HEIC</li><li>Camera RAW</li></ul></div>
 </div>
 <p class="note">HEIC and camera RAW through the installed Windows codecs on Windows, through ImageIO on macOS (HEIC with Apple's hardware decoder), and RAW through the embedded previews on Linux.</p>
-<h2>Where the speed comes from</h2>
+<h2>How it works</h2>
 <ul>
 <li>Decoding at screen resolution: JPEGs are decoded with DCT scaling straight into YCbCr planes; the GPU does colour conversion and scaling.</li>
 <li>An own JPEG decoder spreads Huffman decoding over all cores, even without restart markers.</li>

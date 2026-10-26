@@ -1,5 +1,5 @@
 <!-- title: Funktionen -->
-<!-- description: Bedienung, Tastenkürzel, Bildschirmfotos und Formate von amigo-blinzel, und woher die Geschwindigkeit kommt. -->
+<!-- description: Bedienung, Tastenkürzel, Bildschirmfotos und Formate von amigo-blinzel, und wie sie technisch funktionieren. -->
 <h2>Bedienung</h2>
 <p>Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben Minimieren, Maximieren und Schließen; auf dem Mac stehen dort die Fensterknöpfe des Systems, das Menü rechts und zusätzlich in der Menüleiste. Alles andere steckt im Menü oder liegt auf einer Taste; auf dem Mac gilt ⌘ statt Strg.</p>
 <div class="table-wrap"><table>
@@ -12,7 +12,7 @@
 <tr><td><kbd>Strg</kbd>+<kbd>C</kbd> / <kbd>Strg</kbd>+<kbd>X</kbd></td><td>Auswahl kopieren / Ansicht zuschneiden</td></tr>
 <tr><td><kbd>Strg</kbd>+<kbd>S</kbd></td><td>Ausschnitt speichern unter (JPEG verlustfrei, wo möglich; auch PNG, WebP, AVIF)</td></tr>
 <tr><td><kbd>G</kbd>, <kbd>Strg</kbd>+Klick, <kbd>Strg</kbd>+<kbd>A</kbd></td><td>Raster aller Bilder, Bilder markieren</td></tr>
-<tr><td><kbd>Strg</kbd>+<kbd>B</kbd></td><td><a href="/de/batch">Größe ändern</a> (markierte Bilder oder der ganze Ordner)</td></tr>
+<tr><td><kbd>Strg</kbd>+<kbd>B</kbd></td><td><a href="/de/batch">Größe ändern</a> (Bilder und Ordner in den Dialog ziehen)</td></tr>
 <tr><td><kbd>E</kbd></td><td>Bearbeiten mit dem eingestellten Editor (z. B. Paint.NET, GIMP, Photoshop); „Öffnen mit…“ im Menü</td></tr>
 <tr><td><kbd>R</kbd> / <kbd>L</kbd></td><td>drehen (nur Ansicht)</td></tr>
 <tr><td><kbd>F11</kbd>, Doppelklick</td><td>Vollbild</td></tr>
@@ -29,7 +29,7 @@
 <div><h3>Über das System</h3><ul class="badges system"><li>HEIC</li><li>Kamera-RAW</li></ul></div>
 </div>
 <p class="note">HEIC und Kamera-RAW unter Windows über die installierten Windows-Codecs, unter macOS über ImageIO (HEIC mit Apples Hardware-Decoder), unter Linux RAW über die eingebetteten Vorschauen.</p>
-<h2>Woher die Geschwindigkeit kommt</h2>
+<h2>Technik</h2>
 <ul>
 <li>Decodieren in Bildschirmauflösung: JPEGs werden per DCT-Skalierung direkt in YCbCr-Ebenen decodiert; Farbumrechnung und Skalierung übernimmt die Grafikkarte.</li>
 <li>Ein eigener JPEG-Decoder verteilt das Huffman-Decoding auf alle Kerne, auch ohne Restart-Marker.</li>
