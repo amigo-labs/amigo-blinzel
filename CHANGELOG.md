@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.1.0...v1.2.0) (2026-10-26)
+
+
+### Features
+
+* **batch:** drop zone, date formats and a name preview for resizing ([922816c](https://github.com/amigo-labs/amigo-blinzel/commit/922816c2797acf33706ac2041759e26b4569d05f))
+* **batch:** drop zone, date formats and name preview; factual website with Windows measurement ([e82aa18](https://github.com/amigo-labs/amigo-blinzel/commit/e82aa18357e293819e9f877dcec6cd5230525dde))
+* **website:** Windows measurement from blinzel-race ([294fc10](https://github.com/amigo-labs/amigo-blinzel/commit/294fc10d7804bba03112d8341c3952f76e69beff))
+
+
+### Bug Fixes
+
+* **setup:** don't abort when the setup window is re-entered ([266d0de](https://github.com/amigo-labs/amigo-blinzel/commit/266d0de62d60bcdebe4920ae3937944606d747f7))
+
 ## [1.1.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.0.0...v1.1.0) (2026-10-26)
 
 
