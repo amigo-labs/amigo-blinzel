@@ -303,7 +303,7 @@ Die Hüllen setzen dieselben Traits um wie Windows (`Device`, `Canvas`, `Host`, 
   1. x64 und ARM64 bauen.
   2. `SHA256SUMS` erzeugen und mit Ed25519 signieren.
   3. Release als Entwurf anlegen und veröffentlichen.
-- 🟡 **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest. Sie ist der einzige Herkunftsnachweis: Der Updater installiert nur, was mit dem Release-Schlüssel signiert ist.
+- ✅ **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest (`276b0fbd4a1f9eb68476f0b8a14c5cc0bab403cbca24bcf07d8cff333d3fa9b7`). Sie ist der einzige Herkunftsnachweis: Der Updater installiert nur, was mit dem Release-Schlüssel signiert ist.
 
 **Umsetzung (Branch `m7-install`):**
 - `blinzel-app/src/setup/`: Moduserkennung, Installation über ein `Layout` (echte Pfade oder Sandbox für Tests), Registry-Hilfe nur für HKCU, Startmenü-Verknüpfung mit AppUserModelID `amigo-labs.amigo-blinzel`, Setup-Fenster mit Renderer und DirectWrite des Viewers (ohne Direct3D: Meldungsfenster).
@@ -334,7 +334,7 @@ Die Hüllen setzen dieselben Traits um wie Windows (`Device`, `Canvas`, `Host`, 
 - Entscheidungen ohne Windows in `blinzel-core::update` (Version, Release-JSON über einen kleinen eigenen JSON-Leser, `SHA256SUMS`, Ed25519 über `ed25519-compact`, Zeitplan, Startzähler) mit Unit-Tests.
 - Windows-Teil in `blinzel-app/src/update.rs`: WinHTTP und `BCryptHash` werden erst bei Bedarf geladen. Nur eine installierte Kopie aktualisiert sich; Entwickler- und portable Builds nie.
 - `blinzel-release keygen | sign | verify` für den eigenen Signaturschlüssel.
-- **Solange der öffentliche Schlüssel fehlt** (`RELEASE_KEY = None` in `crates/blinzel-core/src/update.rs`), prüft und installiert der Updater nichts. Erzeugen: `cargo run -p blinzel-release -- keygen <datei>`, den Inhalt der Datei als Secret `RELEASE_SIGNING_KEY` hinterlegen, die Datei löschen, die ausgegebene Zeile in `crates/blinzel-core/src/update.rs` eintragen.
+- Der öffentliche Schlüssel steht als `RELEASE_KEY` in `crates/blinzel-core/src/update.rs`, der geheime (Seed als Hex) nur im Repository-Secret `RELEASE_SIGNING_KEY`. Ohne `RELEASE_KEY` (`None`) prüft und installiert der Updater nichts. Neuer Schlüssel: `cargo run -p blinzel-release -- keygen <datei>`, den Inhalt der Datei als Secret hinterlegen, die Datei löschen, die ausgegebene Zeile eintragen. Ein Schlüsselwechsel erreicht installierte Kopien nur über ein Release, das noch mit dem alten Schlüssel signiert ist.
 
 ## 11. Website und Wettbewerbsvergleich (M8)
 
@@ -443,7 +443,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 ## 14. Offene Punkte, die bei dir liegen
 
 - ✅ Lizenz: MIT.
-- ⬜ Release-Signaturschlüssel: `cargo run -p blinzel-release -- keygen <datei>`, Inhalt als Secret `RELEASE_SIGNING_KEY`, die ausgegebene `RELEASE_KEY`-Zeile in `crates/blinzel-core/src/update.rs`.
+- 🟡 Release-Signaturschlüssel: erzeugt, der öffentliche Teil steht in `crates/blinzel-core/src/update.rs`. Offen: den geheimen Teil als Secret `RELEASE_SIGNING_KEY` hinterlegen und sicher aufbewahren (geht er verloren, nehmen installierte Kopien keine Updates mehr an).
 - 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
 - ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
