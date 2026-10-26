@@ -402,216 +402,216 @@ A dedicated measurement tool for Windows and macOS measures all viewers the same
 - 🟡 **JPEG XL:** `decode::jxl::decode_animation` renders every keyframe (duration from ticks and `tps`, loop count from the header), same rules and budget. Still files are already detected by the header.
 - 🟡 **Playback while decoding:** The decoders deliver every frame individually (`stream_animation` with a frame callback); the loader uploads it to the GPU immediately and, from the second frame on, sends the current state every 200 ms. Playback thus starts after two frames; if it reaches the last frame decoded so far, it holds there and continues with the next delivery. A decode error midway ends the animation with the frames up to that point. Visual check open (large GIFs).
 
-## 12. Meilensteine
+## 12. Milestones
 
-| | Inhalt | Ziel | Status |
+| | Contents | Target | Status |
 |---|---|---|---|
-| **M0** | Workspace, CI (Linux + Windows), Korpus, Bench-Harness | Baseline-JSON im CI | 🟡 |
-| **M1** | Einzelbild: Startsequenz, Chrome, Menü, Ansichtsmodi, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC-Fallback, EXIF/MPF | t0 → Present ≤ 50 ms warm, ≤ 120 ms kalt; kein weißer Frame | 🟡 |
-| **M2** | Blättern, Prefetch, Budgets, Full-Res bei Zoom, Ordner-Watch, P/E-Pools, Auswahl, Strg+C/X/S | Next ≤ 8 ms p99 vorgeladen; 10k-Ordner ≤ 25 ms; Strg+C < 1 ms | 🟡 |
-| **M3** | `blinzel-jpeg`: paralleler Decoder | Full-Res 24 MP ≥ 3× turbo (8 Kerne); DC-only ≥ 2× | 🟡 Ziele erreicht (4,1× bzw. 3,6×), progressive 1,7×; CI-Bestätigung steht aus |
-| **M4** | Thumbnails: Fast-Paths, Pack-Cache, Atlas, Filmstreifen + Raster | 200 Kacheln aus dem Cache ≤ 30 ms; kalt ≥ 150/s | 🟡 fertig: 287/s kalt, 200 aus dem Cache bis auf dem Bildschirm 16 ms; offen: Sichtprüfung |
-| **M5** | WebP (animiert), GIF-Animation, AVIF, HEIC, JXL, TIFF, RAW nativ (jeweils Bench-Gate) | nativ schneller als WIC, sonst bleibt WIC | 🟡 GIF- und WebP-Animation, WebP nativ (Gate: verlustfrei und Animationen nativ, verlustbehaftet WIC sobald geladen), JPEG XL nativ (Gate bestanden, +1,7 MB), TIFF nativ mit parallelen Streifen (sonst WIC), RAW über eingebettete Vorschauen (Entwicklung weiter WIC), Lizenzhinweise der eingebundenen Bibliotheken (`THIRD-PARTY-NOTICES.txt`, Menü „Lizenzhinweise“), AVIF (`rav1d`) nativ, solange WIC ohne Codec ist, HEIC (`zune-heic`) ebenso, aber nur mit dem Feature `heic` (Standard aus, HEVC-Patente); offen: Gate HEIC/AVIF gegen WIC unter Windows |
-| **M6** | Tray/Resident, Einstellungen, ICC-Farbmanagement | Resident-Handoff → sichtbar ≤ 25 ms | 🟡 Resident, Tray, Einstellungsmenü, App-Icon, ICC (JPEG/PNG) fertig; Handoff 23–25 ms (Median, ruhiger Rechner); offen: Sichtprüfung |
-| **M7** | Setup-Exe, Release-Workflow, Self-Updater, winget | Prüfsummen signiert, Update ohne Benutzeraktion | 🟡 umgesetzt; offen: Release-Schlüssel, erster Release |
-| **M8** | `blinzel-race` + Website auf Cloudflare Workers | öffentliche, reproduzierbare Vergleichszahlen | 🟡 Werkzeug, Website und Funktionstabelle (mit Quellen) fertig; Windows gemessen (amigo-blinzel gegen Windows Fotos, ohne kalt); offen: macOS-Messung, Gegenlesen der Tabelle, Cloudflare-Secrets |
-| **M9** | Stapelverarbeitung: Engine, Dialog, Mehrfachauswahl | schneller als ImageMagick; Quellen nie überschrieben | 🟡 Engine und Dialog fertig, 8,6 statt 2,1 Bilder/s; offen: Sichtprüfung unter Windows und macOS, Vergleich mit vipsthumbnail/XnConvert |
-| **M10** | Linux-Hülle (winit + wgpu), Installation, Updater | Golden-Test auf lavapipe, Start bis zum ersten Bild im CI | 🟡 fertig, im CI geprüft (Xvfb); offen: Sichtprüfung unter Wayland, Startzeiten messen |
-| **M11** | macOS-Hülle (AppKit + Metal), App-Bundle, Updater | Metal-Golden-Test, Start bis zum ersten Bild im CI | 🟡 fertig, im macOS-CI gebaut; offen: Sichtprüfung auf einem Mac (Finder, HEIC, Farbprofil, Menüleiste), Startzeiten messen |
-| **M12** | Bildschirmfotos (eigener PR nach #22) | Druck-Taste bis Overlay ohne spürbare Verzögerung | 🟡 Windows fertig: Druck-Taste (und Strg+Umschalt+Druck) im Resident-Modus, GDI-Aufnahme des virtuellen Desktops, Overlay aus `blinzel-ui/src/snip.rs` (Fenster unter der Maus hervorgehoben, Ziehen = Bereich, Klick = Fenster, Enter = Bildschirm), PNG nach `Bilder\Screenshots` (einstellbar), optional in die Zwischenablage, öffnet im Viewer; „Öffnen mit…“ und „Bearbeiten mit…“ (E) auf allen Plattformen; CI: `--capture-test`. Offen: Sichtprüfung unter Windows 11, Zeit Druck-Taste → Overlay messen, macOS (ScreenCaptureKit, Carbon-Hotkey, NSStatusItem), Linux (X11 GetImage, Wayland-Portal), HDR |
+| **M0** | Workspace, CI (Linux + Windows), corpus, bench harness | baseline JSON in CI | 🟡 |
+| **M1** | Single image: startup sequence, chrome, menu, view modes, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC fallback, EXIF/MPF | t0 → present ≤ 50 ms warm, ≤ 120 ms cold; no white frame | 🟡 |
+| **M2** | Browsing, prefetch, budgets, full-res when zoomed, folder watch, P/E pools, selection, Ctrl+C/X/S | next ≤ 8 ms p99 prefetched; 10k folder ≤ 25 ms; Ctrl+C < 1 ms | 🟡 |
+| **M3** | `blinzel-jpeg`: parallel decoder | full-res 24 MP ≥ 3× turbo (8 cores); DC-only ≥ 2× | 🟡 targets reached (4.1× and 3.6×), progressive 1.7×; CI confirmation pending |
+| **M4** | Thumbnails: fast paths, pack cache, atlas, filmstrip + grid | 200 tiles from the cache ≤ 30 ms; cold ≥ 150/s | 🟡 done: 287/s cold, 200 from the cache to on screen 16 ms; open: visual check |
+| **M5** | WebP (animated), GIF animation, AVIF, HEIC, JXL, TIFF, RAW native (each with bench gate) | native faster than WIC, otherwise WIC stays | 🟡 GIF and WebP animation, WebP native (gate: lossless and animations native, lossy via WIC once loaded), JPEG XL native (gate passed, +1.7 MB), TIFF native with parallel strips (otherwise WIC), RAW via embedded previews (development still WIC), license notices of the bundled libraries (`THIRD-PARTY-NOTICES.txt`, menu "Third-party notices"), AVIF (`rav1d`) native as long as WIC has no codec, HEIC (`zune-heic`) likewise, but only with the feature `heic` (off by default, HEVC patents); open: gate HEIC/AVIF against WIC on Windows |
+| **M6** | Tray/resident, settings, ICC color management | resident handoff → visible ≤ 25 ms | 🟡 resident, tray, settings menu, app icon, ICC (JPEG/PNG) done; handoff 23–25 ms (median, idle machine); open: visual check |
+| **M7** | Setup exe, release workflow, self-updater, winget | checksums signed, update without user action | 🟡 implemented; open: release key, first release |
+| **M8** | `blinzel-race` + website on Cloudflare Workers | public, reproducible comparison figures | 🟡 tool, website and feature table (with sources) done; Windows measured (amigo-blinzel vs. Windows Photos, without cold); open: macOS measurement, proofreading the table, Cloudflare secrets |
+| **M9** | Batch processing: engine, dialog, multi-selection | faster than ImageMagick; sources never overwritten | 🟡 engine and dialog done, 8.6 instead of 2.1 images/s; open: visual check on Windows and macOS, comparison with vipsthumbnail/XnConvert |
+| **M10** | Linux shell (winit + wgpu), installation, updater | golden test on lavapipe, startup to first image in CI | 🟡 done, checked in CI (Xvfb); open: visual check under Wayland, measure startup times |
+| **M11** | macOS shell (AppKit + Metal), app bundle, updater | Metal golden test, startup to first image in CI | 🟡 done, built in macOS CI; open: visual check on a Mac (Finder, HEIC, color profile, menu bar), measure startup times |
+| **M12** | Screenshots (separate PR after #22) | Print key to overlay without noticeable delay | 🟡 Windows done: Print key (and Ctrl+Shift+Print) in resident mode, GDI capture of the virtual desktop, overlay from `blinzel-ui/src/snip.rs` (window under the mouse highlighted, drag = region, click = window, Enter = screen), PNG to `Bilder\Screenshots` (Pictures\Screenshots, configurable), optionally to the clipboard, opens in the viewer; "Open with…" and "Edit with…" (E) on all platforms; CI: `--capture-test`. Open: visual check on Windows 11, measure time Print key → overlay, macOS (ScreenCaptureKit, Carbon hotkey, NSStatusItem), Linux (X11 GetImage, Wayland portal), HDR |
 
-**Reihenfolge:**
-1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
+**Order:**
+1. PR #1: M0–M2 including the Windows 11 baseline and "Save cutout".
 2. M3.
-3. M7, damit Releases früh verteilt werden können.
-4. M8 (Website mit ersten Vergleichszahlen für Öffnen und Blättern).
-5. M4, M5, M6. Die Website-Zahlen werden mit jedem Meilenstein ergänzt.
+3. M7, so that releases can be distributed early.
+4. M8 (website with first comparison figures for opening and browsing).
+5. M4, M5, M6. The website figures are extended with every milestone.
 
-## 13. Verifikation
+## 13. Verification
 
-- **Linux (Container/CI):**
-  - `cargo test --workspace`: core, jpeg, i18n, Scheduler, Layout, Auswahl, Export.
+- **Linux (container/CI):**
+  - `cargo test --workspace`: core, jpeg, i18n, scheduler, layout, selection, export.
   - `cargo clippy -D warnings`, `cargo fmt --check`.
   - `cargo xwin clippy --target x86_64-pc-windows-msvc`.
-- **Windows-CI:**
-  - Build, Tests, WARP-Golden-Tests (Shader gegen CPU-Referenz: Orientierungen, Kachelnähte, Zoom, Zuschnitt, Grau, Alpha, Text).
-  - `blinzel-bench`, `blinzel.exe --bench`, Startup-Smoke-Test.
-  - `blinzel-bench` zusätzlich als x86-64-v3-Build; `blinzel-bench compare` schreibt beide Läufe nebeneinander in die Step-Summary.
-  - ARM64-Build.
-- **Lokal unter Windows 11** (Entwicklerrechner):
-  - Der rustup-Host ist dort `windows-gnu`; gebaut wird mit `cargo +1.99.1-x86_64-pc-windows-msvc …`.
-  - NASM liegt unter `%LOCALAPPDATA%\bin\NASM`, CMake kommt aus Visual Studio (`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`); beides muss im `PATH` stehen.
-  - Laptop-Messungen schwanken zwischen aufeinanderfolgenden Läufen um bis zu 30 % (Drosselung). Builds deshalb abwechselnd messen und libjpeg-turbo als Kontrollgröße mitlaufen lassen.
-- **Manuell unter Windows 11:**
-  - Doppelklick-Start und Blättern (auch Dauerfeuer).
-  - Ansichtsmodi, Snap-Layouts, Menü per Maus und Tastatur, Sprachwechsel.
-  - Auswahl → Einfügen in Paint/Word/GIMP; Strg+X/Esc; Strg+S mit beiden Pfaden (verlustfrei und neu kodiert).
-  - Papierkorb, Drag & Drop, Einzelinstanz.
-- **Linux-CI:** Golden-Test der wgpu-Shader auf lavapipe, Start bis zum ersten Bild unter Xvfb, Bildschirmprofil über `_ICC_PROFILE` auf Xvfb, Lizenzhinweise aktuell.
-- **macOS-CI (macos-14):** Clippy und Tests, Metal-Golden-Test, App-Bundle mit Signaturprüfung, Start bis zum ersten Bild.
-- **Manuell auf einem Mac:** Öffnen aus dem Finder und per Drag & Drop, HEIC über ImageIO, Farbprofil eines P3-Bildschirms, Menüleiste und Kontextmenü, Stapelverarbeitung, Gatekeeper-Hinweis beim ersten Start.
-- **Manuell unter Linux:** GNOME (Wayland) und KDE (X11): Start, Fensterbewegung, Dateidialog, Zwischenablage, `--install`.
-- **Release (M7):** SmartScreen-Hinweis beim ersten Start wie auf der Download-Seite beschrieben; Update-Pfad von v0.x.y nach v0.x.y+1 auf einer sauberen VM.
+- **Windows CI:**
+  - Build, tests, WARP golden tests (shader against CPU reference: orientations, tile seams, zoom, crop, gray, alpha, text).
+  - `blinzel-bench`, `blinzel.exe --bench`, startup smoke test.
+  - `blinzel-bench` additionally as an x86-64-v3 build; `blinzel-bench compare` writes both runs side by side into the step summary.
+  - ARM64 build.
+- **Locally on Windows 11** (developer machine):
+  - The rustup host there is `windows-gnu`; builds use `cargo +1.99.1-x86_64-pc-windows-msvc …`.
+  - NASM is under `%LOCALAPPDATA%\bin\NASM`, CMake comes from Visual Studio (`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`); both must be in the `PATH`.
+  - Laptop measurements vary by up to 30 % between consecutive runs (throttling). Therefore measure builds alternately and run libjpeg-turbo alongside as a control.
+- **Manually on Windows 11:**
+  - Double-click start and browsing (including rapid fire).
+  - View modes, snap layouts, menu via mouse and keyboard, language switch.
+  - Selection → paste into Paint/Word/GIMP; Ctrl+X/Esc; Ctrl+S with both paths (lossless and re-encoded).
+  - Recycle Bin, drag & drop, single instance.
+- **Linux CI:** golden test of the wgpu shaders on lavapipe, startup to first image under Xvfb, display profile via `_ICC_PROFILE` on Xvfb, license notices up to date.
+- **macOS CI (macos-14):** Clippy and tests, Metal golden test, app bundle with signature check, startup to first image.
+- **Manually on a Mac:** opening from the Finder and via drag & drop, HEIC via ImageIO, color profile of a P3 display, menu bar and context menu, batch processing, Gatekeeper notice on first start.
+- **Manually on Linux:** GNOME (Wayland) and KDE (X11): startup, moving the window, file dialog, clipboard, `--install`.
+- **Release (M7):** SmartScreen notice on first start as described on the download page; update path from v0.x.y to v0.x.y+1 on a clean VM.
 
-## 14. Offene Punkte, die bei dir liegen
+## 14. Open items on your side
 
-- ✅ Lizenz: MIT.
-- 🟡 Release-Signaturschlüssel: erzeugt, der öffentliche Teil steht in `crates/blinzel-core/src/update.rs`. Offen: den geheimen Teil als Secret `RELEASE_SIGNING_KEY` hinterlegen und sicher aufbewahren (geht er verloren, nehmen installierte Kopien keine Updates mehr an).
-- 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
-- 🟡 Windows-Messung in `website/data/race.json` (26.10.2026, Laptop Ryzen 7 PRO 6850H, 3 Monitore): amigo-blinzel 1.1.0 mit Standardeinstellungen gegen Windows Fotos, ohne `--cold`. Weitere Viewer sind dort nicht installiert. `settle` in den Rohdaten zählt ab dem Ende der Pause nach dem letzten Tastendruck und ist deshalb bei schnellen Viewern negativ.
-- ⬜ Dasselbe auf einem Mac (Apple Silicon): `blinzel-race corpus testbilder`, dann `blinzel-race run testbilder --cold --json website/data/race-macos.json` (fragt einmal nach dem `sudo`-Passwort). Vorher die Viewer installieren und dem Terminal „Bildschirmaufnahme“ und „Bedienungshilfen“ erlauben.
-- ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
-- ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
-- ⬜ Erster manueller Test auf einem Mac und unter Linux (siehe Verifikation).
-- ✅ HEVC-Patente: entschieden, der eigene HEVC-Decoder (`zune-heic`) steckt hinter dem Cargo-Feature `heic` und ist standardmäßig aus; Releases enthalten ihn nicht, HEIC läuft dort über WIC. Wer selbst baut, schaltet ihn mit `cargo build --release -p blinzel-app --features heic` ein (dann fehlen seine Lizenztexte in den `THIRD-PARTY-NOTICES*.txt`, die nur den Standard-Build abdecken).
-- ⬜ Gate HEIC und AVIF unter Windows messen: `set BLINZEL_DECODER=native` bzw. `=wic`, dann `blinzel.exe --bench <ordner>` mit 12/24-MP-Dateien, abwechselnd.
+- ✅ License: MIT.
+- 🟡 Release signing key: generated, the public part is in `crates/blinzel-core/src/update.rs`. Open: store the secret part as the secret `RELEASE_SIGNING_KEY` and keep it safe (if it is lost, installed copies no longer accept updates).
+- 🟡 Cloudflare: Workers Builds is connected; optionally a custom domain. The secrets for the GitHub workflow are therefore not needed.
+- 🟡 Windows measurement in `website/data/race.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. No other viewers are installed there. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
+- ⬜ The same on a Mac (Apple Silicon): `blinzel-race corpus testbilder`, then `blinzel-race run testbilder --cold --json website/data/race-macos.json` (asks once for the `sudo` password). Install the viewers beforehand and grant the terminal "Screen Recording" and "Accessibility".
+- ⬜ Legal notice (Impressum): details of the website operator (name, address, contact), in case the site is operated commercially. The website has no page for this yet; only the operator can provide the details.
+- ⬜ First manual test on Windows 11 (see Verification).
+- ⬜ First manual test on a Mac and on Linux (see Verification).
+- ✅ HEVC patents: decided, our own HEVC decoder (`zune-heic`) sits behind the Cargo feature `heic` and is off by default; releases do not include it, HEIC runs via WIC there. Anyone building it themselves enables it with `cargo build --release -p blinzel-app --features heic` (its license texts are then missing from the `THIRD-PARTY-NOTICES*.txt`, which only cover the default build).
+- ⬜ Measure the HEIC and AVIF gate on Windows: `set BLINZEL_DECODER=native` or `=wic`, then `blinzel.exe --bench <ordner>` with 12/24 MP files, alternately.
 
-## 15. Messwerte (Stand)
+## 15. Measurements (current state)
 
-Linux-Container, 4 vCPU, ein Kern je Decode, Bench im Schnellmodus:
+Linux container, 4 vCPU, one core per decode, bench in quick mode:
 
-| Fall | Ergebnis |
+| Case | Result |
 |---|---|
-| JPEG 24 MP, voll | turbojpeg YCbCr 118 ms; BGRA 147 ms; zune-jpeg 202 ms |
-| JPEG 24 MP, Bildschirm (1440p) | 92 ms |
+| JPEG 24 MP, full | turbojpeg YCbCr 118 ms; BGRA 147 ms; zune-jpeg 202 ms |
+| JPEG 24 MP, screen (1440p) | 92 ms |
 | JPEG 24 MP, 1/8 | 74 ms |
-| JPEG 24 MP, progressiv | ca. 320 ms, unabhängig von der Skalierung |
+| JPEG 24 MP, progressive | approx. 320 ms, independent of the scaling |
 | JPEG 45 MP | YCbCr 190 ms; BGRA 410 ms |
-| PNG 12 MP RGB | eigener Pfad 117 ms; png 132 ms; zune-png 216 ms |
-| PNG 8 MP Screenshot | eigener Pfad 8,4 ms; beide Libraries mit RGBA-Expansion 24–27 ms |
-| natürliche Sortierung, 10k Namen | 2,5 ms |
-| Puffer 96 MB | Pool 0,6 ms; neu 40 ms |
-| `blinzel.exe` (x64, Release, statische CRT) | 1,49 MB (Cross-Build mit clang-cl/lld); 2,5 MB mit MSVC im CI |
+| PNG 12 MP RGB | own path 117 ms; png 132 ms; zune-png 216 ms |
+| PNG 8 MP screenshot | own path 8.4 ms; both libraries with RGBA expansion 24–27 ms |
+| natural sort, 10k names | 2.5 ms |
+| buffer 96 MB | pool 0.6 ms; new 40 ms |
+| `blinzel.exe` (x64, release, static CRT) | 1.49 MB (cross build with clang-cl/lld); 2.5 MB with MSVC in CI |
 
-Windows-CI (`windows-2025`, ohne GPU, Artefakt `windows-bench-and-exe`), vor und nach dem libjpeg-turbo-Fix (PR #2):
+Windows CI (`windows-2025`, without GPU, artifact `windows-bench-and-exe`), before and after the libjpeg-turbo fix (PR #2):
 
-| Fall | vorher | nachher |
+| Case | before | after |
 |---|---|---|
-| JPEG 24 MP 4:2:0, turbojpeg YCbCr voll | 228 ms | 93 ms |
+| JPEG 24 MP 4:2:0, turbojpeg YCbCr full | 228 ms | 93 ms |
 | JPEG 24 MP 4:2:0, 1/8 | 195 ms | 70 ms |
-| JPEG 24 MP 4:4:4 / Graustufen, voll | 284 / 217 ms | 118 / 86 ms |
-| JPEG 45 MP, voll | 423 ms | 175 ms |
-| JPEG 24 MP progressiv, voll | 658 ms | ca. 300 ms |
-| zune-jpeg 24 MP (Vergleich) | 160 ms | 129 ms; turbojpeg jetzt 1,2–1,4× schneller |
-| App: 24 MP öffnen (Decode auf 2250 × 1500) | 240 ms | 87 ms (Upload 1 ms) |
-| Blättern mit 30 Tasten/s, p99 | 604 ms | 240 ms (19 von 22 aus dem Prefetch, Median 0 ms) |
-| Ordner mit 10k Dateien | 9,9 ms | 8,8 ms |
-| Start bis erstes Present | 617 ms | 150 ms, davon 134 ms Decode |
+| JPEG 24 MP 4:4:4 / grayscale, full | 284 / 217 ms | 118 / 86 ms |
+| JPEG 45 MP, full | 423 ms | 175 ms |
+| JPEG 24 MP progressive, full | 658 ms | approx. 300 ms |
+| zune-jpeg 24 MP (comparison) | 160 ms | 129 ms; turbojpeg now 1.2–1.4× faster |
+| App: open 24 MP (decode to 2250 × 1500) | 240 ms | 87 ms (upload 1 ms) |
+| Browsing at 30 keys/s, p99 | 604 ms | 240 ms (19 of 22 from prefetch, median 0 ms) |
+| Folder with 10k files | 9.9 ms | 8.8 ms |
+| Startup to first present | 617 ms | 150 ms, of which 134 ms decode |
 
-Der Runner hat keine GPU: Die Startmessung meldet `"adapter": "Microsoft Basic Render Driver"`, also Software-Rendering durch Windows. Echte GPU-Startzeiten müssen auf einem Rechner mit Grafikkarte gemessen werden (`blinzel.exe bild.jpg --exit-after-first-frame --json start.json`).
+The runner has no GPU: the startup measurement reports `"adapter": "Microsoft Basic Render Driver"`, i.e. software rendering by Windows. Real GPU startup times must be measured on a machine with a graphics card (`blinzel.exe bild.jpg --exit-after-first-frame --json start.json`).
 
-Der C-Teil von libjpeg-turbo war dabei unoptimiert: cmake-rs entfernt unter MSVC mit Visual-Studio-Generator alle `/O`-Flags, MSBuild kompiliert dann mit `/Od`. Behoben durch eine gepatchte Kopie von cmake-rs (`third_party/cmake-rs`, per `[patch.crates-io]`), die CMakes Standard-Flags je Konfiguration behält. libjpeg-turbo baut außerdem als „Release“ (`/O2 /Ob2`). `blinzel-bench run --check` schlägt fehl, falls zune-jpeg den ausgelieferten JPEG-Pfad je wieder schlägt. Die Startmessung schreibt den Adapternamen mit, damit Software-Rendering erkennbar ist.
+The C part of libjpeg-turbo was unoptimized here: under MSVC with the Visual Studio generator, cmake-rs removes all `/O` flags, and MSBuild then compiles with `/Od`. Fixed by a patched copy of cmake-rs (`third_party/cmake-rs`, via `[patch.crates-io]`) that keeps CMake's default flags per configuration. libjpeg-turbo also builds as "Release" (`/O2 /Ob2`). `blinzel-bench run --check` fails if zune-jpeg ever beats the shipped JPEG path again. The startup measurement records the adapter name so that software rendering is recognizable.
 
-### SIMD-Stufen
+### SIMD levels
 
-Lokal gemessen auf AMD Ryzen 7 PRO 6850H (8 Kerne, AVX2, kein AVX-512), Windows 11, Netzbetrieb, Energieschema „Ausbalanciert“; Mediane, ein Kern je Decode.
+Measured locally on AMD Ryzen 7 PRO 6850H (8 cores, AVX2, no AVX-512), Windows 11, on AC power, power plan "Balanced"; medians, one core per decode.
 
-**libjpeg-turbo** auf `jpeg-24mp-420.jpg`, jede Stufe als eigener Kindprozess (`JSIMD_FORCE*`):
+**libjpeg-turbo** on `jpeg-24mp-420.jpg`, each level as a separate child process (`JSIMD_FORCE*`):
 
-| Fall | ohne SIMD | SSE2 | AVX2 | AVX2 gegenüber SSE2 |
+| Case | without SIMD | SSE2 | AVX2 | AVX2 vs. SSE2 |
 |---|---|---|---|---|
-| YCbCr voll | 120 ms | 81 ms | 76 ms | 5 % |
-| BGRA voll (inkl. Farbumrechnung, Upsampling) | 211 ms | 99 ms | 91 ms | 9 % |
+| YCbCr full | 120 ms | 81 ms | 76 ms | 5 % |
+| BGRA full (incl. color conversion, upsampling) | 211 ms | 99 ms | 91 ms | 9 % |
 | 1/8 | 59 ms | 55 ms | 54 ms | ≈ 0 |
 
-AVX2 wählt libjpeg-turbo ohnehin selbst. Der Rest ist der skalare Huffman-Decoder, also der Hebel für M3.
+libjpeg-turbo selects AVX2 by itself anyway. The rest is the scalar Huffman decoder, i.e. the lever for M3.
 
-**Eigene Kernels** (`blinzel_core::kernels`) auf 12 MP, zwei Läufe:
+**Own kernels** (`blinzel_core::kernels`) on 12 MP, two runs:
 
 | Kernel | Baseline (v2) | AVX2+FMA |
 |---|---|---|
-| RGB → RGBA | 6,2 / 5,5 ms | 4,6 / 5,1 ms |
-| Grau+Alpha → RGBA | 5,0 / 4,7 ms | 4,4 / 4,6 ms |
-| RGBA → BGRA | 5,5 / 5,5 ms | 5,5 / 4,8 ms |
-| YCbCr 4:2:0 → BGRA (CPU-Referenz, nicht der Anzeigepfad) | 583 / 530 ms | 500 / 557 ms |
+| RGB → RGBA | 6.2 / 5.5 ms | 4.6 / 5.1 ms |
+| Gray+alpha → RGBA | 5.0 / 4.7 ms | 4.4 / 4.6 ms |
+| RGBA → BGRA | 5.5 / 5.5 ms | 5.5 / 4.8 ms |
+| YCbCr 4:2:0 → BGRA (CPU reference, not the display path) | 583 / 530 ms | 500 / 557 ms |
 
-Die gepackten Kernels sind speichergebunden. Gewinnt AVX2 dort 0,5–1,5 ms, sind das bei einem 12-MP-PNG (≈ 90 ms) höchstens 2 %.
+The packed kernels are memory-bound. If AVX2 gains 0.5–1.5 ms there, that is at most 2 % for a 12 MP PNG (≈ 90 ms).
 
-**Obergrenze „alles mit AVX2“** (x86-64-v3-Build, damit auch die Crates `png` und `fdeflate`): Drei abwechselnde Läufe ergeben für PNG 2–5 % (Minima); JPEG bleibt gleich, weil der C-Teil von `RUSTFLAGS` unberührt bleibt. Ein einzelner Vergleich hintereinander hatte 24 % gezeigt, der Baseline-Lauf war aber gedrosselt.
+**Upper bound "everything with AVX2"** (x86-64-v3 build, so the crates `png` and `fdeflate` as well): three alternating runs yield 2–5 % for PNG (minima); JPEG stays the same because the C part is unaffected by `RUSTFLAGS`. A single back-to-back comparison had shown 24 %, but the baseline run was throttled.
 
-**Ergebnis nach dem Kriterium (≥ 10 % auf einem Hot Path):** Keine Stufe erreicht es. Deshalb gibt es keinen Laufzeit-Dispatch; die Kernels laufen mit `Level::Baseline`, die Basis bleibt x86-64-v2. Kernel-Modul und Bench-Gruppe `simd` bleiben als Werkzeug für M3 (AVX2-IDCT, Farbumrechnung im eigenen Decoder).
+**Result by the criterion (≥ 10 % on a hot path):** No level reaches it. Therefore there is no runtime dispatch; the kernels run with `Level::Baseline`, the baseline remains x86-64-v2. The kernel module and the bench group `simd` remain as tools for M3 (AVX2 IDCT, color conversion in our own decoder).
 
-**Windows-CI** (PR #4, `windows-2025`, AMD EPYC 7763, AVX2; die Läufe sind ruhig, das Minimum liegt beim Median):
+**Windows CI** (PR #4, `windows-2025`, AMD EPYC 7763, AVX2; the runs are quiet, the minimum is at the median):
 
-| Messung | Ergebnis |
+| Measurement | Result |
 |---|---|
-| libjpeg-turbo YCbCr voll: ohne SIMD / SSE2 / AVX2 | 159 / 100 / 95 ms |
-| libjpeg-turbo BGRA voll: ohne SIMD / SSE2 / AVX2 | 253 / 122 / 111 ms |
-| libjpeg-turbo 1/8: ohne SIMD / SSE2 / AVX2 | jeweils 72 ms |
-| Kernel RGB → RGBA: Baseline / AVX2 | 4,4 / 3,4 ms (1,28×, ≈ 1 % des 12-MP-PNG-Decodes von 113 ms) |
-| Kernel Grau+Alpha → RGBA, RGBA → BGRA: Baseline / AVX2 | 3,0 / 2,6 ms; 3,8 / 3,5 ms |
-| Kernel YCbCr → BGRA, alle Stufen | 604–636 ms, kein Unterschied |
-| x86-64-v3 gegenüber v2: PNG (RGB, RGBA, Screenshot) | 1,02× / 1,02× / 1,06× |
-| x86-64-v3 gegenüber v2: JPEG (C-Code unverändert) | 1,01–1,03× |
+| libjpeg-turbo YCbCr full: without SIMD / SSE2 / AVX2 | 159 / 100 / 95 ms |
+| libjpeg-turbo BGRA full: without SIMD / SSE2 / AVX2 | 253 / 122 / 111 ms |
+| libjpeg-turbo 1/8: without SIMD / SSE2 / AVX2 | 72 ms each |
+| Kernel RGB → RGBA: baseline / AVX2 | 4.4 / 3.4 ms (1.28×, ≈ 1 % of the 12 MP PNG decode of 113 ms) |
+| Kernel gray+alpha → RGBA, RGBA → BGRA: baseline / AVX2 | 3.0 / 2.6 ms; 3.8 / 3.5 ms |
+| Kernel YCbCr → BGRA, all levels | 604–636 ms, no difference |
+| x86-64-v3 vs. v2: PNG (RGB, RGBA, screenshot) | 1.02× / 1.02× / 1.06× |
+| x86-64-v3 vs. v2: JPEG (C code unchanged) | 1.01–1.03× |
 
-Das bestätigt die lokale Messung. Bei 1/8 bringt SIMD libjpeg-turbo auf dem Runner gar nichts mehr.
+This confirms the local measurement. At 1/8, SIMD no longer brings libjpeg-turbo anything at all on the runner.
 
-## 16. Übergabe: nächste Schritte
+## 16. Handover: next steps
 
-**Stand (2026-10-25), PR #22:** Code-Signing entfernt; `blinzel-ui` als plattformunabhängige Oberfläche; Stapelverarbeitung (M9); Linux-Hülle (M10) und macOS-Hülle (M11) mit Installation, Updater, CI- und Release-Jobs; Lizenzhinweise je Plattform; Website mit Downloads für drei Plattformen. Offen sind die Sichtprüfungen aus Abschnitt 13 und die Punkte in Abschnitt 14.
+**Status (2026-10-25), PR #22:** Code signing removed; `blinzel-ui` as a platform-independent interface; batch processing (M9); Linux shell (M10) and macOS shell (M11) with installation, updater, CI and release jobs; license notices per platform; website with downloads for three platforms. Open are the visual checks from section 13 and the items in section 14.
 
-**Stand (2026-10-23):**
-- PR #1–#3 sind gemergt.
-- PR #4 (`simd-levels`): SIMD-Stufen gemessen, kein Dispatch ([SIMD-Stufen](#simd-stufen)). Wartet auf Merge.
-- PR #5 (`m3-jpeg`, auf #4 gestapelt): eigener JPEG-Decoder.
-  - Sequentiell (Baseline und Extended, 8 Bit, jede Unterabtastung, Restart-Marker, mehrere Scans), Skalen 8/8, 4/8, 2/8, 1/8.
-  - Parallel: exakt mit Restart-Markern, sonst spekulativ mit Selbstsynchronisation. Ein Rateversuch, der auf einen ungültigen Code läuft, startet ein Bit später neu.
-  - Byte-identisch mit libjpeg-turbo; geprüft in `blinzel-core/tests/own_jpeg.rs` und mit `blinzel-bench run --check` über den ganzen Korpus.
-  - Eingebunden über `decode::decode_with(data, req, threads)`: Das sichtbare Bild läuft auf allen P-Kernen über `blinzel-jpeg`, Prefetch, Regionen und Fehlerfälle bei libjpeg-turbo.
-  - `blinzel-bench jpeg-ab <datei> [skala] [threads]` misst turbo und `blinzel-jpeg` abwechselnd im selben Prozess.
+**Status (2026-10-23):**
+- PR #1–#3 are merged.
+- PR #4 (`simd-levels`): SIMD levels measured, no dispatch ([SIMD levels](#simd-levels)). Waiting for merge.
+- PR #5 (`m3-jpeg`, stacked on #4): own JPEG decoder.
+  - Sequential (baseline and extended, 8-bit, any subsampling, restart markers, multiple scans), scales 8/8, 4/8, 2/8, 1/8.
+  - Parallel: exact with restart markers, otherwise speculative with self-synchronization. A guess that runs into an invalid code restarts one bit later.
+  - Byte-identical with libjpeg-turbo; checked in `blinzel-core/tests/own_jpeg.rs` and with `blinzel-bench run --check` over the whole corpus.
+  - Integrated via `decode::decode_with(data, req, threads)`: the visible image runs on all P-cores via `blinzel-jpeg`; prefetch, regions and error cases stay with libjpeg-turbo.
+  - `blinzel-bench jpeg-ab <datei> [skala] [threads]` measures turbo and `blinzel-jpeg` alternately in the same process.
 
-**Messwerte M3** (Ryzen 7 PRO 6850H, 8 Kerne / 16 Threads, A/B abwechselnd, Mediane):
+**M3 measurements** (Ryzen 7 PRO 6850H, 8 cores / 16 threads, A/B alternating, medians):
 
-| Datei | turbo | blinzel-jpeg, 1 Thread | 16 Threads | Faktor |
+| File | turbo | blinzel-jpeg, 1 thread | 16 threads | Factor |
 |---|---|---|---|---|
-| 24 MP 4:2:0 voll | 77 ms | 90 ms | 20 ms | 3,9× |
-| 24 MP 4:2:0 1/2 | 66 ms | 78 ms | 19 ms | 3,5× |
-| 24 MP 4:2:0 1/8 | 57 ms | 57 ms | 16 ms | 3,6× |
-| 24 MP 4:4:4 voll | 102 ms | 109 ms | 26 ms | 3,9× |
-| 45 MP 4:2:0 voll | 151 ms | 206 ms | 38 ms | 4,0× |
-| 12 MP 4:2:0 voll | 37 ms | 45 ms | 12 ms | 3,1× |
+| 24 MP 4:2:0 full | 77 ms | 90 ms | 20 ms | 3.9× |
+| 24 MP 4:2:0 1/2 | 66 ms | 78 ms | 19 ms | 3.5× |
+| 24 MP 4:2:0 1/8 | 57 ms | 57 ms | 16 ms | 3.6× |
+| 24 MP 4:4:4 full | 102 ms | 109 ms | 26 ms | 3.9× |
+| 45 MP 4:2:0 full | 151 ms | 206 ms | 38 ms | 4.0× |
+| 12 MP 4:2:0 full | 37 ms | 45 ms | 12 ms | 3.1× |
 
-App-Benchmark mit echter GPU (Radeon 680M): 24-MP-JPEG öffnen 28,7 ms gesamt (Decode 19,9 ms auf 3000 × 2000).
+App benchmark with a real GPU (Radeon 680M): open a 24 MP JPEG in 28.7 ms total (decode 19.9 ms to 3000 × 2000).
 
-**Progressive** (seit diesem Stand): Alle Scans werden vorab gelesen; mit mehreren Threads läuft jeder Scan in einem eigenen Thread, zeilenweise hinter den Scans, von denen er abhängt (gleiche Komponente, überlappendes Band). Koeffizienten liegen in Blockzeilen hinter Mutexen, werden erst beim ersten Zugriff angelegt und während der parallelen IDCT freigegeben. Verfeinerungsscans führen je Block eine Maske der Nicht-Null-Koeffizienten.
+**Progressive** (since this state): All scans are read up front; with multiple threads each scan runs in its own thread, row by row behind the scans it depends on (same component, overlapping band). Coefficients sit in block rows behind mutexes, are allocated only on first access and released during the parallel IDCT. Refinement scans keep a mask of the non-zero coefficients per block.
 
-| 24 MP 4:2:0 progressive | turbo | blinzel-jpeg, 1 Thread | 16 Threads |
+| 24 MP 4:2:0 progressive | turbo | blinzel-jpeg, 1 thread | 16 threads |
 |---|---|---|---|
-| voll | 244 ms | 330 ms | 142 ms (1,7×) |
-| 1/8 | 238 ms | 312 ms | 138 ms (1,7×) |
+| full | 244 ms | 330 ms | 142 ms (1.7×) |
+| 1/8 | 238 ms | 312 ms | 138 ms (1.7×) |
 
-Grenze: Der letzte Y-Verfeinerungsscan (3,7 MB) läuft allein ca. 100 ms. Ohne Kenntnis der Blocknummer lässt er sich nicht spekulativ teilen; schneller wird er nur durch einen schnelleren sequentiellen Decoder.
+Limit: The last Y refinement scan (3.7 MB) alone takes approx. 100 ms. Without knowing the block number it cannot be split speculatively; it only gets faster through a faster sequential decoder.
 
-Sequentiell (Baseline) ist `blinzel-jpeg` seit dem Akkumulator-Bitleser gleichauf mit turbo (1,01×), mit 16 Threads 4,1×.
+For sequential (baseline) JPEGs, `blinzel-jpeg` has been on par with turbo (1.01×) since the accumulator bit reader, and 4.1× with 16 threads.
 
-**M7 (Branch `m7-install`, PR auf `m3-jpeg` gestapelt):** Setup-Exe, Deinstallation, Silent-Modus, Self-Updater mit Prüfungen und Rollback, Release-Workflow, winget-Vorlagen, Menüeinträge. Details in [Abschnitt 10](#10-installation-updates-signierung-m7). Offen sind nur Punkte aus Abschnitt 14 (Release-Schlüssel) und der erste echte Release.
+**M7 (branch `m7-install`, PR stacked on `m3-jpeg`):** setup exe, uninstallation, silent mode, self-updater with checks and rollback, release workflow, winget templates, menu entries. Details in [section 10](#10-installation-updates-signing-m7). Only items from section 14 (release key) and the first real release are open.
 
-**Startzeit (echte GPU, Radeon 680M, 24-MP-JPEG, Prozessstart → erstes Bild):**
+**Startup time (real GPU, Radeon 680M, 24 MP JPEG, process start → first image):**
 
-| Stand | Erstes Bild | Direct3D-Frame |
+| State | First image | Direct3D frame |
 |---|---|---|
-| vorher | 230–330 ms (wartete auf `D3D11CreateDevice`, 115–150 ms) | ebenso |
-| + Nachrichtenschleife statt Blockieren, erstes Bild über GDI | 65–71 ms | 128–136 ms |
-| + `SW_SHOWNA`, Rendern auf dem Loader-Thread | **54–61 ms** | 127–137 ms |
+| before | 230–330 ms (waited for `D3D11CreateDevice`, 115–150 ms) | same |
+| + message loop instead of blocking, first image via GDI | 65–71 ms | 128–136 ms |
+| + `SW_SHOWNA`, rendering on the loader thread | **54–61 ms** | 127–137 ms |
 
-Die Zeit bis `main` (20–25 ms) ist Prozesserzeugung, Delay-Load ändert daran nichts. Danach: Lesen und Decodieren ca. 25 ms, CPU-Frame ca. 5 ms, Zeichnen unter 1 ms. Nebeneffekt: Seit der UI-Thread Nachrichten verarbeitet, statt zu blockieren, dauert auch `D3D11CreateDevice` nur noch ca. 95 statt 150 ms.
+The time until `main` (20–25 ms) is process creation; delay-load changes nothing about that. After that: reading and decoding approx. 25 ms, CPU frame approx. 5 ms, drawing under 1 ms. Side effect: since the UI thread processes messages instead of blocking, `D3D11CreateDevice` now also takes only approx. 95 instead of 150 ms.
 
-**Noch offen:** Messung von außen mit `blinzel-race` und Sichtprüfung des Übergangs GDI → Direct3D. Beides geht nur bei entsperrtem Bildschirm; der Rechner war während der Messung gesperrt. Unter 50 ms kommt nur der Resident-Modus (M6).
+**Still open:** measurement from the outside with `blinzel-race` and a visual check of the GDI → Direct3D transition. Both only work with an unlocked screen; the machine was locked during the measurement. Only resident mode (M6) gets below 50 ms.
 
-**Resident-Handoff (M6, Branch `m6-resident`, gleiche Maschine, 24-MP-JPEG):** Gemessen mit `blinzel --resident --json <datei>`: Die Übergabe trägt die Erzeugungszeit des zweiten Prozesses, die Marken zählen also wie beim Kaltstart ab dessen Prozessstart.
+**Resident handoff (M6, branch `m6-resident`, same machine, 24 MP JPEG):** Measured with `blinzel --resident --json <datei>`: the handoff carries the creation time of the second process, so the marks count from its process start, as with a cold start.
 
-| Stand | Übergabe empfangen → sichtbar (Median) | erste Übergabe nach dem Start |
+| State | Handoff received → visible (median) | first handoff after startup |
 |---|---|---|
-| ohne Vorwärmen | 24,6 ms | 43 ms |
-| + Decode/Upload in Bildschirmgröße vorgewärmt | 24,7 ms | 33 ms |
-| + Fenster einmal gecloakt gezeigt | **23–25 ms** (Spanne 22–29 ms) | 23–24 ms |
+| without warm-up | 24.6 ms | 43 ms |
+| + decode/upload warmed up at screen size | 24.7 ms | 33 ms |
+| + window shown cloaked once | **23–25 ms** (range 22–29 ms) | 23–24 ms |
 
-Davon Lesen ca. 2 ms, Decodieren ca. 19 ms (3000 × 2000, alle P-Kerne), Upload ca. 1,5 ms, Present unter 1 ms. Ziel ≤ 25 ms erreicht. Der zweite Prozess braucht bis zur Übergabe so lange wie ein Kaltstart bis `main` (normal 20–25 ms; während dieser Messung war der Rechner gesperrt und brauchte 120–150 ms, auch der alte Stand). Von außen also normal ca. 45–50 ms vom Doppelklick bis zum Bild.
+Of this, reading approx. 2 ms, decoding approx. 19 ms (3000 × 2000, all P-cores), upload approx. 1.5 ms, present under 1 ms. Target ≤ 25 ms reached. The second process needs as long until the handoff as a cold start until `main` (normally 20–25 ms; during this measurement the machine was locked and needed 120–150 ms, the old state too). From the outside, therefore, normally approx. 45–50 ms from double-click to image.
 
-Speicher der versteckten Instanz: 50 MB privat nach dem Start, nach Benutzung ca. 70 MB und stabil (60 Übergaben, kein Wachstum).
+Memory of the hidden instance: 50 MB private after startup, approx. 70 MB after use and stable (60 handoffs, no growth).
 
-**Als Nächstes, in dieser Reihenfolge:**
-1. Bei entsperrtem Bildschirm: Sichtprüfung des GDI-Übergangs, Tray-Menü und Aufwecken ansehen, `blinzel-race` mit Kaltstart und Resident messen.
-2. M6 abschließen: Sichtprüfung von Tray, Aufwecken und Farbmanagement auf einem Monitor mit Wide-Gamut-Profil.
-3. M4: Sichtprüfung von Raster und Filmstreifen; danach Dateinamen unter den Kacheln und ein Raster-Szenario in `blinzel-race`.
-4. M5 wie in Abschnitt 12.
+**Next, in this order:**
+1. With an unlocked screen: visual check of the GDI transition, look at the tray menu and waking, measure `blinzel-race` with cold start and resident.
+2. Finish M6: visual check of tray, waking and color management on a monitor with a wide-gamut profile.
+3. M4: visual check of grid and filmstrip; then file names under the tiles and a grid scenario in `blinzel-race`.
+4. M5 as in section 12.
