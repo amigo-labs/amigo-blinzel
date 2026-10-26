@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 (2026-10-26)
+
+
+### Features
+
+* screenshots on Windows, "Open with" and "Edit with" ([e6f13be](https://github.com/amigo-labs/amigo-blinzel/commit/e6f13be693a2a26c945e8538ece58ef85f915ee2))
+* screenshots on Windows, "Open with"/"Edit with", automated releases ([52dae81](https://github.com/amigo-labs/amigo-blinzel/commit/52dae811ca54558f46e49a23fe232d683bf20a49))
+* **website:** light-table redesign, SEO metadata and platform download ([98d7658](https://github.com/amigo-labs/amigo-blinzel/commit/98d7658b58d7edaa2a86b833a4c3e00755d7fec4))
+* **website:** light-table redesign, SEO metadata, platform download ([37bb4b5](https://github.com/amigo-labs/amigo-blinzel/commit/37bb4b50f127dfa8f2083cf62790bd248f564e73))
+
+## Changelog
+
 ## The first version (0.1.0)
 
 The first version.
