@@ -53,6 +53,8 @@ pub struct Args {
     pub exit_after_first_frame: bool,
     /// Started at sign-in: hidden, tray icon only (resident mode).
     pub resident: bool,
+    /// Test: take a screenshot of the whole desktop into this PNG, exit.
+    pub capture_test: Option<PathBuf>,
 }
 
 pub fn parse_args() -> Args {
@@ -65,6 +67,7 @@ pub fn parse_args() -> Args {
             Some("--json") => a.json = it.next().map(PathBuf::from),
             Some("--exit-after-first-frame") => a.exit_after_first_frame = true,
             Some("--resident") => a.resident = true,
+            Some("--capture-test") => a.capture_test = it.next().map(PathBuf::from),
             _ => a.file = Some(PathBuf::from(arg)),
         }
     }
@@ -143,6 +146,18 @@ pub fn run() -> i32 {
     let args = parse_args();
     if let Some(dir) = &args.bench {
         return bench::run(dir, args.warp, args.json.as_deref());
+    }
+    if let Some(out) = &args.capture_test {
+        return match crate::screenshot::capture_test(out) {
+            Ok((w, h)) => {
+                println!("{}: {w}x{h}", out.display());
+                0
+            }
+            Err(e) => {
+                eprintln!("capture: {e}");
+                1
+            }
+        };
     }
     let settings = settings_store::load();
     let lang = settings
@@ -380,6 +395,7 @@ pub fn run() -> i32 {
 
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let resident_mode = settings.resident;
+    let screenshot_hotkey = settings.screenshot_hotkey;
     let mut app = App::new(
         WinHost { hwnd },
         device,
@@ -417,6 +433,9 @@ pub fn run() -> i32 {
     if resident_mode {
         resident::add_tray(hwnd);
         resident::refresh_autostart();
+        if screenshot_hotkey {
+            crate::screenshot::set_hotkey(hwnd, true);
+        }
     }
     if args.resident {
         // Nothing to show. This version starts fine (see update::on_start);

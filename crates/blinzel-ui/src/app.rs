@@ -88,6 +88,28 @@ pub enum Action {
     Activate,
     Uncloak,
     Quit,
+    /// The system's "Open with" choice for a file.
+    OpenWith(PathBuf),
+    /// Start `editor` with `file`.
+    EditWith {
+        editor: PathBuf,
+        file: PathBuf,
+    },
+    /// Ask for an editor program (then [`App::editor_chosen`]); `then`
+    /// is the file to open with it.
+    ChooseEditor {
+        then: Option<PathBuf>,
+    },
+    /// Take a screenshot: pick a region (or window), or the whole monitor
+    /// under the pointer at once.
+    Capture {
+        whole_screen: bool,
+    },
+    /// Register or drop the global screenshot key.
+    SetScreenshotHotkey(bool),
+    /// Ask for the screenshot folder (then
+    /// [`App::screenshot_folder_picked`]).
+    PickScreenshotFolder,
 }
 
 /// A cutout to save (selection, otherwise the view crop).
@@ -1529,6 +1551,7 @@ impl<B: Backend> App<B> {
         match key {
             Letter('G') if !ctrl => return Some(self.command(Cmd::ToggleGrid)),
             Letter('T') if !ctrl => return Some(self.command(Cmd::ToggleFilmstrip)),
+            Letter('E') if !ctrl => return Some(self.command(Cmd::EditWith)),
             _ => {}
         }
         let overflow = self.layout().map(|l| l.overflows).unwrap_or(false);
@@ -1661,6 +1684,8 @@ impl<B: Backend> App<B> {
             color_management: self.settings.color_management,
             filmstrip: self.settings.filmstrip,
             grid: self.browse.grid.is_some(),
+            screenshot_hotkey: self.settings.screenshot_hotkey,
+            screenshot_clipboard: self.settings.screenshot_clipboard,
         }
     }
 
@@ -1779,8 +1804,53 @@ impl<B: Backend> App<B> {
             Cmd::ToggleResident => {
                 self.settings.resident = !self.settings.resident;
                 settings_store::save(&self.settings);
-                vec![Action::SetResident(self.settings.resident)]
+                let on = self.settings.resident;
+                vec![
+                    Action::SetResident(on),
+                    Action::SetScreenshotHotkey(on && self.settings.screenshot_hotkey),
+                ]
             }
+            Cmd::ToggleScreenshotHotkey => {
+                // The key lives in the resident instance: turning it on
+                // turns resident mode on too.
+                let on = !(self.settings.screenshot_hotkey && self.settings.resident);
+                self.settings.screenshot_hotkey = on;
+                let mut actions = Vec::new();
+                if on && !self.settings.resident {
+                    self.settings.resident = true;
+                    actions.push(Action::SetResident(true));
+                }
+                settings_store::save(&self.settings);
+                actions.push(Action::SetScreenshotHotkey(on));
+                actions
+            }
+            Cmd::ToggleScreenshotClipboard => {
+                self.settings.screenshot_clipboard = !self.settings.screenshot_clipboard;
+                settings_store::save(&self.settings);
+                vec![]
+            }
+            Cmd::ScreenshotFolder => vec![Action::PickScreenshotFolder],
+            Cmd::Capture => vec![Action::Capture {
+                whole_screen: false,
+            }],
+            Cmd::CaptureScreen => vec![Action::Capture { whole_screen: true }],
+            Cmd::OpenWith => match &self.current {
+                Some(c) => vec![Action::OpenWith(c.path.clone())],
+                None => vec![],
+            },
+            Cmd::EditWith => {
+                let Some(file) = self.current.as_ref().map(|c| c.path.clone()) else {
+                    return vec![];
+                };
+                match &self.settings.editor {
+                    Some(e) => vec![Action::EditWith {
+                        editor: PathBuf::from(e),
+                        file,
+                    }],
+                    None => vec![Action::ChooseEditor { then: Some(file) }],
+                }
+            }
+            Cmd::ChooseEditor => vec![Action::ChooseEditor { then: None }],
             Cmd::ToggleAutoUpdate => {
                 self.settings.auto_update = !self.settings.auto_update;
                 settings_store::save(&self.settings);
@@ -2004,6 +2074,25 @@ impl<B: Backend> App<B> {
     }
 
     /// The folder the platform's dialog returned for the batch.
+    /// The editor the user picked; opens `then` with it.
+    pub fn editor_chosen(&mut self, editor: PathBuf, then: Option<PathBuf>) -> Vec<Action> {
+        let Some(e) = editor.to_str().filter(|e| !e.contains(['"', '\n', '\r'])) else {
+            return vec![];
+        };
+        self.settings.editor = Some(e.to_string());
+        settings_store::save(&self.settings);
+        then.map(|file| Action::EditWith { editor, file })
+            .into_iter()
+            .collect()
+    }
+
+    pub fn screenshot_folder_picked(&mut self, folder: PathBuf) {
+        if let Some(d) = folder.to_str().filter(|d| !d.contains(['"', '\n', '\r'])) {
+            self.settings.screenshot_dir = Some(d.to_string());
+            settings_store::save(&self.settings);
+        }
+    }
+
     pub fn batch_folder_picked(&mut self, folder: PathBuf) {
         if let Some(d) = &mut self.dialog {
             d.set_folder(folder);

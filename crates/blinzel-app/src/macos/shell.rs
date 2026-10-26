@@ -512,6 +512,27 @@ impl Shell {
                 NSApplication::sharedApplication(mtm).terminate(None);
                 vec![]
             }
+            Action::OpenWith(file) => {
+                if let Some(app) = pick_app(mtm, tr(Msg::MenuOpenWith)) {
+                    let _ = open_with_app(&app, &file);
+                }
+                vec![]
+            }
+            Action::EditWith { editor, file } => {
+                if let Err(e) = open_with_app(&editor, &file) {
+                    self.app
+                        .show_notice(trf(Msg::EditorFailed, &[("reason", &e)]));
+                }
+                vec![]
+            }
+            Action::ChooseEditor { then } => match pick_app(mtm, tr(Msg::MenuChooseEditor)) {
+                Some(editor) => self.app.editor_chosen(editor, then),
+                None => vec![],
+            },
+            // Screenshots are not on macOS yet (the menu does not offer them).
+            Action::Capture { .. }
+            | Action::SetScreenshotHotkey(_)
+            | Action::PickScreenshotFolder => vec![],
         }
     }
 
@@ -865,6 +886,40 @@ fn url_path(u: &NSURL) -> Option<PathBuf> {
 
 fn open_path(p: &Path) {
     let _ = std::process::Command::new("/usr/bin/open").arg(p).spawn();
+}
+
+/// Asks for an application (in /Applications).
+fn pick_app(mtm: MainThreadMarker, title: &str) -> Option<PathBuf> {
+    let panel = NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseFiles(true);
+    panel.setCanChooseDirectories(false);
+    panel.setAllowsMultipleSelection(false);
+    panel.setTitle(Some(&NSString::from_str(title)));
+    panel.setDirectoryURL(Some(&file_url(Path::new("/Applications"))));
+    (panel.runModal() == NSModalResponseOK)
+        .then(|| panel.URL().and_then(|u| url_path(&u)))
+        .flatten()
+}
+
+/// Opens `file` with an app bundle (through Launch Services) or a program.
+fn open_with_app(app: &Path, file: &Path) -> Result<(), String> {
+    let status = if app.extension().is_some_and(|e| e == "app") {
+        std::process::Command::new("/usr/bin/open")
+            .arg("-a")
+            .arg(app)
+            .arg(file)
+            .status()
+    } else {
+        std::process::Command::new(app)
+            .arg(file)
+            .spawn()
+            .map(|_| Default::default())
+    };
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(_) => Err(format!("{} cannot open the file", app.display())),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Writes the licence texts next to the cache and opens them.

@@ -61,6 +61,29 @@ pub fn open_file(hwnd: HWND) -> Option<PathBuf> {
     }
 }
 
+/// A program (the editor for "Edit with…").
+pub fn open_program(hwnd: HWND) -> Option<PathBuf> {
+    ensure_sta();
+    unsafe {
+        let dlg: IFileOpenDialog =
+            CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let title = wide(tr(Msg::MenuChooseEditor));
+        let _ = dlg.SetTitle(PCWSTR(title.as_ptr()));
+        let (n, s) = (wide("*.exe"), wide("*.exe"));
+        let filters = [COMDLG_FILTERSPEC {
+            pszName: PCWSTR(n.as_ptr()),
+            pszSpec: PCWSTR(s.as_ptr()),
+        }];
+        dlg.SetFileTypes(&filters).ok()?;
+        dlg.Show(Some(hwnd)).ok()?;
+        let item = dlg.GetResult().ok()?;
+        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = name.to_string().ok().map(PathBuf::from);
+        CoTaskMemFree(Some(name.0 as *const _));
+        path
+    }
+}
+
 /// A folder (the batch dialog's output).
 pub fn pick_folder(hwnd: HWND) -> Option<PathBuf> {
     use windows::Win32::UI::Shell::FOS_PICKFOLDERS;

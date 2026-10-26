@@ -32,6 +32,14 @@ pub struct Settings {
     /// bottom in workspace coordinates (`GetWindowPlacement`).
     pub window: Option<[i32; 4]>,
     pub maximized: bool,
+    /// The Print key takes screenshots (in resident mode).
+    pub screenshot_hotkey: bool,
+    /// Where screenshots go; `None`: the system's screenshot folder.
+    pub screenshot_dir: Option<String>,
+    /// Screenshots also go to the clipboard.
+    pub screenshot_clipboard: bool,
+    /// The program "Edit with…" starts with the image.
+    pub editor: Option<String>,
 }
 
 impl Default for Settings {
@@ -50,6 +58,10 @@ impl Default for Settings {
             filmstrip: false,
             window: None,
             maximized: false,
+            screenshot_hotkey: true,
+            screenshot_dir: None,
+            screenshot_clipboard: false,
+            editor: None,
         }
     }
 }
@@ -66,6 +78,13 @@ fn parse_rect(v: &str) -> Option<[i32; 4]> {
 
 fn unquote(v: &str) -> Option<&str> {
     v.strip_prefix('"').and_then(|v| v.strip_suffix('"'))
+}
+
+/// A path setting: no line breaks or quotes (which a path cannot hold on
+/// Windows and the file could not store), not empty.
+fn path_value(v: Option<&str>) -> Option<String> {
+    v.filter(|v| !v.is_empty() && !v.contains(['"', '\n', '\r']))
+        .map(str::to_owned)
 }
 
 fn parse_color(s: &str) -> Option<[u8; 3]> {
@@ -88,7 +107,6 @@ impl Settings {
                 continue;
             };
             let (key, value) = (key.trim(), value.trim());
-            // Colour values contain '#', so re-read them from the raw line.
             match key {
                 "view_mode" => {
                     if let Some(m) = unquote(value).and_then(ViewMode::from_key) {
@@ -117,15 +135,30 @@ impl Settings {
                 "filmstrip" => s.filmstrip = value.parse().unwrap_or(s.filmstrip),
                 "window" => s.window = parse_rect(value).or(s.window),
                 "maximized" => s.maximized = value.parse().unwrap_or(s.maximized),
+                "screenshot_hotkey" => {
+                    s.screenshot_hotkey = value.parse().unwrap_or(s.screenshot_hotkey)
+                }
+                "screenshot_clipboard" => {
+                    s.screenshot_clipboard = value.parse().unwrap_or(s.screenshot_clipboard)
+                }
                 _ => {}
             }
         }
+        // Colours and paths may contain '#': read them from the raw line.
         for line in text.lines() {
-            if let Some((key, value)) = line.split_once('=')
-                && key.trim() == "background"
-                && let Some(c) = unquote(value.trim()).and_then(parse_color)
-            {
-                s.background = c;
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = unquote(value.trim());
+            match key.trim() {
+                "background" => {
+                    if let Some(c) = value.and_then(parse_color) {
+                        s.background = c;
+                    }
+                }
+                "screenshot_dir" => s.screenshot_dir = path_value(value),
+                "editor" => s.editor = path_value(value),
+                _ => {}
             }
         }
         s
@@ -133,10 +166,16 @@ impl Settings {
 
     pub fn to_text(&self) -> String {
         let [r, g, b] = self.background;
-        let window = match self.window {
+        let mut optional = match self.window {
             Some([l, t, r, b]) => format!("window = {l},{t},{r},{b}\n"),
             None => String::new(),
         };
+        if let Some(d) = &self.screenshot_dir {
+            optional += &format!("screenshot_dir = \"{d}\"\n");
+        }
+        if let Some(e) = &self.editor {
+            optional += &format!("editor = \"{e}\"\n");
+        }
         format!(
             "# amigo-blinzel settings\n\
              view_mode = \"{}\"\n\
@@ -152,7 +191,9 @@ impl Settings {
              color_management = {}\n\
              filmstrip = {}\n\
              maximized = {}\n\
-             {window}",
+             screenshot_hotkey = {}\n\
+             screenshot_clipboard = {}\n\
+             {optional}",
             self.view.mode.key(),
             self.view.no_upscale,
             self.language.as_deref().unwrap_or("auto"),
@@ -165,6 +206,8 @@ impl Settings {
             self.color_management,
             self.filmstrip,
             self.maximized,
+            self.screenshot_hotkey,
+            self.screenshot_clipboard,
         )
     }
 }
@@ -192,6 +235,10 @@ mod tests {
             filmstrip: true,
             window: Some([-1900, 30, 200, 1000]),
             maximized: true,
+            screenshot_hotkey: false,
+            screenshot_dir: Some(r"D:\Bilder #2\Screens".into()),
+            screenshot_clipboard: true,
+            editor: Some(r"C:\Program Files\paint.net\paintdotnet.exe".into()),
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
         // Broken rects are ignored.

@@ -120,6 +120,18 @@ jobs:
           $p = Start-Process -FilePath target/release/blinzel.exe -ArgumentList 'testdata/generated/jpeg-24mp-420.jpg','--exit-after-first-frame','--json','bench-startup-windows.json' -Wait -PassThru -NoNewWindow
           if (Test-Path bench-startup-windows.json) { Get-Content bench-startup-windows.json }
           exit $p.ExitCode
+      # Screenshots: the desktop through GDI into a PNG (no overlay).
+      - name: Screenshot capture test
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target/release/blinzel.exe -ArgumentList '--capture-test','capture.png' -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          $b = [IO.File]::ReadAllBytes("$PWD/capture.png")
+          $sig = [BitConverter]::ToString($b[0..7])
+          $w = ([int]$b[16] -shl 24) + ([int]$b[17] -shl 16) + ([int]$b[18] -shl 8) + $b[19]
+          $h = ([int]$b[20] -shl 24) + ([int]$b[21] -shl 16) + ([int]$b[22] -shl 8) + $b[23]
+          "capture.png: $w x $h, $($b.Length) bytes" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+          if ($sig -ne '89-50-4E-47-0D-0A-1A-0A' -or $w -lt 640 -or $h -lt 480) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -129,6 +141,7 @@ jobs:
             target/release/blinzel.exe
             target/release/blinzel.pdb
             target/warp-golden/
+            capture.png
 
   windows-arm64:
     name: Windows ARM64 (cross build)

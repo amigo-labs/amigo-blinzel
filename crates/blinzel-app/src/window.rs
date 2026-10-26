@@ -33,7 +33,7 @@ use crate::backend::{
 };
 use crate::instance::Request;
 use crate::resident::{self, WM_TRAY};
-use crate::{clipboard, instance, menu, platform};
+use crate::{clipboard, instance, menu, platform, screenshot};
 
 thread_local! {
     pub static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -512,6 +512,31 @@ fn handle(
             actions.extend(resident::on_tray(wp, lp));
             done
         }
+        WM_HOTKEY if screenshot::is_hotkey(wp) => {
+            actions.push(Action::Capture {
+                whole_screen: false,
+            });
+            done
+        }
+        screenshot::WM_SCREENSHOT => {
+            let result = unsafe { Box::from_raw(lp.0 as *mut Result<PathBuf, String>) };
+            match *result {
+                Ok(path) => {
+                    actions.extend(app.open(path));
+                    if app.settings.screenshot_clipboard {
+                        actions.extend(app.command(blinzel_ui::menu::Cmd::Copy));
+                    }
+                    actions.push(Action::Wake { opened: true });
+                }
+                Err(e) => {
+                    app.show_notice(screenshot::failure(&e));
+                    unsafe {
+                        SetTimer(Some(hwnd), TIMER_NOTICE, 3500, None);
+                    }
+                }
+            }
+            done
+        }
         WM_DROPFILES => {
             let drop = HDROP(wp.0 as *mut _);
             let mut buf = [0u16; 32768];
@@ -560,7 +585,7 @@ fn handle(
 }
 
 /// The UI's key for a virtual-key code.
-fn key_of(vk: u16) -> Option<Key> {
+pub(crate) fn key_of(vk: u16) -> Option<Key> {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     Some(match VIRTUAL_KEY(vk) {
         VK_LEFT => Key::Left,
@@ -752,7 +777,44 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::TrayMenu { x, y } => match menu::show_tray(hwnd, x, y) {
-            Some(cmd) => with_app(|a| a.command(cmd)).unwrap_or_default(),
+            Some(cmd) => {
+                use blinzel_ui::menu::Cmd;
+                if matches!(cmd, Cmd::Capture | Cmd::CaptureScreen) {
+                    screenshot::let_menu_fade();
+                }
+                with_app(|a| a.command(cmd)).unwrap_or_default()
+            }
+            None => vec![],
+        },
+        Action::Capture { whole_screen } => {
+            screenshot::start(hwnd, whole_screen);
+            vec![]
+        }
+        Action::SetScreenshotHotkey(on) => {
+            if !screenshot::set_hotkey(hwnd, on) {
+                with_app(|a| a.show_notice(screenshot::hotkey_taken()));
+                unsafe {
+                    SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                }
+            }
+            vec![]
+        }
+        Action::PickScreenshotFolder => {
+            if let Some(dir) = crate::dialogs::pick_folder(hwnd) {
+                with_app(|a| a.screenshot_folder_picked(dir));
+            }
+            vec![]
+        }
+        Action::OpenWith(file) => {
+            screenshot::open_with(hwnd, &file);
+            vec![]
+        }
+        Action::EditWith { editor, file } => {
+            screenshot::edit_with(hwnd, &editor, &file);
+            vec![]
+        }
+        Action::ChooseEditor { then } => match crate::dialogs::open_program(hwnd) {
+            Some(editor) => with_app(|a| a.editor_chosen(editor, then)).unwrap_or_default(),
             None => vec![],
         },
         Action::Wake { opened } => wake(hwnd, opened),
