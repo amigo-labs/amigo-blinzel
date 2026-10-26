@@ -7,11 +7,13 @@
 //! aspect ratio if asked, resample in linear light ([`resample`]), turn
 //! into display orientation, sharpen, encode with the source's EXIF
 //! ([`meta`]) and ICC profile, and write atomically under a name from a
-//! pattern ([`naming`]).
+//! pattern ([`naming`]), planned up front ([`plan`]) so a preview shows
+//! the names the run writes.
 
 pub mod encode;
 pub mod meta;
 pub mod naming;
+pub mod plan;
 pub mod resample;
 mod rows;
 pub mod run;

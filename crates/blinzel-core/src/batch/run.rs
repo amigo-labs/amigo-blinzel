@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
-use super::naming::{self, Claims, Fields};
+use super::naming::Claims;
+use super::plan::{self, Item};
 use super::rows::Rows;
 use super::{Job, codec_for, encode, geometry, meta, resample, sharpen};
 use crate::decode::{self, DecodeError, Probe, Request};
@@ -19,6 +20,11 @@ use crate::selection::orient_bgra;
 pub trait Source: Sync {
     fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError>;
     fn decode(&self, data: &[u8], req: Request) -> Result<Image, DecodeError>;
+    /// Seconds the local clock was ahead of UTC at `t` (file dates);
+    /// UTC unless the platform knows better.
+    fn utc_offset(&self, _t: std::time::SystemTime) -> i32 {
+        0
+    }
 }
 
 /// Native decoders only.
@@ -97,9 +103,10 @@ impl Budget {
 
 /// Resizes `files`, reporting each result through `progress` (called from
 /// worker threads). Files not started when `cancel` is set are skipped.
+/// Planned targets ([`plan::targets`]) are kept free for their file.
 pub fn run(
     job: &Job,
-    files: &[PathBuf],
+    files: &[Item],
     source: &dyn Source,
     opts: &Options,
     progress: &(dyn Fn(Progress) + Sync),
@@ -108,6 +115,9 @@ pub fn run(
     let next = AtomicUsize::new(0);
     let (done, failed) = (AtomicUsize::new(0), AtomicUsize::new(0));
     let claims = Claims::default();
+    for t in files.iter().filter_map(|f| f.target.clone()) {
+        claims.reserve(t);
+    }
     let budget = Budget {
         used: Mutex::new(0),
         freed: Condvar::new(),
@@ -122,8 +132,9 @@ pub fn run(
                         break;
                     }
                     let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(path) = files.get(i) else { break };
-                    let r = decode::guard(|| Ok(one(job, path, i + 1, source, &claims, &budget)))
+                    let Some(item) = files.get(i) else { break };
+                    let path = &item.source;
+                    let r = decode::guard(|| Ok(one(job, item, i + 1, source, &claims, &budget)))
                         .unwrap_or_else(|e| Err(e.to_string()));
                     progress(match r {
                         Ok((output, bytes)) => {
@@ -159,12 +170,13 @@ pub fn run(
 /// Resizes one file; returns the output path and its size in bytes.
 fn one(
     job: &Job,
-    path: &Path,
+    item: &Item,
     index: usize,
     source: &dyn Source,
     claims: &Claims,
     budget: &Budget,
 ) -> Result<(PathBuf, u64), String> {
+    let path = &item.source;
     let data = std::fs::read(path).map_err(|e| e.to_string())?;
     let probe = source.probe(&data).map_err(|e| e.to_string())?;
     let stored = (probe.width, probe.height);
@@ -227,60 +239,47 @@ fn one(
         .map(|p| &p.bytes[..]);
     let bytes = encode::encode(&px, w, h, codec, &job.quality, exif.as_deref(), icc)?;
 
-    let date = source_exif
-        .as_deref()
-        .and_then(meta::date_taken)
-        .or_else(|| {
-            std::fs::metadata(path)
-                .and_then(|m| m.modified())
-                .ok()
-                .map(naming::date_of)
-        })
-        .unwrap_or_default();
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy())
-        .unwrap_or_default();
-    let ext = path
-        .extension()
-        .map(|s| s.to_string_lossy())
-        .unwrap_or_default();
-    let base = naming::render(
-        &job.pattern,
-        &Fields {
-            name: &stem,
-            ext: &ext,
-            index,
-            width: w,
-            height: h,
-            date: &date,
-        },
-    )?;
-    let dir = path.parent().unwrap_or(Path::new(".")).join(&job.out_dir);
+    let date = plan::date_of(source_exif.as_deref(), path, source);
+    let base = plan::base_name(job, path, index, (w, h), date)?;
+    let dir = plan::out_dir(job, path);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let out = write_new(&dir, &base, codec.extension(), &bytes, claims)?;
+    // The planned name, unless the format turned out otherwise.
+    let ext = codec.extension();
+    let planned = item
+        .target
+        .as_deref()
+        .filter(|t| t.extension().is_some_and(|e| e == ext));
+    let out = write_new(&dir, &base, ext, &bytes, planned, claims)?;
     Ok((out, bytes.len() as u64))
 }
 
-/// Writes `bytes` to a new file `dir/base.ext` (numbered if taken): a
-/// temporary file first, then linked to its name, which fails instead of
-/// replacing a file that appeared meanwhile.
+/// Writes `bytes` to a new file: `planned` if given, else `dir/base.ext`
+/// (numbered if taken). A temporary file first, then linked to its name,
+/// which fails instead of replacing a file that appeared meanwhile.
 fn write_new(
     dir: &Path,
     base: &str,
     ext: &str,
     bytes: &[u8],
+    planned: Option<&Path>,
     claims: &Claims,
 ) -> Result<PathBuf, String> {
-    let tmp = dir.join(format!(".{base}.{}.blinzel-tmp", std::process::id()));
+    // One temporary file per write: files of a batch may share a name.
+    static WRITES: AtomicUsize = AtomicUsize::new(0);
+    let n = WRITES.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(".{base}.{}-{n}.blinzel-tmp", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let mut planned = planned.map(Path::to_path_buf);
     let result = loop {
-        let target = claims.claim(dir, base, ext);
+        let target = planned
+            .take()
+            .unwrap_or_else(|| claims.claim(dir, base, ext));
         match std::fs::hard_link(&tmp, &target) {
             Ok(()) => break Ok(target),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             // File systems without hard links (FAT, some network shares):
             // the claim checked the name a moment ago.
+            Err(_) if std::fs::symlink_metadata(&target).is_ok() => continue,
             Err(_) => match std::fs::rename(&tmp, &target) {
                 Ok(()) => return Ok(target),
                 Err(e) => break Err(format!("{}: {e}", target.display())),
@@ -348,7 +347,7 @@ mod tests {
             ..Job::default()
         };
         let events = Mutex::new(Vec::new());
-        let files = vec![a.clone(), broken.clone(), a.clone()];
+        let files: Vec<Item> = [&a, &broken, &a].map(|p| p.clone().into()).into();
         let sum = run(
             &job,
             &files,
@@ -391,11 +390,78 @@ mod tests {
             let p = decode::probe(&file).unwrap();
             assert_eq!((p.width, p.height), (150, 100));
             let exif = meta::read_exif(&file, Format::Jpeg).unwrap();
-            assert_eq!(meta::date_taken(&exif).as_deref(), Some("2024-05-17"));
+            assert_eq!(
+                meta::date_taken(&exif)
+                    .map(|s| s.format("YYYY-MM-DD"))
+                    .as_deref(),
+                Some("2024-05-17")
+            );
         }
         // Only the outputs and the old file: no temporary files left.
         assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 3);
         assert_eq!(std::fs::read(&a).unwrap(), source_png());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn planned_names_are_the_names_written() {
+        let dir = tmp("plan");
+        let sources: Vec<PathBuf> = (0..4).map(|i| dir.join(format!("{i}.png"))).collect();
+        for s in &sources {
+            std::fs::write(s, source_png()).unwrap();
+        }
+        // Same name for all four: only the order decides the numbers.
+        let job = Job {
+            size: Size::Width(60),
+            pattern: "run_{date:DD.MM.YYYY_hh-mm-ss}".into(),
+            ..Job::default()
+        };
+        let infos: Vec<_> = sources
+            .iter()
+            .map(|s| plan::inspect(s, &Native).unwrap())
+            .collect();
+        let pairs: Vec<(&Path, &plan::SourceInfo)> =
+            sources.iter().map(PathBuf::as_path).zip(&infos).collect();
+        let targets: Vec<PathBuf> = plan::targets(&job, &pairs)
+            .into_iter()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(targets[0], dir.join("resized/run_17.05.2024_10-11-12.png"));
+        assert_eq!(
+            targets[3],
+            dir.join("resized/run_17.05.2024_10-11-12 (4).png")
+        );
+        let items: Vec<Item> = sources
+            .iter()
+            .zip(&targets)
+            .map(|(s, t)| Item {
+                source: s.clone(),
+                target: Some(t.clone()),
+            })
+            .collect();
+        let written = Mutex::new(vec![None; items.len()]);
+        run(
+            &job,
+            &items,
+            &Native,
+            &Options {
+                threads: 4,
+                ..Options::default()
+            },
+            &|p| {
+                if let Progress::Done { index, output, .. } = p {
+                    written.lock().unwrap()[index] = Some(output);
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        let written: Vec<PathBuf> = written
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(written, targets);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -406,7 +472,7 @@ mod tests {
         std::fs::write(&a, source_png()).unwrap();
         let sum = run(
             &Job::default(),
-            &[a.clone(), a.clone()],
+            &[a.clone().into(), a.clone().into()],
             &Native,
             &Options::default(),
             &|_| {},
@@ -451,7 +517,7 @@ mod tests {
         let out = Mutex::new(None);
         run(
             &job,
-            std::slice::from_ref(&src),
+            &[src.clone().into()],
             &Native,
             &Options::default(),
             &|p| {

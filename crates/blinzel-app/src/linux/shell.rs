@@ -939,7 +939,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             WindowEvent::KeyboardInput { event, .. } => self.key(el, &event),
             WindowEvent::DroppedFile(path) => {
-                let actions = self.app.as_mut().unwrap().open(path);
+                let actions = self.app.as_mut().unwrap().files_dropped(vec![path]);
                 self.run(el, actions);
             }
             _ => {}

@@ -418,6 +418,41 @@ impl Services for WinServices {
         crate::run::system_language()
     }
 
+    /// The time zone's offset at `t` itself (summer or winter time then,
+    /// not now).
+    fn utc_offset(&self, t: std::time::SystemTime) -> i32 {
+        use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+        use windows::Win32::System::Time::{
+            FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+        };
+        // FILETIME ticks (100 ns since 1601) of the Unix epoch.
+        const EPOCH: i64 = 116_444_736_000_000_000;
+        let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) else {
+            return 0;
+        };
+        let ticks = EPOCH + (d.as_nanos() / 100) as i64;
+        let ft = FILETIME {
+            dwLowDateTime: ticks as u32,
+            dwHighDateTime: (ticks >> 32) as u32,
+        };
+        let (mut utc, mut local, mut out) = (
+            SYSTEMTIME::default(),
+            SYSTEMTIME::default(),
+            FILETIME::default(),
+        );
+        let ok = unsafe {
+            FileTimeToSystemTime(&ft, &mut utc).is_ok()
+                && SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_ok()
+                && SystemTimeToFileTime(&local, &mut out).is_ok()
+        };
+        if !ok {
+            return 0;
+        }
+        let local_ticks = ((out.dwHighDateTime as i64) << 32) | out.dwLowDateTime as i64;
+        // Whole seconds: SYSTEMTIME drops the sub-millisecond part.
+        ((local_ticks - ticks) as f64 / 10_000_000.0).round() as i32
+    }
+
     fn wants_early_image(&self) -> bool {
         self.hwnd.load(Ordering::Relaxed) != 0
     }

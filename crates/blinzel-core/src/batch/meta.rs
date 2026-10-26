@@ -12,6 +12,7 @@
 //!
 //! Every read is bounds-checked; a malformed block yields `None`.
 
+use super::naming::Stamp;
 use crate::exif::{Entry, Tiff};
 use crate::format::Format;
 
@@ -111,21 +112,43 @@ fn isobmff_box<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
     None
 }
 
-/// The capture date as `YYYY-MM-DD` (DateTimeOriginal).
-pub fn date_taken(tiff: &[u8]) -> Option<String> {
+/// The capture time (DateTimeOriginal, `YYYY:MM:DD hh:mm:ss`); the time
+/// is midnight where only the date is readable.
+pub fn date_taken(tiff: &[u8]) -> Option<Stamp> {
     let t = Tiff::new(tiff)?;
     let (ifd0, _) = t.ifd(t.first_ifd()?)?;
     let exif = t.int(ifd0.iter().find(|e| e.tag == EXIF_IFD)?)? as usize;
     let (entries, _) = t.ifd(exif)?;
     let e = entries.iter().find(|e| e.tag == DATE_TAKEN && e.typ == 2)?;
-    let s = tiff.get(t.payload(e)?)?;
-    let s = std::str::from_utf8(s.get(..10)?).ok()?;
-    let b = s.as_bytes();
-    let ok = b.iter().enumerate().all(|(i, c)| match i {
-        4 | 7 => *c == b':' || *c == b'-',
-        _ => c.is_ascii_digit(),
-    });
-    (ok && &s[..4] != "0000").then(|| format!("{}-{}-{}", &s[..4], &s[5..7], &s[8..10]))
+    let b = tiff.get(t.payload(e)?)?;
+    let num = |r: std::ops::Range<usize>| -> Option<u16> {
+        let d = b.get(r)?;
+        if !d.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(d).ok()?.parse().ok()
+    };
+    let sep = |i: usize, ok: &[u8]| b.get(i).is_some_and(|c| ok.contains(c));
+    if !(sep(4, b":-") && sep(7, b":-")) {
+        return None;
+    }
+    let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    if year == 0 || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let time = (sep(10, b" T") && sep(13, b":") && sep(16, b":"))
+        .then(|| Some((num(11..13)?, num(14..16)?, num(17..19)?)))
+        .flatten()
+        .filter(|&(h, m, s)| h < 24 && m < 60 && s < 61)
+        .unwrap_or_default();
+    Some(Stamp {
+        year,
+        month: month as u8,
+        day: day as u8,
+        hour: time.0 as u8,
+        minute: time.1 as u8,
+        second: time.2 as u8,
+    })
 }
 
 /// One entry to write: tag, type, count and the value bytes in little
@@ -341,7 +364,12 @@ pub(crate) mod tests {
     #[test]
     fn rewrite_drops_what_must_go_and_keeps_the_rest() {
         let src = sample();
-        assert_eq!(date_taken(&src).as_deref(), Some("2024-05-17"));
+        assert_eq!(
+            date_taken(&src)
+                .map(|s| s.format("YYYY-MM-DD hh:mm:ss"))
+                .as_deref(),
+            Some("2024-05-17 10:11:12")
+        );
         let out = rewrite(&src, (1600, 1200), false).unwrap();
         let t = Tiff::new(&out).unwrap();
         assert!(t.little_endian());
@@ -362,7 +390,12 @@ pub(crate) mod tests {
         let (e, _) = t.ifd(exif).unwrap();
         assert_eq!(t.int(&e[1]), Some(1600));
         assert_eq!(t.int(&e[2]), Some(1200));
-        assert_eq!(date_taken(&out).as_deref(), Some("2024-05-17"));
+        assert_eq!(
+            date_taken(&out)
+                .map(|s| s.format("YYYY-MM-DD hh:mm:ss"))
+                .as_deref(),
+            Some("2024-05-17 10:11:12")
+        );
         assert!(!out.windows(4).any(|w| w == b"junk"));
         assert!(!out.windows(4).any(|w| w == [0xFF, 0xD8, 0xFF, 0xD9]));
         assert!(out.len() < src.len());

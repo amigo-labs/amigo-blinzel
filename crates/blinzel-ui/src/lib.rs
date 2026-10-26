@@ -6,6 +6,7 @@
 pub mod app;
 pub mod backend;
 pub mod batch_dialog;
+pub mod batch_files;
 pub mod browse;
 pub mod chrome;
 pub mod color;

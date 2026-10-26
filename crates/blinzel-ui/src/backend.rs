@@ -150,6 +150,11 @@ pub trait Services: Send + Sync + 'static {
     /// Where the thumbnail cache lives.
     fn cache_dir(&self) -> Option<PathBuf>;
     fn system_language(&self) -> Lang;
+    /// Seconds the local clock was ahead of UTC at `t` (file dates in
+    /// batch names); UTC unless the platform knows better.
+    fn utc_offset(&self, _t: std::time::SystemTime) -> i32 {
+        0
+    }
     /// The first decoded image while the GPU is still starting (Windows
     /// shows it through GDI meanwhile).
     fn early_image(&self, _img: &Arc<Image>, _probe: &Probe) {}

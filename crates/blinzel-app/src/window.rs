@@ -540,11 +540,15 @@ fn handle(
         WM_DROPFILES => {
             let drop = HDROP(wp.0 as *mut _);
             let mut buf = [0u16; 32768];
-            let n = unsafe { DragQueryFileW(drop, 0, Some(&mut buf)) } as usize;
+            let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
+            let paths: Vec<PathBuf> = (0..count)
+                .filter_map(|i| {
+                    let n = unsafe { DragQueryFileW(drop, i, Some(&mut buf)) } as usize;
+                    (n > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..n])))
+                })
+                .collect();
             unsafe { DragFinish(drop) };
-            if n > 0 {
-                actions.extend(app.open(PathBuf::from(String::from_utf16_lossy(&buf[..n]))));
-            }
+            actions.extend(app.files_dropped(paths));
             done
         }
         WM_RENDERFORMAT => {
