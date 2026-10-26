@@ -1,21 +1,22 @@
 <!-- title: Funktionen -->
+<!-- description: Bedienung, Tastenkürzel, Bildschirmfotos und Formate von amigo-blinzel, und woher die Geschwindigkeit kommt. -->
 <h2>Bedienung</h2>
 <p>Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰), rechts oben Minimieren, Maximieren und Schließen; auf dem Mac stehen dort die Fensterknöpfe des Systems, das Menü rechts und zusätzlich in der Menüleiste. Alles andere steckt im Menü oder liegt auf einer Taste; auf dem Mac gilt ⌘ statt Strg.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Taste / Maus</th><th>Aktion</th></tr></thead>
 <tbody>
-<tr><td>→ / Leertaste, ← / Rück</td><td>nächstes / vorheriges Bild</td></tr>
-<tr><td>Pos1 / Ende</td><td>erstes / letztes Bild</td></tr>
-<tr><td>1 / 2 / 3</td><td>Fenster an Bild anpassen / Bild an Fenster anpassen / 100 %</td></tr>
-<tr><td>Mausrad, + / −, 0</td><td>Zoom um den Cursor, zurücksetzen</td></tr>
-<tr><td>Strg+C / Strg+X</td><td>Auswahl kopieren / Ansicht zuschneiden</td></tr>
-<tr><td>Strg+S</td><td>Ausschnitt speichern unter (JPEG verlustfrei, wo möglich; auch PNG, WebP, AVIF)</td></tr>
-<tr><td>G, Strg+Klick, Strg+A</td><td>Raster aller Bilder, Bilder markieren</td></tr>
-<tr><td>Strg+B</td><td><a href="/de/batch">Größe ändern</a> (markierte Bilder oder der ganze Ordner)</td></tr>
-<tr><td>E</td><td>Bearbeiten mit dem eingestellten Editor (z. B. Paint.NET, GIMP, Photoshop); „Öffnen mit…“ im Menü</td></tr>
-<tr><td>R / L</td><td>drehen (nur Ansicht)</td></tr>
-<tr><td>F11, Doppelklick</td><td>Vollbild</td></tr>
-<tr><td>Entf</td><td>in den Papierkorb</td></tr>
+<tr><td><kbd>→</kbd> / <kbd>Leertaste</kbd>, <kbd>←</kbd> / <kbd>Rück</kbd></td><td>nächstes / vorheriges Bild</td></tr>
+<tr><td><kbd>Pos1</kbd> / <kbd>Ende</kbd></td><td>erstes / letztes Bild</td></tr>
+<tr><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td><td>Fenster an Bild anpassen / Bild an Fenster anpassen / 100 %</td></tr>
+<tr><td>Mausrad, <kbd>+</kbd> / <kbd>−</kbd>, <kbd>0</kbd></td><td>Zoom um den Cursor, zurücksetzen</td></tr>
+<tr><td><kbd>Strg</kbd>+<kbd>C</kbd> / <kbd>Strg</kbd>+<kbd>X</kbd></td><td>Auswahl kopieren / Ansicht zuschneiden</td></tr>
+<tr><td><kbd>Strg</kbd>+<kbd>S</kbd></td><td>Ausschnitt speichern unter (JPEG verlustfrei, wo möglich; auch PNG, WebP, AVIF)</td></tr>
+<tr><td><kbd>G</kbd>, <kbd>Strg</kbd>+Klick, <kbd>Strg</kbd>+<kbd>A</kbd></td><td>Raster aller Bilder, Bilder markieren</td></tr>
+<tr><td><kbd>Strg</kbd>+<kbd>B</kbd></td><td><a href="/de/batch">Größe ändern</a> (markierte Bilder oder der ganze Ordner)</td></tr>
+<tr><td><kbd>E</kbd></td><td>Bearbeiten mit dem eingestellten Editor (z. B. Paint.NET, GIMP, Photoshop); „Öffnen mit…“ im Menü</td></tr>
+<tr><td><kbd>R</kbd> / <kbd>L</kbd></td><td>drehen (nur Ansicht)</td></tr>
+<tr><td><kbd>F11</kbd>, Doppelklick</td><td>Vollbild</td></tr>
+<tr><td><kbd>Entf</kbd></td><td>in den Papierkorb</td></tr>
 </tbody>
 </table></div>
 <h2>Bildschirmfotos (Windows)</h2>
@@ -23,7 +24,11 @@
 <h2>Bilddateien bleiben unberührt</h2>
 <p>amigo-blinzel verändert keine Bilddatei. Ausschnitte werden nur über „Speichern unter“ als neue Datei geschrieben. Bei JPEG-Quellen werden die Daten dabei, wenn möglich, verlustfrei übernommen statt neu kodiert.</p>
 <h2>Formate</h2>
-<p>JPEG, PNG, GIF, BMP, TIFF, WebP, AVIF und JPEG XL mit eigenen Decodern auf jeder Plattform. HEIC und Kamera-RAW unter Windows über die installierten Windows-Codecs, unter macOS über ImageIO (HEIC mit Apples Hardware-Decoder), unter Linux RAW über die eingebetteten Vorschauen.</p>
+<div class="formats">
+<div><h3>Eigene Decoder, auf jeder Plattform</h3><ul class="badges"><li>JPEG</li><li>PNG</li><li>GIF</li><li>BMP</li><li>TIFF</li><li>WebP</li><li>AVIF</li><li>JPEG XL</li></ul></div>
+<div><h3>Über das System</h3><ul class="badges system"><li>HEIC</li><li>Kamera-RAW</li></ul></div>
+</div>
+<p class="note">HEIC und Kamera-RAW unter Windows über die installierten Windows-Codecs, unter macOS über ImageIO (HEIC mit Apples Hardware-Decoder), unter Linux RAW über die eingebetteten Vorschauen.</p>
 <h2>Woher die Geschwindigkeit kommt</h2>
 <ul>
 <li>Decodieren in Bildschirmauflösung: JPEGs werden per DCT-Skalierung direkt in YCbCr-Ebenen decodiert; Farbumrechnung und Skalierung übernimmt die Grafikkarte.</li>
