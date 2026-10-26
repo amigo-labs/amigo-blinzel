@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "blinzel-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arboard",
  "blinzel-core",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "blinzel-bench"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "blinzel-core",
  "blinzel-jpeg",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "blinzel-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "blinzel-jpeg",
  "ed25519-compact",
@@ -377,18 +377,18 @@ dependencies = [
 
 [[package]]
 name = "blinzel-i18n"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "blinzel-jpeg"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "blinzel-race"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "blinzel-core",
  "block2 0.6.2",
@@ -406,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "blinzel-release"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "blinzel-core",
  "ed25519-compact",
@@ -416,14 +416,14 @@ dependencies = [
 
 [[package]]
 name = "blinzel-site"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "blinzel-core",
 ]
 
 [[package]]
 name = "blinzel-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "blinzel-core",
  "blinzel-i18n",
