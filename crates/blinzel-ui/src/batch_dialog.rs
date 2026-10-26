@@ -1,20 +1,23 @@
 //! The batch dialog: resize many images at once (`blinzel_core::batch`).
 //! A modal panel drawn over the viewer, with the same controls on every
-//! platform. It edits a [`Job`], hands it to the app to run, then shows
-//! the progress and the result.
+//! platform. Images and folders are dropped onto it ([`BatchFiles`], which
+//! shows the name every copy will get); it edits a [`Job`], hands both to
+//! the app to run, then shows the progress and the result.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 
-use blinzel_core::batch::naming::{self, Fields};
+use blinzel_core::batch::naming;
+use blinzel_core::batch::plan::Item;
 use blinzel_core::batch::run::{Progress, Summary};
 use blinzel_core::batch::{Codec, Job, Output, Sharpen, Size};
 use blinzel_core::geom::Rect;
 use blinzel_i18n::{Msg, PluralMsg, tr, trf, trp};
 
 use crate::backend::{Canvas, Key};
+use crate::batch_files::{BatchFiles, Inspected, ROW, file_name};
 use crate::widgets::{self, Painter};
 
 /// Messages from the running batch.
@@ -29,8 +32,10 @@ pub enum Outcome {
     Unchanged,
     Redraw,
     Close,
-    /// Run `job` over `files`.
-    Start(Job, Vec<PathBuf>),
+    /// Run `job` over `items`.
+    Start(Job, Vec<Item>),
+    /// Read these files' headers (then [`BatchDialog::inspecting`]).
+    Inspect(Vec<PathBuf>),
     /// Ask the platform for a folder (then [`BatchDialog::set_folder`]).
     PickFolder,
     OpenFolder(PathBuf),
@@ -46,6 +51,8 @@ enum Field {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Hit {
+    Remove(usize),
+    Clear,
     Mode(usize),
     Format(usize),
     NoEnlarge,
@@ -81,6 +88,10 @@ const FORMATS: [Option<Codec>; 5] = [
     Some(Codec::Avif),
 ];
 
+/// The placeholders, under the name field (not translated: they are
+/// what is typed).
+const PLACEHOLDERS: &str = "{name}  {n:3}  {w}  {h}  {date}  {date:DD.MM.YYYY_hh-mm}";
+
 struct Run {
     total: usize,
     done: usize,
@@ -94,9 +105,7 @@ struct Run {
 }
 
 pub struct BatchDialog {
-    files: Vec<PathBuf>,
-    /// The files are the grid's marked ones (else the folder's).
-    marked: bool,
+    files: BatchFiles,
     mode: usize,
     first: String,
     second: String,
@@ -119,12 +128,17 @@ pub struct BatchDialog {
     run: Option<Run>,
 }
 
+impl Default for BatchDialog {
+    fn default() -> Self {
+        BatchDialog::new()
+    }
+}
+
 impl BatchDialog {
-    pub fn new(files: Vec<PathBuf>, marked: bool) -> BatchDialog {
+    pub fn new() -> BatchDialog {
         let job = Job::default();
         BatchDialog {
-            files,
-            marked,
+            files: BatchFiles::default(),
             mode: 0,
             first: "1920".into(),
             second: "1080".into(),
@@ -147,10 +161,9 @@ impl BatchDialog {
         }
     }
 
-    /// The same settings for a new set of files (the dialog opened again).
-    pub fn reopen(mut self, files: Vec<PathBuf>, marked: bool) -> BatchDialog {
-        self.files = files;
-        self.marked = marked;
+    /// The same settings with an empty list (the dialog opened again).
+    pub fn reopen(mut self) -> BatchDialog {
+        self.files.clear();
         self.run = None;
         self.focus = None;
         self.hover = None;
@@ -163,6 +176,25 @@ impl BatchDialog {
 
     pub fn set_folder(&mut self, folder: PathBuf) {
         self.folder = folder.to_string_lossy().into_owned();
+    }
+
+    /// Dropped files and folders, for the list (not while a batch runs or
+    /// shows its result).
+    pub fn add(&mut self, paths: Vec<PathBuf>) -> Outcome {
+        if self.run.is_some() {
+            return Outcome::Unchanged;
+        }
+        let new = self.files.add(paths);
+        if new.is_empty() {
+            Outcome::Unchanged
+        } else {
+            Outcome::Inspect(new)
+        }
+    }
+
+    /// Header results for an [`Outcome::Inspect`] come through `rx`.
+    pub fn inspecting(&mut self, rx: Receiver<Inspected>) {
+        self.files.inspecting(rx);
     }
 
     fn two_values(&self) -> bool {
@@ -215,11 +247,11 @@ impl BatchDialog {
         (!self.folder.trim().is_empty() && job.validate().is_ok()).then_some(job)
     }
 
-    /// The batch started: progress comes through `rx`.
-    pub fn started(&mut self, rx: Receiver<RunMsg>, cancel: Arc<AtomicBool>) {
+    /// The batch started over `total` files: progress comes through `rx`.
+    pub fn started(&mut self, total: usize, rx: Receiver<RunMsg>, cancel: Arc<AtomicBool>) {
         self.focus = None;
         self.run = Some(Run {
-            total: self.files.len(),
+            total,
             done: 0,
             failed: 0,
             errors: Vec::new(),
@@ -230,12 +262,13 @@ impl BatchDialog {
         });
     }
 
-    /// Takes the progress messages that arrived. True if any did.
+    /// Takes the header results and progress messages that arrived. True
+    /// if any did.
     pub fn poll(&mut self) -> bool {
+        let mut any = self.files.poll();
         let Some(run) = &mut self.run else {
-            return false;
+            return any;
         };
-        let mut any = false;
         while let Ok(m) = run.rx.try_recv() {
             any = true;
             match m {
@@ -248,11 +281,7 @@ impl BatchDialog {
                 RunMsg::Progress(Progress::Failed { source, error, .. }) => {
                     run.failed += 1;
                     if run.errors.len() < 4 {
-                        let name = source
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        run.errors.push(format!("{name}: {error}"));
+                        run.errors.push(format!("{}: {error}", file_name(&source)));
                     }
                 }
                 RunMsg::Finished(s) => run.summary = Some(s),
@@ -303,6 +332,8 @@ impl BatchDialog {
             self.focus = None;
         }
         match h {
+            Hit::Remove(i) => self.files.remove(i),
+            Hit::Clear => self.files.clear(),
             Hit::Mode(i) => self.mode = i,
             Hit::Format(i) => self.format = i,
             Hit::NoEnlarge => self.no_enlarge = !self.no_enlarge,
@@ -349,12 +380,25 @@ impl BatchDialog {
         self.dragging_slider = false;
     }
 
+    /// The wheel scrolls the file list under it.
+    pub fn wheel(&mut self, p: (f64, f64), delta: i16) -> Outcome {
+        if self.run.is_none() && self.files.wheel(p, delta) {
+            Outcome::Redraw
+        } else {
+            Outcome::Unchanged
+        }
+    }
+
     fn start(&mut self) -> Outcome {
-        match self.job() {
-            Some(job) if self.run.is_none() && !self.files.is_empty() => {
-                Outcome::Start(job, self.files.clone())
-            }
-            _ => Outcome::Unchanged,
+        if self.run.is_some() {
+            return Outcome::Unchanged;
+        }
+        let Some(job) = self.job() else {
+            return Outcome::Unchanged;
+        };
+        match self.files.items(job.clone()) {
+            Some(items) => Outcome::Start(job, items),
+            None => Outcome::Unchanged,
         }
     }
 
@@ -414,40 +458,6 @@ impl BatchDialog {
         Outcome::Redraw
     }
 
-    /// The first file's output name, as an example of the pattern.
-    fn example(&self) -> Option<String> {
-        let first = self.files.first()?;
-        let stem = first.file_stem()?.to_string_lossy();
-        let ext = first
-            .extension()
-            .map(|e| e.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let a = Self::number(&self.first).unwrap_or(0);
-        let b = Self::number(&self.second).unwrap_or(a);
-        let date = naming::date_of(std::time::SystemTime::now());
-        let name = naming::render(
-            &self.pattern,
-            &Fields {
-                name: &stem,
-                ext: &ext,
-                index: 1,
-                width: a,
-                height: b,
-                date: &date,
-            },
-        )
-        .ok()?;
-        let out_ext = match FORMATS[self.format] {
-            Some(c) => c.extension().to_string(),
-            None => match ext.to_ascii_lowercase().as_str() {
-                "jpeg" | "jpg" | "jpe" | "jfif" => "jpg".into(),
-                e @ ("png" | "webp" | "avif") => e.into(),
-                _ => "jpg".into(),
-            },
-        };
-        Some(format!("{name}.{out_ext}"))
-    }
-
     /// Draws the dialog centred in `client` (physical pixels) and
     /// remembers where its controls are.
     pub fn draw(&mut self, canvas: &mut impl Canvas, client: (f64, f64), scale: f64) {
@@ -456,11 +466,14 @@ impl BatchDialog {
         // Dim the viewer behind the modal panel.
         p.fill(Rect::new(0.0, 0.0, client.0, client.1), 0.0, widgets::SCRIM);
         let pad = p.px(24.0);
-        let w = p.px(600.0).min(client.0 - p.px(16.0));
-        // Edit mode: title, size, format, quality, options, name with
-        // example, folder, footer (see the layout below).
+        let w = p.px(640.0).min(client.0 - p.px(16.0));
+        // Edit mode: title, file list, size, format, quality, options,
+        // name with placeholders, folder, footer (see the layout below).
+        // The list takes what the window leaves, within limits.
+        let fixed = p.px(640.0);
+        let list_h = (client.1 - p.px(16.0) - fixed).clamp(p.px(96.0), p.px(ROW * 9.0 + 12.0));
         let h = match &self.run {
-            None => p.px(600.0),
+            None => fixed + list_h,
             Some(r) if r.summary.is_some() => p.px(230.0) + p.px(20.0) * r.errors.len() as f64,
             Some(_) => p.px(200.0),
         };
@@ -476,21 +489,37 @@ impl BatchDialog {
         let mut y = panel.y + pad;
         let (_, th) = p.text(tr(Msg::BatchTitle), 18.0, x0, y, widgets::FG);
         y += th + p.px(4.0);
-        let source = format!(
-            "{} · {}",
-            trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]),
-            tr(if self.marked {
-                Msg::BatchMarked
-            } else {
-                Msg::BatchWholeFolder
-            })
-        );
-        let (_, sh) = p.text(&source, 13.0, x0, y, widgets::DIM);
-        y += sh + p.px(18.0);
-
+        let count = trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]);
+        let (_, sh) = p.text(&count, 13.0, x0, y, widgets::DIM);
         let hover = self.hover;
+        if self.run.is_none() && !self.files.is_empty() {
+            let clear = tr(Msg::BatchClear);
+            let (cw, _) = p.text_size(clear, 13.0);
+            let cr = Rect::new(x0 + inner - cw, y, cw, sh);
+            let color = if hover == Some(Hit::Clear) {
+                widgets::FG
+            } else {
+                widgets::ACCENT
+            };
+            p.text_in(clear, 13.0, &cr, 0.0, color);
+            hits.push((cr, Hit::Clear));
+        }
+        y += sh + p.px(10.0);
+
         let footer_h = p.px(34.0);
         let footer_y = panel.bottom() - pad - footer_h;
+        if self.run.is_none() {
+            let hover_remove = match hover {
+                Some(Hit::Remove(i)) => Some(i),
+                _ => None,
+            };
+            let job = self.job();
+            let list = Rect::new(x0, y, inner, list_h);
+            for (r, i) in self.files.draw(&mut p, list, job, hover_remove) {
+                hits.push((r, Hit::Remove(i)));
+            }
+            y += list_h + p.px(18.0);
+        }
         match &self.run {
             None => {
                 // Size.
@@ -642,17 +671,8 @@ impl BatchDialog {
                 );
                 hits.push((pf, Hit::Field(Field::Pattern)));
                 y += fh + p.px(4.0);
-                if let Some(ex) = self.example() {
-                    let (_, eh) = p.text(
-                        &trf(Msg::BatchExample, &[("file", &ex)]),
-                        12.0,
-                        x0,
-                        y,
-                        widgets::FAINT,
-                    );
-                    y += eh;
-                }
-                y += p.px(12.0);
+                let (_, eh) = p.text(PLACEHOLDERS, 12.0, x0, y, widgets::FAINT);
+                y += eh + p.px(12.0);
                 let (_, lh) = p.text(tr(Msg::BatchFolder), 12.5, x0, y, widgets::DIM);
                 y += lh + p.px(6.0);
                 let bw = p.px(40.0);
@@ -669,7 +689,7 @@ impl BatchDialog {
                 hits.push((pick, Hit::PickFolder));
 
                 // Footer.
-                let ok = self.job().is_some() && !self.files.is_empty();
+                let ok = self.job().is_some() && self.files.ready();
                 let (start, cancel) = (tr(Msg::BatchStart), tr(Msg::BatchCancel));
                 let (sw, cw) = (p.button_width(start), p.button_width(cancel));
                 let sr = Rect::new(panel.right() - pad - sw, footer_y, sw, footer_h);
@@ -731,9 +751,20 @@ impl BatchDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn dialog() -> BatchDialog {
-        BatchDialog::new(vec![PathBuf::from("/photos/IMG_0001.HEIC")], true)
+        let mut d = BatchDialog::new();
+        d.files.push_ready(
+            "/photos/IMG_0001.HEIC".into(),
+            crate::batch_files::tests::info(),
+        );
+        d
+    }
+
+    fn new_name(d: &mut BatchDialog) -> String {
+        let job = d.job();
+        d.files.texts(job)[0].1.clone()
     }
 
     #[test]
@@ -761,14 +792,32 @@ mod tests {
     }
 
     #[test]
-    fn example_names_follow_the_pattern() {
+    fn new_names_follow_the_pattern() {
         let mut d = dialog();
-        assert_eq!(d.example().as_deref(), Some("IMG_0001.jpg"));
-        d.pattern = "{name}_{w}".into();
+        assert_eq!(new_name(&mut d), "IMG_0001.jpg");
+        d.pattern = "{name}_{w}x{h}".into();
         d.format = 3;
-        assert_eq!(d.example().as_deref(), Some("IMG_0001_1920.webp"));
+        assert_eq!(new_name(&mut d), "IMG_0001_1920x1440.webp", "the real size");
+        d.pattern = "{date:DD.MM.YYYY_hh-mm}_{n:3}".into();
+        assert_eq!(
+            new_name(&mut d),
+            "17.05.2024_09-04_001.webp",
+            "the file's date"
+        );
         d.pattern = "{bad".into();
-        assert!(d.example().is_none() && d.job().is_none());
+        assert_eq!(new_name(&mut d), "–");
+        assert!(d.job().is_none());
+    }
+
+    #[test]
+    fn dropped_files_wait_for_their_headers() {
+        let mut d = BatchDialog::new();
+        assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "nothing to do");
+        let a = std::env::temp_dir().join(format!("blinzel-dialog-{}.jpg", std::process::id()));
+        std::fs::write(&a, b"x").unwrap();
+        assert_eq!(d.add(vec![a.clone()]), Outcome::Inspect(vec![a.clone()]));
+        assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "header still read");
+        std::fs::remove_file(&a).unwrap();
     }
 
     #[test]
@@ -783,9 +832,12 @@ mod tests {
         d.key(Key::Backspace);
         assert_eq!(d.first, "192");
         match d.key(Key::Enter) {
-            Outcome::Start(job, files) => {
+            Outcome::Start(job, items) => {
                 assert_eq!(job.size, Size::LongEdge(192));
-                assert_eq!(files.len(), 1);
+                assert_eq!(
+                    items[0].target.as_deref(),
+                    Some(Path::new("/photos/resized/IMG_0001.jpg"))
+                );
             }
             o => panic!("{o:?}"),
         }
@@ -797,8 +849,9 @@ mod tests {
         let mut d = dialog();
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        d.started(rx, cancel.clone());
+        d.started(1, rx, cancel.clone());
         assert!(d.is_running());
+        assert_eq!(d.add(vec!["/photos/x.jpg".into()]), Outcome::Unchanged);
         tx.send(RunMsg::Progress(Progress::Done {
             index: 0,
             source: "/photos/IMG_0001.HEIC".into(),
@@ -819,7 +872,7 @@ mod tests {
         assert!(!d.is_running());
         assert_eq!(
             d.run.as_ref().unwrap().output.as_deref(),
-            Some(std::path::Path::new("/photos/resized"))
+            Some(Path::new("/photos/resized"))
         );
     }
 }

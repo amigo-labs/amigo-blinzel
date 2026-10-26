@@ -1,11 +1,11 @@
 <!-- title: Batch resizing -->
-<!-- description: Resize whole folders in one go: size, format, metadata and file names, right in the image viewer. -->
-<p class="lead">amigo-blinzel resizes whole folders in one go: for the web, for mail, for the photo book. Right in the viewer, the same on every platform.</p>
+<!-- description: Resize many images at once: size, format, metadata and file names with a preview, right in the image viewer. -->
+<p class="lead">amigo-blinzel resizes many images at once: for the web, for mail, for the photo book. Right in the viewer, the same on every platform.</p>
 <h2>How it works</h2>
 <ol>
-<li>Mark images in the grid (G): Ctrl+click, Shift+click, Ctrl+A. Without marks the dialog takes the whole folder.</li>
 <li>Menu → “Resize images…” or Ctrl+B (⌘B on a Mac).</li>
-<li>Choose size, format and names, pick the output folder, start. Progress and a report appear in the dialog; “Open folder” shows the result.</li>
+<li>Drag images or folders from the file manager into the dialog. A folder adds its images, not those of its subfolders. Remove single files with ×.</li>
+<li>Choose size, format and names, pick the output folder, start. The list shows the new name of every file. Progress and a report appear in the dialog; “Open folder” shows the result.</li>
 </ol>
 <h2>Size</h2>
 <ul>
@@ -18,14 +18,15 @@
 <h2>Metadata</h2>
 <p>EXIF is kept and adjusted: orientation set to normal (it is in the pixels then), the new pixel size, without the embedded thumbnail and maker notes. GPS coordinates can be removed. The colour profile is carried over unchanged, also into WebP and AVIF.</p>
 <h2>File names</h2>
-<p>A pattern of placeholders sets the name; the dialog shows the first name as an example.</p>
+<p>A pattern of placeholders sets the name. The list in the dialog shows old → new for every file, with the real size and date; exactly these names are written.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Placeholder</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td><code>{name}</code></td><td>source name without extension</td></tr>
 <tr><td><code>{n}</code>, <code>{n:3}</code></td><td>running number, optionally with leading zeros</td></tr>
 <tr><td><code>{w}</code>, <code>{h}</code></td><td>width and height of the result</td></tr>
-<tr><td><code>{date}</code></td><td>date taken from EXIF, else the modification date</td></tr>
+<tr><td><code>{date}</code></td><td>date taken from EXIF, else the modification date, as <code>YYYY-MM-DD</code></td></tr>
+<tr><td><code>{date:DD.MM.YYYY_hh-mm}</code></td><td>the same date in your own format: <code>YYYY</code>, <code>YY</code>, <code>MM</code>, <code>DD</code>, <code>hh</code>, <code>mm</code>, <code>ss</code>; everything else stays as typed</td></tr>
 <tr><td><code>{ext}</code></td><td>extension of the source</td></tr>
 </tbody>
 </table></div>

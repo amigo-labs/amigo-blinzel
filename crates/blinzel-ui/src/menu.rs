@@ -387,7 +387,7 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
         tr(Msg::MenuBatch),
         Some(accel(&[ctrl, "B"])),
         false,
-        s.has_images,
+        true,
     ));
     m.push(MenuItem::item(
         Cmd::OpenWith,

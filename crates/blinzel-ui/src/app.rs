@@ -1496,6 +1496,12 @@ impl<B: Backend> App<B> {
     }
 
     pub fn wheel(&mut self, p: (f64, f64), delta: i16) -> Vec<Action> {
+        if self.popup.is_none()
+            && let Some(d) = &mut self.dialog
+        {
+            let o = d.wheel(p, delta);
+            return self.dialog_outcome(o);
+        }
         if self.popup.is_some() || self.dialog.is_some() {
             return vec![];
         }
@@ -1958,41 +1964,27 @@ impl<B: Backend> App<B> {
         })
     }
 
-    /// Opens the batch dialog for the grid's marked images, else the
-    /// folder's.
+    /// Opens the batch dialog with an empty list (files are dropped onto
+    /// it), keeping the last settings.
     fn open_batch(&mut self) {
-        let dir = self.list.dir().to_path_buf();
-        let marked: Vec<PathBuf> = self
-            .browse
-            .grid
-            .as_ref()
-            .map(|g| {
-                (0..self.list.len())
-                    .filter_map(|i| self.list.get(i))
-                    .filter(|e| g.marked.contains(&e.name))
-                    .map(|e| dir.join(&e.name))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let is_marked = !marked.is_empty();
-        let mut files = marked;
-        if files.is_empty() {
-            files = (0..self.list.len())
-                .filter_map(|i| self.list.get(i))
-                .filter(|e| !e.is_placeholder())
-                .map(|e| dir.join(&e.name))
-                .collect();
-        }
-        if files.is_empty()
-            && let Some(c) = &self.current
-        {
-            files.push(c.path.clone());
-        }
         self.dialog = Some(match self.last_dialog.take() {
-            Some(d) => d.reopen(files, is_marked),
-            None => BatchDialog::new(files, is_marked),
+            Some(d) => d.reopen(),
+            None => BatchDialog::new(),
         });
         self.invalidate();
+    }
+
+    /// Files dropped onto the window: into the batch dialog's list while
+    /// it is open, else the first one is shown.
+    pub fn files_dropped(&mut self, paths: Vec<PathBuf>) -> Vec<Action> {
+        if let Some(d) = &mut self.dialog {
+            let o = d.add(paths);
+            return self.dialog_outcome(o);
+        }
+        match paths.into_iter().next() {
+            Some(p) => self.open(p),
+            None => vec![],
+        }
     }
 
     fn dialog_outcome(&mut self, o: batch_dialog::Outcome) -> Vec<Action> {
@@ -2008,8 +2000,13 @@ impl<B: Backend> App<B> {
                 self.invalidate();
                 vec![]
             }
-            O::Start(job, files) => {
-                self.start_batch(job, files);
+            O::Start(job, items) => {
+                self.start_batch(job, items);
+                self.invalidate();
+                vec![]
+            }
+            O::Inspect(paths) => {
+                self.inspect_batch(paths);
                 self.invalidate();
                 vec![]
             }
@@ -2018,30 +2015,44 @@ impl<B: Backend> App<B> {
         }
     }
 
+    /// Reads the headers of files dropped onto the batch dialog in the
+    /// background; results go to the dialog.
+    fn inspect_batch(&mut self, paths: Vec<PathBuf>) {
+        let Some(d) = &mut self.dialog else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        d.inspecting(rx);
+        let services = self.services.clone();
+        let _ = std::thread::Builder::new()
+            .name("blinzel-batch-inspect".into())
+            .spawn(move || {
+                services.tune_thread(false);
+                let source = BatchSource(services.clone());
+                for path in paths {
+                    let info = blinzel_core::decode::guard(|| {
+                        Ok(blinzel_core::batch::plan::inspect(&path, &source))
+                    })
+                    .unwrap_or_else(|e| Err(e.to_string()));
+                    if tx.send((path, info)).is_err() {
+                        return;
+                    }
+                    services.wake(Wake::Batch);
+                }
+            });
+    }
+
     /// Runs a batch in the background; progress goes to the dialog.
-    fn start_batch(&mut self, job: blinzel_core::batch::Job, files: Vec<PathBuf>) {
-        use blinzel_core::batch::run::{self, Options, Source};
+    fn start_batch(
+        &mut self,
+        job: blinzel_core::batch::Job,
+        items: Vec<blinzel_core::batch::plan::Item>,
+    ) {
+        use blinzel_core::batch::run::{self, Options};
         use std::sync::atomic::AtomicBool;
-
-        struct Platform<S>(Arc<S>);
-
-        impl<S: Services> Source for Platform<S> {
-            fn probe(&self, data: &[u8]) -> Result<Probe, blinzel_core::decode::DecodeError> {
-                self.0.probe(data)
-            }
-            fn decode(
-                &self,
-                data: &[u8],
-                req: blinzel_core::decode::Request,
-            ) -> Result<blinzel_core::pixel::Image, blinzel_core::decode::DecodeError> {
-                self.0.decode(data, req, 1)
-            }
-        }
 
         let Some(d) = &mut self.dialog else { return };
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        d.started(rx, cancel.clone());
+        d.started(items.len(), rx, cancel.clone());
         let services = self.services.clone();
         let _ = std::thread::Builder::new()
             .name("blinzel-batch".into())
@@ -2052,10 +2063,10 @@ impl<B: Backend> App<B> {
                     let _ = tx2.lock().unwrap().send(RunMsg::Progress(p));
                     services.wake(Wake::Batch);
                 };
-                let source = Platform(services.clone());
+                let source = BatchSource(services.clone());
                 let summary = run::run(
                     &job,
-                    &files,
+                    &items,
                     &source,
                     &Options::default(),
                     &progress,
@@ -2179,6 +2190,25 @@ impl<B: Backend> App<B> {
 
 /// Reads the source, exports the cutout and writes it atomically (temp
 /// file + rename). Returns the message for the notice toast.
+/// The platform's decoders and clock for batch work.
+struct BatchSource<S>(Arc<S>);
+
+impl<S: Services> blinzel_core::batch::run::Source for BatchSource<S> {
+    fn probe(&self, data: &[u8]) -> Result<Probe, blinzel_core::decode::DecodeError> {
+        self.0.probe(data)
+    }
+    fn decode(
+        &self,
+        data: &[u8],
+        req: blinzel_core::decode::Request,
+    ) -> Result<blinzel_core::pixel::Image, blinzel_core::decode::DecodeError> {
+        self.0.decode(data, req, 1)
+    }
+    fn utc_offset(&self, t: std::time::SystemTime) -> i32 {
+        self.0.utc_offset(t)
+    }
+}
+
 pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> String {
     use blinzel_core::export::{SaveFormat, export};
     use blinzel_i18n::{Msg, trf};

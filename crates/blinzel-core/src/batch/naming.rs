@@ -3,7 +3,8 @@
 //! Placeholders: `{name}` (source name without extension), `{ext}` (source
 //! extension), `{n}` or `{n:3}` (running number, optionally zero-padded),
 //! `{w}` and `{h}` (output size), `{date}` (capture date from EXIF, else
-//! the file's modification date, as `YYYY-MM-DD`).
+//! the file's modification time, as `YYYY-MM-DD`) or `{date:FORMAT}` with
+//! `YYYY`, `YY`, `MM`, `DD`, `hh`, `mm` and `ss` in FORMAT.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,48 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_PATTERN: &str = "{name}";
+const DEFAULT_DATE: &str = "YYYY-MM-DD";
+
+/// A wall-clock date and time (local time, as the camera or the file
+/// system's clock showed it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stamp {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
+
+impl Stamp {
+    /// `fmt` with `YYYY`, `YY`, `MM`, `DD`, `hh`, `mm` and `ss` replaced;
+    /// everything else is kept as it is.
+    pub fn format(&self, fmt: &str) -> String {
+        let mut out = String::new();
+        let mut rest = fmt;
+        'outer: while let Some(c) = rest.chars().next() {
+            for (token, value) in [
+                ("YYYY", format!("{:04}", self.year)),
+                ("YY", format!("{:02}", self.year % 100)),
+                ("MM", format!("{:02}", self.month)),
+                ("DD", format!("{:02}", self.day)),
+                ("hh", format!("{:02}", self.hour)),
+                ("mm", format!("{:02}", self.minute)),
+                ("ss", format!("{:02}", self.second)),
+            ] {
+                if let Some(r) = rest.strip_prefix(token) {
+                    out.push_str(&value);
+                    rest = r;
+                    continue 'outer;
+                }
+            }
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+        out
+    }
+}
 
 /// What a pattern can refer to.
 pub struct Fields<'a> {
@@ -20,7 +63,8 @@ pub struct Fields<'a> {
     pub index: usize,
     pub width: u32,
     pub height: u32,
-    pub date: &'a str,
+    /// None: `{date}` stays empty.
+    pub date: Option<Stamp>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -31,7 +75,8 @@ enum Part<'a> {
     Index(usize),
     Width,
     Height,
-    Date,
+    /// With its format.
+    Date(&'a str),
 }
 
 fn parse(pattern: &str) -> Result<Vec<Part<'_>>, String> {
@@ -51,9 +96,13 @@ fn parse(pattern: &str) -> Result<Vec<Part<'_>>, String> {
             "n" => Part::Index(0),
             "w" => Part::Width,
             "h" => Part::Height,
-            "date" => Part::Date,
-            t => match t.strip_prefix("n:").map(str::parse::<usize>) {
-                Some(Ok(d)) if d <= 9 => Part::Index(d),
+            "date" => Part::Date(DEFAULT_DATE),
+            t => match (t.strip_prefix("n:"), t.strip_prefix("date:")) {
+                (Some(d), _) => match d.parse::<usize>() {
+                    Ok(d) if d <= 9 => Part::Index(d),
+                    _ => return Err(format!("unknown placeholder {{{t}}}")),
+                },
+                (_, Some(f)) if !f.is_empty() => Part::Date(f),
                 _ => return Err(format!("unknown placeholder {{{t}}}")),
             },
         });
@@ -92,7 +141,11 @@ pub fn render(pattern: &str, f: &Fields) -> Result<String, String> {
             Part::Index(d) => out.push_str(&format!("{:0d$}", f.index)),
             Part::Width => out.push_str(&f.width.to_string()),
             Part::Height => out.push_str(&f.height.to_string()),
-            Part::Date => out.push_str(f.date),
+            Part::Date(fmt) => {
+                if let Some(s) = f.date {
+                    out.push_str(&s.format(fmt));
+                }
+            }
         }
     }
     let clean: String = out
@@ -111,11 +164,12 @@ pub fn render(pattern: &str, f: &Fields) -> Result<String, String> {
     })
 }
 
-/// `YYYY-MM-DD` (UTC) of a point in time.
-pub fn date_of(t: SystemTime) -> String {
-    let days = t
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() / 86_400) as i64;
+/// A point in time as a wall clock `utc_offset` seconds ahead of UTC
+/// shows it.
+pub fn stamp_of(t: SystemTime, utc_offset: i32) -> Stamp {
+    let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64 + utc_offset as i64;
+    let days = secs.div_euclid(86_400);
+    let time = secs.rem_euclid(86_400);
     // Howard Hinnant's civil_from_days.
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -126,7 +180,14 @@ pub fn date_of(t: SystemTime) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}")
+    Stamp {
+        year: y.clamp(0, 9999) as u16,
+        month: m as u8,
+        day: d as u8,
+        hour: (time / 3600) as u8,
+        minute: (time / 60 % 60) as u8,
+        second: (time % 60) as u8,
+    }
 }
 
 /// Names handed out in this batch but maybe not on disk yet.
@@ -134,6 +195,11 @@ pub fn date_of(t: SystemTime) -> String {
 pub struct Claims(Mutex<HashSet<PathBuf>>);
 
 impl Claims {
+    /// Keeps `p` from being handed out by [`Claims::claim`].
+    pub fn reserve(&self, p: PathBuf) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(p);
+    }
+
     /// A path `dir/base.ext` that neither exists nor was handed out, with
     /// ` (2)`, ` (3)`, … appended as needed.
     pub fn claim(&self, dir: &Path, base: &str, ext: &str) -> PathBuf {
@@ -158,6 +224,15 @@ impl Claims {
 mod tests {
     use super::*;
 
+    const TAKEN: Stamp = Stamp {
+        year: 2024,
+        month: 5,
+        day: 17,
+        hour: 9,
+        minute: 4,
+        second: 30,
+    };
+
     fn fields() -> Fields<'static> {
         Fields {
             name: "IMG_0042",
@@ -165,7 +240,7 @@ mod tests {
             index: 7,
             width: 1600,
             height: 1200,
-            date: "2024-05-17",
+            date: Some(TAKEN),
         }
     }
 
@@ -183,20 +258,48 @@ mod tests {
     }
 
     #[test]
+    fn date_formats() {
+        let f = fields();
+        assert_eq!(render("{date:DD.MM.YYYY}", &f).unwrap(), "17.05.2024");
+        assert_eq!(
+            render("{date:YYYYMMDD_hhmmss}", &f).unwrap(),
+            "20240517_090430"
+        );
+        assert_eq!(render("{date:YY}-{name}", &f).unwrap(), "24-IMG_0042");
+        assert_eq!(render("{date:hh:mm}", &f).unwrap(), "09_04");
+        assert_eq!(
+            render("{date:Tag DD}", &f).unwrap(),
+            "Tag 17",
+            "other letters stay"
+        );
+        let undated = Fields { date: None, ..f };
+        assert_eq!(render("{date}_{name}", &undated).unwrap(), "_IMG_0042");
+    }
+
+    #[test]
     fn bad_patterns_are_refused() {
         assert!(validate("{name").is_err());
         assert!(validate("{size}").is_err());
         assert!(validate("{n:x}").is_err());
+        assert!(validate("{date:}").is_err());
         assert!(validate("sub/{name}").is_err());
         assert!(validate("").is_err());
         assert!(validate("{name}_{n:4}").is_ok());
+        assert!(validate("{date:DD.MM.YYYY hh-mm}").is_ok());
     }
 
     #[test]
-    fn dates() {
-        assert_eq!(date_of(UNIX_EPOCH), "1970-01-01");
+    fn stamps() {
+        assert_eq!(stamp_of(UNIX_EPOCH, 0).format(DEFAULT_DATE), "1970-01-01");
         let t = UNIX_EPOCH + std::time::Duration::from_secs(1_709_164_800); // 2024-02-29
-        assert_eq!(date_of(t), "2024-02-29");
+        assert_eq!(stamp_of(t, 0).format(DEFAULT_DATE), "2024-02-29");
+        let late = t + std::time::Duration::from_secs(23 * 3600 + 30 * 60 + 5);
+        assert_eq!(stamp_of(late, 0).format("hh:mm:ss"), "23:30:05");
+        // Two hours ahead of UTC (CEST) is already the next day.
+        assert_eq!(
+            stamp_of(late, 2 * 3600).format("YYYY-MM-DD hh:mm"),
+            "2024-03-01 01:30"
+        );
     }
 
     #[test]

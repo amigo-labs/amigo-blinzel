@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+use blinzel_core::batch::plan::Item;
 use blinzel_core::batch::run::{self, Native, Options, Progress};
 use blinzel_core::batch::{Codec, Job, Output, Size};
 
@@ -32,7 +33,7 @@ pub fn batch(args: &[String]) -> Result<(), String> {
         "avif" => Codec::Avif,
         f => return Err(format!("unknown format {f}")),
     };
-    let files = match option(args, "--from") {
+    let files: Vec<PathBuf> = match option(args, "--from") {
         Some(from) => {
             let mut v: Vec<PathBuf> = std::fs::read_dir(from)
                 .map_err(|e| format!("{from}: {e}"))?
@@ -54,11 +55,12 @@ pub fn batch(args: &[String]) -> Result<(), String> {
         out_dir: out.clone(),
         ..Job::default()
     };
+    let items: Vec<Item> = files.iter().cloned().map(Item::from).collect();
     let bytes = AtomicU64::new(0);
     let t = Instant::now();
     let sum = run::run(
         &job,
-        &files,
+        &items,
         &Native,
         &Options {
             threads,

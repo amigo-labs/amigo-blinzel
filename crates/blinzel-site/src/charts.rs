@@ -32,11 +32,10 @@ fn ms(v: f64, sep: &str) -> String {
     }
 }
 
-const OURS: &str = "amigo-blinzel";
-
 /// A horizontal bar chart; `rows` are (label, value, value text). Each row
 /// is a label and its value above a bar on a full-width track, so long
-/// viewer names never collide with the bars on a phone.
+/// viewer names never collide with the bars on a phone. Every viewer
+/// looks the same: the values make the comparison.
 fn bars(title: &str, rows: &[(String, f64, String)]) -> String {
     // Narrow enough that the text stays legible when a phone scales it down.
     const W: f64 = 480.0;
@@ -51,13 +50,12 @@ fn bars(title: &str, rows: &[(String, f64, String)]) -> String {
     for (i, (label, value, text)) in rows.iter().enumerate() {
         let y = ROW * i as f64;
         let w = (W * value / max).max(BAR);
-        let ours = if label == OURS { " ours" } else { "" };
         svg += &format!(
-            "<g class=\"row{ours}\">\
+            "<g class=\"row\">\
              <text x=\"0\" y=\"{:.1}\" class=\"label\">{}</text>\
              <text x=\"{W}\" y=\"{:.1}\" text-anchor=\"end\" class=\"value\">{}</text>\
              <rect x=\"0\" y=\"{:.1}\" width=\"{W}\" height=\"{BAR}\" rx=\"6\" class=\"track\"/>\
-             <rect x=\"0\" y=\"{:.1}\" width=\"{w:.1}\" height=\"{BAR}\" rx=\"6\" class=\"bar{ours}\"/>\
+             <rect x=\"0\" y=\"{:.1}\" width=\"{w:.1}\" height=\"{BAR}\" rx=\"6\" class=\"bar\"/>\
              </g>",
             y + 20.0,
             esc(label),
@@ -144,13 +142,8 @@ pub fn race(
                 t("next")
             );
             for v in vs {
-                let class = if name(v) == OURS {
-                    " class=\"ours\""
-                } else {
-                    ""
-                };
                 html += &format!(
-                    "<tr{class}><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                     esc(&name(v)),
                     esc(v.get("version").and_then(Json::as_str).unwrap_or("?")),
                     cell(v.get("open_warm")),
@@ -207,7 +200,7 @@ pub mod tests {
       ]}"#;
 
     #[test]
-    fn charts_sort_and_highlight() {
+    fn charts_sort_without_highlight() {
         let j = Json::parse(SAMPLE).unwrap();
         let t = |k: &str| -> &'static str {
             match k {
@@ -219,9 +212,9 @@ pub mod tests {
             }
         };
         let svg = race("open_warm", &j, "/race.json", t).unwrap();
-        // Faster first, ours highlighted.
+        // Faster first; no viewer stands out.
         assert!(svg.find("amigo-blinzel").unwrap() < svg.find("ImageGlass").unwrap());
-        assert!(svg.contains("bar ours"));
+        assert!(!svg.contains("ours"));
         assert!(svg.contains("1,80 s") && svg.contains("270 ms"));
         assert!(
             race("open_cold", &j, "/race.json", t)
@@ -231,7 +224,7 @@ pub mod tests {
         let burst = race("burst", &j, "/race.json", t).unwrap();
         assert!(burst.contains("20 / 20") && burst.contains("6 / 20"));
         let table = race("table", &j, "/race.json", t).unwrap();
-        assert!(table.contains("<tr class=\"ours\">"));
+        assert!(!table.contains("ours"));
         assert!(table.contains("href=\"/race.json\""));
         let machine = race("machine", &j, "/race.json", t).unwrap();
         assert!(machine.contains("<dt>Processor</dt>") && machine.contains("<dt>gpu</dt>"));

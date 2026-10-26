@@ -460,8 +460,11 @@ fn open_default_apps() {
     }
 }
 
+/// `None` when re-entered: a button's action (COM in `install_now`,
+/// `ShellExecuteW`) pumps messages while the UI is borrowed, and a panic
+/// inside `wndproc` would abort the process.
 fn with_ui<R>(f: impl FnOnce(&mut Ui) -> R) -> Option<R> {
-    UI.with(|cell| cell.borrow_mut().as_mut().map(f))
+    UI.with(|cell| cell.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
 fn client_point(hwnd: HWND, lp: LPARAM, screen: bool) -> (f64, f64) {
@@ -478,13 +481,15 @@ fn client_point(hwnd: HWND, lp: LPARAM, screen: bool) -> (f64, f64) {
 }
 
 fn press(hwnd: HWND, b: Btn) {
-    let close = with_ui(|ui| {
+    // Re-entered (e.g. Enter while installing): ignore the press.
+    let Some(close) = with_ui(|ui| {
         let close = ui.activate(b);
         ui.hover = None;
         ui.pressed = None;
         close
-    })
-    .unwrap_or(true);
+    }) else {
+        return;
+    };
     unsafe {
         if close {
             let _ = DestroyWindow(hwnd);

@@ -1,11 +1,11 @@
 <!-- title: Stapelverarbeitung -->
-<!-- description: Ganze Ordner in einem Rutsch verkleinern: Größe, Format, Metadaten und Dateinamen, direkt im Bildbetrachter. -->
-<p class="lead">amigo-blinzel verkleinert ganze Ordner in einem Rutsch: für die Website, für Mails, fürs Fotobuch. Direkt im Viewer, auf jeder Plattform gleich.</p>
+<!-- description: Viele Bilder auf einmal verkleinern: Größe, Format, Metadaten und Dateinamen mit Vorschau, direkt im Bildbetrachter. -->
+<p class="lead">amigo-blinzel verkleinert viele Bilder auf einmal: für die Website, für Mails, fürs Fotobuch. Direkt im Viewer, auf jeder Plattform gleich.</p>
 <h2>So geht's</h2>
 <ol>
-<li>Im Raster (G) Bilder markieren: Strg+Klick, Umschalt+Klick, Strg+A. Ohne Markierung nimmt der Dialog den ganzen Ordner.</li>
 <li>Menü → „Größe ändern…“ oder Strg+B (auf dem Mac ⌘B).</li>
-<li>Größe, Format und Namen wählen, Zielordner festlegen, starten. Fortschritt und Bericht erscheinen im Dialog; danach öffnet „Ordner öffnen“ das Ergebnis.</li>
+<li>Bilder oder Ordner aus dem Explorer in den Dialog ziehen. Ein Ordner bringt seine Bilder mit, nicht die seiner Unterordner. Einzelne Dateien lassen sich mit × wieder entfernen.</li>
+<li>Größe, Format und Namen wählen, Zielordner festlegen, starten. Die Liste zeigt für jede Datei den neuen Namen. Fortschritt und Bericht erscheinen im Dialog; danach öffnet „Ordner öffnen“ das Ergebnis.</li>
 </ol>
 <h2>Größe</h2>
 <ul>
@@ -18,14 +18,15 @@
 <h2>Metadaten</h2>
 <p>EXIF bleibt erhalten und wird angepasst: Ausrichtung auf „normal“ (sie steckt dann in den Pixeln), neue Pixelmaße, ohne eingebettetes Vorschaubild und Herstellerdaten. GPS-Koordinaten lassen sich entfernen. Das Farbprofil wird unverändert übernommen, auch in WebP und AVIF.</p>
 <h2>Dateinamen</h2>
-<p>Ein Muster aus Platzhaltern bestimmt den Namen; der Dialog zeigt den ersten Namen als Beispiel.</p>
+<p>Ein Muster aus Platzhaltern bestimmt den Namen. Die Liste im Dialog zeigt für jede Datei alt → neu, mit der echten Größe und dem echten Datum; genau diese Namen werden geschrieben.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Platzhalter</th><th>Bedeutung</th></tr></thead>
 <tbody>
 <tr><td><code>{name}</code></td><td>Name der Quelle ohne Endung</td></tr>
 <tr><td><code>{n}</code>, <code>{n:3}</code></td><td>laufende Nummer, auf Wunsch mit führenden Nullen</td></tr>
 <tr><td><code>{w}</code>, <code>{h}</code></td><td>Breite und Höhe des Ergebnisses</td></tr>
-<tr><td><code>{date}</code></td><td>Aufnahmedatum aus EXIF, sonst Änderungsdatum</td></tr>
+<tr><td><code>{date}</code></td><td>Aufnahmedatum aus EXIF, sonst Änderungsdatum, als <code>YYYY-MM-DD</code></td></tr>
+<tr><td><code>{date:DD.MM.YYYY_hh-mm}</code></td><td>dasselbe Datum im eigenen Format: <code>YYYY</code>, <code>YY</code>, <code>MM</code>, <code>DD</code>, <code>hh</code>, <code>mm</code>, <code>ss</code>; alles andere bleibt, wie getippt</td></tr>
 <tr><td><code>{ext}</code></td><td>Endung der Quelle</td></tr>
 </tbody>
 </table></div>

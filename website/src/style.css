@@ -429,10 +429,6 @@ thead th {
 tbody tr:last-child > * { border-bottom: 0; }
 tbody tr { transition: background-color .15s ease; }
 tbody tr:hover { background: rgba(255, 255, 255, .03); }
-tr.ours { background: color-mix(in srgb, var(--ours) 9%, transparent); }
-tr.ours:hover { background: color-mix(in srgb, var(--ours) 13%, transparent); }
-tr.ours > :first-child { box-shadow: inset 3px 0 0 var(--ours); }
-tr.ours td, tr.ours th { font-weight: 600; }
 
 /* Key column of the controls table. */
 .page-features tbody td:first-child { color: var(--muted); }
@@ -451,7 +447,6 @@ tr.ours td, tr.ours th { font-weight: 600; }
 }
 .features tbody th { background: var(--surface); font-weight: 650; }
 .features thead th:first-child { background: var(--surface-2); }
-.features tr.ours th { background: color-mix(in srgb, var(--ours) 9%, var(--surface)); }
 .features td a { color: inherit; text-decoration: underline dotted color-mix(in srgb, var(--fg) 35%, transparent); text-underline-offset: 4px; }
 .features td a:hover { color: var(--accent); text-decoration: underline solid; }
 @media (min-width: 1200px) {
@@ -517,11 +512,9 @@ tr.ours td, tr.ours th { font-weight: 600; }
 /* Chart text is in SVG units and scales with the chart. */
 .chart text { font-family: var(--sans); font-size: 12px; font-variant-numeric: tabular-nums; }
 .chart .label { fill: var(--fg); font-weight: 500; }
-.chart .value { fill: var(--muted); }
-.chart .ours .label, .chart .ours .value { fill: var(--fg); font-weight: 700; }
+.chart .value { fill: var(--fg); }
 .chart .track { fill: var(--track); }
-.chart .bar { fill: var(--bar); }
-.chart .bar.ours { fill: var(--ours); }
+.chart .bar { fill: var(--ours); }
 .pending {
   display: flex;
   align-items: baseline;
