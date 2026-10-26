@@ -17,6 +17,10 @@ use std::path::{Path, PathBuf};
 
 use blinzel_core::json::Json;
 
+/// Where the site is served: canonical links, Open Graph and the sitemap
+/// need absolute URLs.
+const SITE: &str = "https://blinzel.amigo-labs.dev";
+
 /// The `blinzel-race` reports: placeholder prefix (`{{race:open_warm}}`)
 /// and file in `website/data/`, published next to the pages.
 const RACES: [(&str, &str); 2] = [("race", "race.json"), ("race-macos", "race-macos.json")];
@@ -80,6 +84,8 @@ impl Lang {
         match (self, key) {
             (Lang::De, "lang_name") => "Deutsch",
             (Lang::En, "lang_name") => "English",
+            (Lang::De, "og_locale") => "de_DE",
+            (Lang::En, "og_locale") => "en_US",
             (Lang::De, "skip") => "Zum Inhalt springen",
             (Lang::En, "skip") => "Skip to content",
             (Lang::De, "pending") => {
@@ -132,24 +138,41 @@ impl Lang {
 struct Page {
     slug: &'static str,
     title: String,
+    description: String,
     body: String,
 }
 
-/// Reads a fragment: the first line is `<!-- title: … -->`.
+/// `<!-- key: value -->` on one line.
+fn header<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.trim()
+        .strip_prefix("<!--")?
+        .trim_start()
+        .strip_prefix(key)?
+        .strip_prefix(':')?
+        .strip_suffix("-->")
+        .map(str::trim)
+}
+
+/// Reads a fragment: the first lines are `<!-- title: … -->` and
+/// `<!-- description: … -->` (for search engines and link previews).
 fn read_page(src: &Path, lang: Lang, slug: &'static str) -> Result<Page, String> {
     let path = src.join(lang.code()).join(format!("{slug}.html"));
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let (first, body) = text.split_once('\n').unwrap_or((&text, ""));
-    let title = first
-        .trim()
-        .strip_prefix("<!-- title:")
-        .and_then(|t| t.strip_suffix("-->"))
-        .map(|t| t.trim().to_string())
-        .ok_or_else(|| format!("{}: first line must be <!-- title: … -->", path.display()))?;
+    let mut lines = text.splitn(3, '\n');
+    let mut next = |key: &str| {
+        lines
+            .next()
+            .and_then(|l| header(l, key))
+            .map(str::to_string)
+            .ok_or_else(|| format!("{}: missing <!-- {key}: … -->", path.display()))
+    };
+    let title = next("title")?;
+    let description = next("description")?;
     Ok(Page {
         slug,
         title,
-        body: body.to_string(),
+        description,
+        body: lines.next().unwrap_or("").to_string(),
     })
 }
 
@@ -232,6 +255,12 @@ fn render(layout: &str, lang: Lang, pages: &[Page], page: &Page) -> String {
         .replace("{{version}}", env!("CARGO_PKG_VERSION"))
         .replace("{{heading}}", &heading)
         .replace("{{title}}", &page.title)
+        .replace("{{description}}", &charts::esc(&page.description))
+        .replace("{{site}}", SITE)
+        .replace("{{canonical}}", &format!("{SITE}{}", url(lang, page.slug)))
+        .replace("{{url_de}}", &format!("{SITE}{}", url(Lang::De, page.slug)))
+        .replace("{{url_en}}", &format!("{SITE}{}", url(Lang::En, page.slug)))
+        .replace("{{og_locale}}", lang.t("og_locale"))
         .replace("{{nav}}", &nav)
         .replace("{{footer}}", &footer)
         .replace("{{other_lang_url}}", &url(other, page.slug))
@@ -276,10 +305,18 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
             fs::write(dir.join(format!("{}.html", p.slug)), html).map_err(|e| e.to_string())?;
         }
     }
+    fs::write(dist.join("sitemap.xml"), sitemap()).map_err(|e| e.to_string())?;
+    fs::write(
+        dist.join("robots.txt"),
+        format!("User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n"),
+    )
+    .map_err(|e| e.to_string())?;
     for file in [
         "style.css",
+        "site.js",
         "lang.js",
         "favicon.svg",
+        "og.png",
         "index.html",
         "404.html",
         "_headers",
@@ -294,6 +331,27 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
             .map_err(|e| format!("{}: {e}", race.file))?;
     }
     Ok(dist)
+}
+
+/// Every page in both languages, each with its translations.
+fn sitemap() -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">\n",
+    );
+    for lang in Lang::ALL {
+        for slug in PAGES {
+            xml += &format!("<url><loc>{SITE}{}</loc>", url(lang, slug));
+            for alt in Lang::ALL {
+                xml += &format!(
+                    "<xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\"/>",
+                    alt.code(),
+                    url(alt, slug)
+                );
+            }
+            xml += "</url>\n";
+        }
+    }
+    xml + "</urlset>\n"
 }
 
 fn main() {
@@ -357,20 +415,72 @@ mod tests {
         assert!(!html.contains("reference measurement"));
         assert!(html.contains("href=\"/race.json\"") && html.contains("href=\"/race-macos.json\""));
         assert!(dist.join("race-macos.json").is_file());
-        for lang in ["de", "en"] {
+        for file in [
+            "sitemap.xml",
+            "robots.txt",
+            "site.js",
+            "og.png",
+            "style.css",
+        ] {
+            assert!(dist.join(file).is_file(), "{file}");
+        }
+        let sitemap = fs::read_to_string(dist.join("sitemap.xml")).unwrap();
+        assert_eq!(sitemap.matches("<url>").count(), 2 * PAGES.len());
+        for lang in Lang::ALL {
+            let code = lang.code();
             for p in PAGES {
-                let html = fs::read_to_string(dist.join(lang).join(format!("{p}.html")))
-                    .unwrap_or_else(|e| panic!("{lang}/{p}: {e}"));
+                let html = fs::read_to_string(dist.join(code).join(format!("{p}.html")))
+                    .unwrap_or_else(|e| panic!("{code}/{p}: {e}"));
                 // One heading per page (the start page brings its own), and
                 // the privacy page linked from every page.
-                assert_eq!(html.matches("<h1").count(), 1, "{lang}/{p}");
+                assert_eq!(html.matches("<h1").count(), 1, "{code}/{p}");
                 assert!(
-                    html.contains(&format!("href=\"/{lang}/privacy\"")),
-                    "{lang}/{p}"
+                    html.contains(&format!("href=\"/{code}/privacy\"")),
+                    "{code}/{p}"
                 );
-                assert!(!html.contains("{{"), "{lang}/{p}");
+                assert!(!html.contains("{{"), "{code}/{p}");
+                // Description, canonical link and both translations of
+                // this very page.
+                assert_eq!(html.matches("<meta name=\"description\"").count(), 1);
+                let canonical = format!("<link rel=\"canonical\" href=\"{SITE}{}\">", url(lang, p));
+                assert!(html.contains(&canonical), "{code}/{p}");
+                for alt in Lang::ALL {
+                    let link =
+                        format!("hreflang=\"{}\" href=\"{SITE}{}\"", alt.code(), url(alt, p));
+                    assert!(html.contains(&link), "{code}/{p}: {link}");
+                }
+                // The CSP allows no inline scripts.
+                assert_eq!(
+                    html.matches("<script").count(),
+                    html.matches("<script src=").count(),
+                    "{code}/{p}"
+                );
             }
         }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn pages_need_title_and_description() {
+        let tmp = std::env::temp_dir().join(format!("blinzel-page-{}", std::process::id()));
+        fs::create_dir_all(tmp.join("en")).unwrap();
+        fs::write(
+            tmp.join("en/index.html"),
+            "<!-- title: Home -->\n<!-- description: A \"fast\" viewer -->\n<p>x</p>\n",
+        )
+        .unwrap();
+        let p = read_page(&tmp, Lang::En, "index").unwrap();
+        assert_eq!(
+            (p.title.as_str(), p.description.as_str()),
+            ("Home", "A \"fast\" viewer")
+        );
+        assert_eq!(p.body, "<p>x</p>\n");
+        fs::write(
+            tmp.join("en/index.html"),
+            "<!-- title: Home -->\n<p>x</p>\n",
+        )
+        .unwrap();
+        assert!(read_page(&tmp, Lang::En, "index").is_err());
         let _ = fs::remove_dir_all(&tmp);
     }
 
