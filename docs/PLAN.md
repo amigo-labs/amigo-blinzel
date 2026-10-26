@@ -299,10 +299,13 @@ Die Hüllen setzen dieselben Traits um wie Windows (`Device`, `Canvas`, `Host`, 
 ### Keine Code-Signatur
 
 - ✅ **Entschieden:** Releases werden nicht mit einem Code-Signing-Zertifikat signiert (kein SignPath, kein Authenticode, auf dem Mac keine Notarisierung). Folge: Windows SmartScreen warnt beim ersten Start („Weitere Informationen“ → „Trotzdem ausführen“); die Download-Seite erklärt das.
-- 🟡 Release-Workflow bei Tag `v*` auf GitHub-gehosteten Runnern:
-  1. x64 und ARM64 bauen.
-  2. `SHA256SUMS` erzeugen und mit Ed25519 signieren.
-  3. Release als Entwurf anlegen und veröffentlichen.
+- 🟡 **Releases automatisch über release-please** (wie bei amigo-native):
+  1. Jeder Push auf `main` legt einen Release-PR an oder aktualisiert ihn (`.github/workflows/release-please.yml`). Er enthält die nächste Version in `Cargo.toml` und `Cargo.lock` sowie den `CHANGELOG.md`-Eintrag aus den Conventional Commits seit dem letzten Release. `feat` erhöht vor 1.0 die zweite Stelle, `fix` die dritte; `docs`, `ci`, `chore` usw. lösen kein Release aus.
+  2. Wird der Release-PR gemergt, setzt release-please den Tag `v<version>` und legt das Release als Entwurf mit dem Changelog an.
+  3. Danach baut `release.yml` alle Plattformen, erzeugt `SHA256SUMS`, signiert sie mit Ed25519, hängt die Dateien an und veröffentlicht das Release. Erst dann sehen es die Updater.
+  - `release.yml` lässt sich für einen bestehenden Tag auch von Hand starten.
+  - Konfiguration: `release-please-config.json` und `.release-please-manifest.json`. Das Manifest startet bei 0.0.0, das erste Release wird so 0.1.0. `bootstrap-sha` ist der Merge von PR #22.
+  - Optional das Secret `RELEASE_PLEASE_TOKEN` (fein granulierter PAT mit Schreibrechten für contents und pull-requests), damit auch auf dem Release-PR die CI läuft. Ohne Token muss unter Settings → Actions → General „Allow GitHub Actions to create and approve pull requests“ an sein.
 - ✅ **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest (`276b0fbd4a1f9eb68476f0b8a14c5cc0bab403cbca24bcf07d8cff333d3fa9b7`). Sie ist der einzige Herkunftsnachweis: Der Updater installiert nur, was mit dem Release-Schlüssel signiert ist.
 
 **Umsetzung (Branch `m7-install`):**
