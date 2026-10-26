@@ -1,14 +1,22 @@
-//! amigo-blinzel for Windows: a frameless Win32 window, a Direct3D 11
-//! renderer and a prefetching decode pipeline around `blinzel-core`.
+//! amigo-blinzel's platform shells around `blinzel-ui`: Windows (Win32,
+//! Direct3D 11), Linux (winit, wgpu) and macOS (AppKit, Metal).
+
+#[cfg(unix)]
+pub mod curl;
+#[cfg(unix)]
+pub mod lcms;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
+pub mod notices_text;
+#[cfg(unix)]
+pub mod selfupdate;
 
 #[cfg(windows)]
-pub mod app;
+pub mod backend;
 #[cfg(windows)]
 pub mod bench;
-#[cfg(windows)]
-pub mod browse;
-#[cfg(windows)]
-pub mod chrome;
 #[cfg(windows)]
 pub mod clipboard;
 #[cfg(windows)]
@@ -22,8 +30,6 @@ pub mod gfx;
 #[cfg(windows)]
 pub mod instance;
 #[cfg(windows)]
-pub mod loader;
-#[cfg(windows)]
 pub mod menu;
 #[cfg(windows)]
 pub mod notices;
@@ -34,11 +40,7 @@ pub mod resident;
 #[cfg(windows)]
 pub mod run;
 #[cfg(windows)]
-pub mod settings_store;
-#[cfg(windows)]
 pub mod setup;
-#[cfg(windows)]
-pub mod thumbs;
 #[cfg(windows)]
 pub mod update;
 #[cfg(windows)]

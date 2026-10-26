@@ -4,13 +4,17 @@
 //! blinzel-release keygen <secret-key-file>   new key pair; prints the public key
 //! blinzel-release sign <file> <out.sig>      signs with $RELEASE_SIGNING_KEY (hex seed)
 //! blinzel-release verify <file> <sig> <public-key-hex>
-//! blinzel-release notices [--check]          writes (or checks) THIRD-PARTY-NOTICES.txt
+//! blinzel-release notices [--check]          writes (or checks) THIRD-PARTY-NOTICES*.txt
+//! blinzel-release macos-bundle <out.app> <blinzel>...
+//!                                            the macOS app bundle (universal with
+//!                                            one executable per architecture)
 //! ```
 //!
 //! The secret key is the 32-byte Ed25519 seed as hex. It belongs in the
 //! repository secret `RELEASE_SIGNING_KEY` and nowhere in the repository;
-//! the public key goes into `blinzel-app/src/update.rs` (`RELEASE_KEY`).
+//! the public key goes into `blinzel-core/src/update.rs` (`RELEASE_KEY`).
 
+mod macos;
 mod notices;
 
 use std::fs;
@@ -33,6 +37,10 @@ fn main() {
         ["verify", file, sig, key] => verify(file, sig, key),
         ["notices"] => notices(false),
         ["notices", "--check"] => notices(true),
+        ["macos-bundle", out, exes @ ..] => {
+            let exes: Vec<&Path> = exes.iter().map(Path::new).collect();
+            macos::bundle(Path::new(out), &exes, env!("CARGO_PKG_VERSION"))
+        }
         _ => Err(usage()),
     };
     if let Err(e) = result {
@@ -44,15 +52,16 @@ fn main() {
 fn usage() -> String {
     "usage:\n  blinzel-release keygen <secret-key-file>\n  blinzel-release sign <file> <out.sig>   \
      (secret from $RELEASE_SIGNING_KEY)\n  blinzel-release verify <file> <sig> <public-key-hex>\n  \
-     blinzel-release notices [--check]"
+     blinzel-release notices [--check]\n  \
+     blinzel-release macos-bundle <out.app> <blinzel>..."
         .into()
 }
 
-/// The notices file lives in the workspace root, next to `LICENSE`.
+/// The notices files live in the workspace root, next to `LICENSE`.
 fn notices(check: bool) -> Result<(), String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let root = fs::canonicalize(&root).map_err(|e| format!("{}: {e}", root.display()))?;
-    notices::run(&root, &root.join(notices::FILE), check)
+    notices::run_all(&root, check)
 }
 
 fn keygen(path: &str) -> Result<(), String> {
@@ -71,7 +80,7 @@ fn keygen(path: &str) -> Result<(), String> {
     );
     println!("public key: {pk}");
     println!(
-        "for update.rs: pub const RELEASE_KEY: Option<[u8; 32]> = Some({});",
+        "for blinzel-core/src/update.rs: pub const RELEASE_KEY: Option<[u8; 32]> = Some({});",
         rust_bytes(kp.pk.as_ref())
     );
     Ok(())

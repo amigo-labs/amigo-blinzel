@@ -170,3 +170,34 @@ pub fn ico(sizes: &[u32]) -> Vec<u8> {
     }
     out
 }
+
+/// An ICNS file (the macOS app icon) with PNG images; used by
+/// `blinzel-release macos-bundle`.
+#[allow(dead_code)]
+pub fn icns() -> Vec<u8> {
+    // OSType and pixel size; the @2x types share images with the next
+    // size up.
+    const TYPES: [(&[u8; 4], u32); 10] = [
+        (b"icp4", 16),
+        (b"icp5", 32),
+        (b"ic11", 32),
+        (b"ic12", 64),
+        (b"ic07", 128),
+        (b"ic08", 256),
+        (b"ic13", 256),
+        (b"ic09", 512),
+        (b"ic14", 512),
+        (b"ic10", 1024),
+    ];
+    let mut body = Vec::new();
+    for (kind, size) in TYPES {
+        let image = png(size);
+        body.extend(kind);
+        body.extend(((image.len() + 8) as u32).to_be_bytes());
+        body.extend(image);
+    }
+    let mut out = b"icns".to_vec();
+    out.extend(((body.len() + 8) as u32).to_be_bytes());
+    out.extend(body);
+    out
+}

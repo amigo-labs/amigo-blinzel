@@ -7,7 +7,9 @@
 //! fails when a shipped implementation is beaten by its yardstick.
 //! `blinzel-bench compare <a.json> <b.json>` puts two runs side by side.
 
+mod batch;
 mod compare;
+mod resize;
 mod simd;
 mod thumbs;
 
@@ -33,6 +35,8 @@ fn main() {
         Some("simd-child") => simd::child(&args[1..]),
         Some("jpeg-ab") => jpeg_ab(&args[1..]),
         Some("thumbs") => thumbs::thumbs(&args[1..]),
+        Some("resize") => resize::resize(&args[1..]),
+        Some("batch") => batch::batch(&args[1..]),
         _ => Err(usage()),
     };
     if let Err(e) = result {
@@ -43,7 +47,9 @@ fn main() {
 
 fn usage() -> String {
     "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]\n  blinzel-bench compare <a.json> <b.json>
-  blinzel-bench thumbs <dir> [--count N] [--threads T]".into()
+  blinzel-bench thumbs <dir> [--count N] [--threads T]
+  blinzel-bench resize [--runs N] [--quick]
+  blinzel-bench batch <dir> [--count N] [--threads T] [--format jpeg|png|webp|avif] [--edge E]".into()
 }
 
 fn flag(args: &[String], name: &str) -> bool {

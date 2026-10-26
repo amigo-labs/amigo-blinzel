@@ -589,6 +589,28 @@ pub fn container_profile(data: &[u8]) -> Option<Profile> {
     profile(&colour).ok().flatten()
 }
 
+/// The EXIF block (TIFF) of any HEIF file (HEIC too): the `Exif` item
+/// describing the primary image, or else the first one. The item starts
+/// with the offset of the TIFF header.
+pub fn exif(data: &[u8]) -> Option<Vec<u8>> {
+    let c = Container::parse(data).ok()?;
+    let mut ids: Vec<u32> = c
+        .items
+        .iter()
+        .filter(|(_, item)| &item.kind == b"Exif")
+        .map(|(&id, _)| id)
+        .collect();
+    ids.sort_by_key(|&id| {
+        let describes_primary = c
+            .refs_from(b"cdsc", id)
+            .is_some_and(|to| to.contains(&c.primary));
+        (!describes_primary, id)
+    });
+    let d = c.data(*ids.first()?).ok()?;
+    let skip = u32::from_be_bytes(d.get(..4)?.try_into().ok()?) as usize;
+    d.get(skip.checked_add(4)?..).map(<[u8]>::to_vec)
+}
+
 /// Stored size (cropped), orientation and colour profile, from the
 /// container alone.
 pub fn info(data: &[u8]) -> Result<((u32, u32), Orientation, Option<Profile>)> {

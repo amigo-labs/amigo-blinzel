@@ -22,10 +22,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::app::{Action, App, CursorKind, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, monitor_rect};
-use crate::chrome::Button;
+use blinzel_ui::app::Action;
+use blinzel_ui::backend::{CursorKind, Key};
+use blinzel_ui::chrome::Button;
+use blinzel_ui::settings_store;
+
+use crate::backend::{
+    App, TIMER_ANIM, WM_BATCH, WM_COLOR_TARGET, WM_DIR_CHANGED, WM_LIST, WM_LOADED, WM_THUMB,
+    monitor_rect,
+};
 use crate::instance::Request;
-use crate::loader::WM_LOADED;
 use crate::resident::{self, WM_TRAY};
 use crate::{clipboard, instance, menu, platform};
 
@@ -314,7 +320,13 @@ fn handle(
         },
         WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
             let shift = (wp.0 & 0x0004) != 0;
-            actions.extend(app.mouse_down(point_from_lparam(lp), shift, msg == WM_MBUTTONDOWN));
+            let ctrl = key_down(VK_CONTROL);
+            actions.extend(app.mouse_down(
+                point_from_lparam(lp),
+                shift,
+                ctrl,
+                msg == WM_MBUTTONDOWN,
+            ));
             if app.is_dragging() {
                 unsafe { SetCapture(hwnd) };
             }
@@ -360,9 +372,9 @@ fn handle(
         WM_XBUTTONUP => {
             let which = hi_word(wp.0 as isize);
             actions.extend(app.command(if which == 1 {
-                menu::Cmd::Prev
+                blinzel_ui::menu::Cmd::Prev
             } else {
-                menu::Cmd::Next
+                blinzel_ui::menu::Cmd::Next
             }));
             Outcome::Result(LRESULT(1))
         }
@@ -395,7 +407,9 @@ fn handle(
             if msg == WM_SYSKEYDOWN && vk != VK_F10.0 {
                 return Outcome::Default; // Alt+F4 and friends
             }
-            match app.key(vk, key_down(VK_CONTROL), key_down(VK_SHIFT)) {
+            let handled =
+                key_of(vk).and_then(|k| app.key(k, key_down(VK_CONTROL), key_down(VK_SHIFT)));
+            match handled {
                 Some(a) => {
                     actions.extend(a);
                     done
@@ -412,7 +426,7 @@ fn handle(
             }
             done
         }
-        WM_TIMER if wp.0 == crate::app::TIMER_ANIM => {
+        WM_TIMER if wp.0 == TIMER_ANIM => {
             app.on_anim_timer();
             done
         }
@@ -444,8 +458,20 @@ fn handle(
             app.on_dir_changed();
             done
         }
-        crate::thumbs::WM_THUMB => {
+        WM_THUMB => {
             app.on_thumbs();
+            done
+        }
+        WM_BATCH => {
+            app.on_batch();
+            done
+        }
+        // Characters for the batch dialog's text fields (keys go through
+        // WM_KEYDOWN).
+        WM_CHAR if app.dialog.is_some() => {
+            if let Some(c) = char::from_u32(wp.0 as u32) {
+                app.text_input(c.encode_utf8(&mut [0; 4]));
+            }
             done
         }
         WM_COLOR_TARGET => {
@@ -531,6 +557,36 @@ fn handle(
         }
         _ => Outcome::Default,
     }
+}
+
+/// The UI's key for a virtual-key code.
+fn key_of(vk: u16) -> Option<Key> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    Some(match VIRTUAL_KEY(vk) {
+        VK_LEFT => Key::Left,
+        VK_RIGHT => Key::Right,
+        VK_UP => Key::Up,
+        VK_DOWN => Key::Down,
+        VK_PRIOR => Key::PageUp,
+        VK_NEXT => Key::PageDown,
+        VK_HOME => Key::Home,
+        VK_END => Key::End,
+        VK_SPACE => Key::Space,
+        VK_BACK => Key::Backspace,
+        VK_RETURN => Key::Enter,
+        VK_ESCAPE => Key::Escape,
+        VK_TAB => Key::Tab,
+        VK_DELETE => Key::Delete,
+        VK_F10 => Key::F10,
+        VK_F11 => Key::F11,
+        VK_APPS => Key::Menu,
+        VK_ADD | VK_OEM_PLUS => Key::Plus,
+        VK_SUBTRACT | VK_OEM_MINUS => Key::Minus,
+        _ if (0x30..=0x39).contains(&vk) => Key::Digit((vk - 0x30) as u8),
+        _ if (VK_NUMPAD0.0..=VK_NUMPAD9.0).contains(&vk) => Key::Digit((vk - VK_NUMPAD0.0) as u8),
+        _ if (0x41..=0x5A).contains(&vk) => Key::Letter(vk as u8 as char),
+        _ => return None,
+    })
 }
 
 fn set_cursor(kind: CursorKind) {
@@ -623,10 +679,12 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
                 crate::dialogs::save_file(hwnd, &folder, &job.default_name, job.prefer_png)
             {
                 let raw = hwnd.0 as isize;
+                let services = with_app(|a| a.services.clone());
                 let _ = std::thread::Builder::new()
                     .name("blinzel-save".into())
                     .spawn(move || {
-                        let text = save_cutout(&job, &target);
+                        let Some(services) = services else { return };
+                        let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
                         let ptr = Box::into_raw(Box::new(text)) as isize;
                         unsafe {
                             if PostMessageW(
@@ -672,6 +730,16 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             if let Err(e) = crate::notices::show(hwnd) {
                 platform::debug_log(&format!("notices: {e}"));
             }
+            vec![]
+        }
+        Action::PickFolder => {
+            if let Some(dir) = crate::dialogs::pick_folder(hwnd) {
+                with_app(|a| a.batch_folder_picked(dir));
+            }
+            vec![]
+        }
+        Action::OpenFolder(dir) => {
+            crate::dialogs::open_folder(hwnd, &dir);
             vec![]
         }
         Action::SetResident(on) => {
@@ -797,7 +865,7 @@ fn exit(hwnd: HWND) {
         // saved.
         if !a.hidden {
             remember_placement(hwnd, a);
-            crate::settings_store::save(&a.settings);
+            settings_store::save(&a.settings);
         }
         a.clip.take()
     })
@@ -819,7 +887,7 @@ fn hide_window(hwnd: HWND) {
     }
     with_app(|a| {
         remember_placement(hwnd, a);
-        crate::settings_store::save(&a.settings);
+        settings_store::save(&a.settings);
     });
     set_cloak(hwnd, true);
     unsafe {
@@ -1026,36 +1094,4 @@ pub fn register_class(
         return Err(windows::core::Error::from_thread());
     }
     Ok(())
-}
-
-/// Reads the source, exports the cutout and writes it atomically (temp
-/// file + rename). Returns the message for the notice toast.
-fn save_cutout(job: &crate::app::SaveJob, target: &std::path::Path) -> String {
-    use blinzel_core::export::{SaveFormat, export};
-    use blinzel_i18n::{Msg, trf};
-    let name = target
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let result = (|| -> Result<bool, String> {
-        let data = platform::io::read_file(&job.source).map_err(|e| e.to_string())?;
-        let saved = export(
-            &data,
-            &job.cut,
-            SaveFormat::from_path(target),
-            &crate::wic::decode_any,
-        )?;
-        let tmp = target.with_extension("blinzel-tmp");
-        std::fs::write(&tmp, &saved.bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, target).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            e.to_string()
-        })?;
-        Ok(saved.lossless)
-    })();
-    match result {
-        Ok(true) => trf(Msg::SavedLossless, &[("name", &name)]),
-        Ok(false) => trf(Msg::Saved, &[("name", &name)]),
-        Err(e) => trf(Msg::ErrorSave, &[("name", &name), ("reason", &e)]),
-    }
 }

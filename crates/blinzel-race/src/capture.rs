@@ -5,10 +5,9 @@
 //! outside, from what actually reached the screen, treats every viewer the
 //! same.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
@@ -23,26 +22,16 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::core::Interface;
 
+use crate::frames::{Event, Frames};
 use crate::signature;
 
 /// Sample grid over the monitor.
 const COLS: u32 = 40;
 const ROWS: u32 = 24;
 
-/// One presented frame: when it reached the screen and what it showed.
-#[derive(Clone, Copy, Debug)]
-pub struct Event {
-    pub qpc: i64,
-    pub sig: Option<usize>,
-}
-
-#[derive(Default)]
-struct Shared {
-    events: Vec<Event>,
-}
-
 pub struct Capture {
-    shared: Arc<(Mutex<Shared>, Condvar)>,
+    /// Frames of every monitor; times are QPC ticks.
+    pub frames: Frames,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     /// The primary monitor (desktop coordinates).
@@ -55,14 +44,14 @@ pub struct Capture {
 impl Capture {
     /// One duplication thread per monitor of every adapter.
     pub fn start() -> Result<Capture, String> {
-        let shared = Arc::new((Mutex::new(Shared::default()), Condvar::new()));
+        let frames = Frames::default();
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::new();
         let mut primary = None;
         let mut errors = Vec::new();
         for (a, o) in outputs() {
             let (tx, rx) = std::sync::mpsc::channel();
-            let (s2, stop2) = (shared.clone(), stop.clone());
+            let (f2, stop2) = (frames.clone(), stop.clone());
             threads.push(std::thread::spawn(move || {
                 let dup = match Dup::new(a, o) {
                     Ok(d) => d,
@@ -72,7 +61,7 @@ impl Capture {
                     }
                 };
                 let _ = tx.send(Ok((dup.rect, dup.adapter.clone())));
-                dup.run(&s2, &stop2);
+                dup.run(&f2, &stop2);
             }));
             match rx.recv().map_err(|e| e.to_string()) {
                 Ok(Ok((rect, name))) => {
@@ -86,50 +75,13 @@ impl Capture {
         let monitors = threads.len() - errors.len();
         let (monitor, adapter) = primary.ok_or_else(|| errors.join("; "))?;
         Ok(Capture {
-            shared,
+            frames,
             stop,
             threads,
             monitor,
             adapter,
             monitors,
         })
-    }
-
-    /// Waits until a frame presented at or after `since` shows signature
-    /// `want`; returns its present time.
-    pub fn wait_for(&self, since: i64, want: usize, timeout: Duration) -> Result<i64, String> {
-        let deadline = Instant::now() + timeout;
-        let (lock, cv) = &*self.shared;
-        let mut s = lock.lock().unwrap();
-        loop {
-            if let Some(ev) = s
-                .events
-                .iter()
-                .find(|e| e.qpc >= since && e.sig == Some(want))
-            {
-                return Ok(ev.qpc);
-            }
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(format!("signature {want} not seen"));
-            }
-            s = cv.wait_timeout(s, left).unwrap().0;
-        }
-    }
-
-    /// Frames presented at or after `since`.
-    pub fn events_since(&self, since: i64) -> Vec<Event> {
-        let s = self.shared.0.lock().unwrap();
-        s.events
-            .iter()
-            .filter(|e| e.qpc >= since)
-            .copied()
-            .collect()
-    }
-
-    /// Forgets old frames (between measurements).
-    pub fn clear(&self) {
-        self.shared.0.lock().unwrap().events.clear();
     }
 }
 
@@ -238,21 +190,16 @@ impl Dup {
         }
     }
 
-    fn run(&self, shared: &(Mutex<Shared>, Condvar), stop: &AtomicBool) {
+    fn run(&self, frames: &Frames, stop: &AtomicBool) {
         let _ = &self.device;
         while !stop.load(Ordering::Relaxed) {
             match self.frame() {
-                Ok(Some(ev)) => {
-                    let (lock, cv) = shared;
-                    lock.lock().unwrap().events.push(ev);
-                    cv.notify_all();
-                }
+                Ok(Some(ev)) => frames.push(ev),
                 Ok(None) => {}
                 Err(e) => {
                     // Mode switch, secure desktop, ...: this monitor stops
                     // reporting; the others go on.
                     eprintln!("capture {}: {e}", self.adapter);
-                    let _ = shared;
                     return;
                 }
             }
@@ -273,7 +220,7 @@ impl Dup {
             let out = if info.LastPresentTime != 0 {
                 let tex: ID3D11Texture2D = res.as_ref().unwrap().cast().map_err(|e| e.message())?;
                 Some(Event {
-                    qpc: info.LastPresentTime,
+                    at: info.LastPresentTime,
                     sig: self.classify(&tex)?,
                 })
             } else {

@@ -1,6 +1,7 @@
-//! Colour management: which profile the monitor under the window wants,
-//! and colour transforms (3D LUTs) from image profiles to it, built by the
-//! Windows Color System (`mscms`, every ICC profile kind).
+//! Colour management on Windows: which profile the monitor under the
+//! window wants, and colour transforms (3D LUTs) from image profiles to it,
+//! built by the Windows Color System (`mscms`, every ICC profile kind).
+//! `blinzel_ui::color::ColorManager` decides when one is needed.
 //!
 //! sRGB images on an sRGB target (the usual case) need nothing: no DLL is
 //! loaded and the shader skips the lookup. With Windows' own colour
@@ -11,11 +12,7 @@
 //! 7 ms that would compete with the start), so a start uses the answer
 //! remembered from the last one and asks again after the first frame.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
 
 use blinzel_core::icc::Profile;
 use blinzel_core::lut::{self, Lut3d};
@@ -38,8 +35,6 @@ use windows::Win32::UI::ColorSystem::{
     TranslateBitmapBits,
 };
 use windows::core::{PCWSTR, PWSTR, w};
-
-use crate::platform::debug_log;
 
 /// The display device of `monitor` (`\\.\DISPLAY1`), as text and as
 /// the NUL-padded UTF-16 the display APIs take.
@@ -287,134 +282,6 @@ pub fn build_lut(src: Option<&Profile>, dst: Option<&Profile>) -> Option<Lut3d> 
     ok.as_bool().then(|| Lut3d::from_nodes(n, out)).flatten()
 }
 
-enum Slot {
-    Building,
-    Ready(Option<Arc<Lut3d>>),
-}
-
-/// The current target: `None` until known, then `Some(target)`, with a
-/// generation that changes with it.
-#[derive(Default)]
-struct TargetState {
-    target: Option<Option<Profile>>,
-    generation: u64,
-}
-
-/// Colour management shared by the loader (CPU first frame, building
-/// ahead) and the UI thread: the current target and the LUTs built for it.
-pub struct ColorManager {
-    enabled: AtomicBool,
-    target: Mutex<TargetState>,
-    known: Condvar,
-    /// By (target generation, source profile hash; 0 for sRGB).
-    luts: Mutex<HashMap<(u64, u64), Slot>>,
-    built: Condvar,
-}
-
-impl ColorManager {
-    pub fn new(enabled: bool) -> Arc<ColorManager> {
-        Arc::new(ColorManager {
-            enabled: AtomicBool::new(enabled),
-            target: Mutex::new(TargetState::default()),
-            known: Condvar::new(),
-            luts: Mutex::new(HashMap::new()),
-            built: Condvar::new(),
-        })
-    }
-
-    /// Sets the target (on start, and when the window changes monitors).
-    /// True if it changed.
-    pub fn set_target(&self, target: Option<Profile>) -> bool {
-        let mut t = self.target.lock().unwrap();
-        let changed = t.target.as_ref() != Some(&target);
-        if changed {
-            t.target = Some(target);
-            t.generation += 1;
-            self.luts
-                .lock()
-                .unwrap()
-                .retain(|_, s| matches!(s, Slot::Building));
-        }
-        self.known.notify_all();
-        changed
-    }
-
-    /// Starts building the transform for `src` in the background (the
-    /// image decodes meanwhile), if one is needed and the target is known.
-    pub fn prepare(self: &Arc<Self>, src: Option<&Profile>) {
-        let wide_target = matches!(&self.target.lock().unwrap().target, Some(Some(_)));
-        if !self.enabled.load(Ordering::Relaxed) || (src.is_none_or(|p| p.srgb) && !wide_target) {
-            return;
-        }
-        let (me, src) = (self.clone(), src.cloned());
-        let _ = std::thread::Builder::new()
-            .name("blinzel-color".into())
-            .spawn(move || {
-                me.lut(src.as_ref());
-            });
-    }
-
-    pub fn set_enabled(&self, on: bool) {
-        self.enabled.store(on, Ordering::Relaxed);
-    }
-
-    /// The transform for an image with profile `src` (none: sRGB), or
-    /// `None` when it needs none. Waits briefly for the target on start.
-    pub fn lut(&self, src: Option<&Profile>) -> Option<Arc<Lut3d>> {
-        if !self.enabled.load(Ordering::Relaxed) {
-            return None;
-        }
-        let (target, generation) = {
-            let t = self.target.lock().unwrap();
-            let (t, _) = self
-                .known
-                .wait_timeout_while(t, Duration::from_millis(200), |t| t.target.is_none())
-                .unwrap();
-            (t.target.clone().flatten(), t.generation)
-        };
-        let src_srgb = src.is_none_or(|p| p.srgb);
-        if src_srgb && target.is_none() {
-            return None;
-        }
-        if let (Some(s), Some(t)) = (src, &target)
-            && s.hash == t.hash
-        {
-            return None;
-        }
-        let key = (
-            generation,
-            if src_srgb {
-                0
-            } else {
-                src.map_or(0, |p| p.hash)
-            },
-        );
-        {
-            let mut luts = self.luts.lock().unwrap();
-            loop {
-                match luts.get(&key) {
-                    Some(Slot::Ready(l)) => return l.clone(),
-                    // Another thread builds it (e.g. ahead of the decode).
-                    Some(Slot::Building) => luts = self.built.wait(luts).unwrap(),
-                    None => break,
-                }
-            }
-            luts.insert(key, Slot::Building);
-        }
-        let t0 = std::time::Instant::now();
-        let built = build_lut(src.filter(|_| !src_srgb), target.as_ref()).map(Arc::new);
-        let us = t0.elapsed().as_secs_f64() * 1e6;
-        blinzel_core::timing::record("color_lut_us", us);
-        debug_log(&format!("colour transform built in {:.1} ms", us / 1e3));
-        self.luts
-            .lock()
-            .unwrap()
-            .insert(key, Slot::Ready(built.clone()));
-        self.built.notify_all();
-        built
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,14 +328,5 @@ mod tests {
         );
         let muted = lut.apply([0.6, 0.3, 0.3]);
         assert!(muted[0] > 0.6 && muted[1] < 0.3, "{muted:?}");
-        // And the manager caches per profile and skips sRGB → sRGB.
-        let m = ColorManager::new(true);
-        m.set_target(None);
-        assert!(m.lut(None).is_none());
-        let a = m.lut(Some(&p3)).unwrap();
-        let b = m.lut(Some(&p3)).unwrap();
-        assert!(Arc::ptr_eq(&a, &b));
-        m.set_enabled(false);
-        assert!(m.lut(Some(&p3)).is_none());
     }
 }

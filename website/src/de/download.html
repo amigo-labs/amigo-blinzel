@@ -1,13 +1,36 @@
 <!-- title: Download -->
-<p>Version {{version}} · Windows 11 ab Version 24H2</p>
+<p>Version {{version}} · Windows 11, macOS 14 und Linux</p>
+<div class="cta">
+<a class="button" href="#windows">Windows</a>
+<a class="button secondary" href="#macos">macOS</a>
+<a class="button secondary" href="#linux">Linux</a>
+</div>
+<h2 id="windows">Windows</h2>
+<p>Windows 11 ab Version 24H2.</p>
 <div class="cta">
 <a class="button" href="{{download:x64}}">x64</a>
 <a class="button secondary" href="{{download:arm64}}">ARM64</a>
 </div>
-<h2>Installation</h2>
-<p>Die heruntergeladene Datei ist Viewer und Installer zugleich. Sie installiert sich nur für dich nach <code>%LOCALAPPDATA%\Programs\amigo-blinzel</code>, ohne Administratorrechte. Als Standard-App für Bilder legst du amigo-blinzel danach in den Windows-Einstellungen fest; das Setup öffnet die Seite auf Wunsch.</p>
-<p>Deinstallieren: Einstellungen → Apps → Installierte Apps.</p>
+<p>Die heruntergeladene Datei ist Viewer und Installer zugleich. Sie installiert sich nur für dich nach <code>%LOCALAPPDATA%\Programs\amigo-blinzel</code>, ohne Administratorrechte. Als Standard-App für Bilder legst du amigo-blinzel danach in den Windows-Einstellungen fest; das Setup öffnet die Seite auf Wunsch. Deinstallieren: Einstellungen → Apps → Installierte Apps.</p>
+<p><strong>Erster Start:</strong> Die Datei ist nicht mit einem Code-Signing-Zertifikat signiert. Windows SmartScreen zeigt deshalb beim ersten Start „Der Computer wurde durch Windows geschützt“: auf <em>Weitere Informationen</em> und dann <em>Trotzdem ausführen</em> klicken.</p>
+<h2 id="macos">macOS</h2>
+<p>macOS 14 Sonoma oder neuer, Apple Silicon und Intel in einer App.</p>
+<div class="cta">
+<a class="button" href="{{download:macos}}">macOS (Universal)</a>
+</div>
+<p>Das ZIP enthält <code>amigo-blinzel.app</code>; zieh die App in den Ordner „Programme“. Im Finder erscheint sie danach unter „Öffnen mit“ für Bilder; zur Standard-App wird sie über „Informationen“ → „Öffnen mit“ → „Alle ändern“.</p>
+<p><strong>Erster Start:</strong> Die App ist nicht von Apple notarisiert. macOS meldet deshalb beim ersten Öffnen, dass die App nicht geprüft werden kann. Unter macOS 14: im Finder mit gedrückter Ctrl-Taste auf die App klicken, <em>Öffnen</em> wählen und bestätigen. Ab macOS 15: einmal öffnen, dann Systemeinstellungen → Datenschutz &amp; Sicherheit → <em>Trotzdem öffnen</em>. Alternativ im Terminal: <code>xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app</code>.</p>
+<h2 id="linux">Linux</h2>
+<p>x64 und ARM64, Wayland oder X11, mit glibc ab 2.35 (Ubuntu 22.04, Debian 12, Fedora 36 und neuer) und einem Vulkan- oder OpenGL-ES-3-Treiber.</p>
+<div class="cta">
+<a class="button" href="{{download:linux-x64}}">x64 (.tar.gz)</a>
+<a class="button secondary" href="{{download:linux-arm64}}">ARM64 (.tar.gz)</a>
+</div>
+<p>Entpacken und für dich installieren, ohne Root-Rechte:</p>
+<pre><code>tar xzf amigo-blinzel-linux-x64.tar.gz
+./amigo-blinzel/blinzel --install</code></pre>
+<p>Das legt das Programm nach <code>~/.local/share/amigo-blinzel</code>, einen Aufruf <code>blinzel</code> nach <code>~/.local/bin</code> und einen Eintrag ins Anwendungsmenü mit „Öffnen mit“ für Bilder. Als Standard-Bildbetrachter: <code>xdg-mime default amigo-blinzel.desktop image/jpeg image/png image/webp image/avif</code>. Deinstallieren: <code>blinzel --uninstall</code>.</p>
 <h2>Prüfen</h2>
-<p>Die Prüfsummen stehen in <a href="{{download:sums}}">SHA256SUMS</a>, signiert mit dem Release-Schlüssel des Projekts. Unter Windows: <code>Get-FileHash amigo-blinzel-setup-x64.exe</code>.</p>
+<p>Die Prüfsummen aller Dateien stehen in <a href="{{download:sums}}">SHA256SUMS</a>, signiert mit dem Release-Schlüssel des Projekts. Unter Windows: <code>Get-FileHash amigo-blinzel-setup-x64.exe</code>, unter macOS und Linux: <code>shasum -a 256</code> bzw. <code>sha256sum</code>.</p>
 <h2>Updates</h2>
-<p>amigo-blinzel prüft höchstens einmal am Tag bei GitHub, ob es eine neue Version gibt, und installiert sie still; aktiv wird sie beim nächsten Start. Abschalten: <code>auto_update = false</code> in <code>%APPDATA%\amigo-blinzel\settings.toml</code>.</p>
+<p>amigo-blinzel prüft höchstens einmal am Tag bei GitHub, ob es eine neue Version gibt, und installiert sie still; aktiv wird sie beim nächsten Start. Das gilt für die installierte Kopie (unter macOS: die App). Abschalten: <code>auto_update = false</code> in der Datei <code>settings.toml</code>, unter Windows in <code>%APPDATA%\amigo-blinzel</code>, unter macOS in <code>~/Library/Application Support/amigo-blinzel</code>, unter Linux in <code>~/.config/amigo-blinzel</code>.</p>

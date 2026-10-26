@@ -11,7 +11,7 @@ use windows::core::{PCWSTR, w};
 use crate::platform::wide;
 use crate::setup::install::Layout;
 
-pub const TEXT: &str = include_str!("../../../THIRD-PARTY-NOTICES.txt");
+pub use crate::notices_text::TEXT;
 
 /// Writes the notices to the installation's cache folder and opens them.
 pub fn show(hwnd: HWND) -> Result<(), String> {

@@ -3,7 +3,7 @@
 <h2>Test images</h2>
 <p>24 JPEGs of 24 megapixels and about 8 MB each, as from a typical camera. Every image has its own base colour; consecutive images always differ.</p>
 <h2>Detection</h2>
-<p>Through the Windows Desktop Duplication API the tool sees every frame that reaches the screen, with its presentation time. A grid of sample points recognizes from the base colour which image is visible, on every monitor.</p>
+<p>Through the Desktop Duplication API on Windows and ScreenCaptureKit on macOS the tool sees every frame that reaches the screen, with its presentation time. A grid of sample points recognizes from the base colour which image is visible, on every monitor. On macOS the tool starts every viewer through Launch Services (<code>open -a</code>), the way Finder opens a file with an app.</p>
 <h2>Measurements</h2>
 <ul>
 <li><strong>Opening:</strong> from process start until the first image is visible. Warm: program and image are in the file cache. Cold: the file cache is emptied first.</li>
@@ -17,4 +17,4 @@
 <li>A first, uncounted start loads every program into the cache.</li>
 </ul>
 <h2>Measure yourself</h2>
-<p><code>blinzel-race corpus images</code> creates the images, <code>blinzel-race run images --json result.json</code> measures every viewer found. Cold starts need administrator rights (<code>--cold</code>).</p>
+<p><code>blinzel-race corpus images</code> creates the images, <code>blinzel-race run images --json result.json</code> measures every viewer found. Cold starts need administrator rights (<code>--cold</code>; on macOS the tool asks for the password once). On macOS the terminal also needs the Screen Recording and Accessibility permissions (System Settings, Privacy &amp; Security).</p>

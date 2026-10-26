@@ -1,6 +1,6 @@
 [package]
 name = "blinzel-release"
-description = "Release tooling: Ed25519 key generation, signing and verification of SHA256SUMS"
+description = "Release tooling: Ed25519 signing of SHA256SUMS, third-party notices, the macOS app bundle"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +12,5 @@ blinzel-core.workspace = true
 # Key generation needs the OS random number generator.
 ed25519-compact = { workspace = true, features = ["random"] }
 toml.workspace = true
+# The app icon for the macOS bundle (shared generator in blinzel-app).
+png.workspace = true

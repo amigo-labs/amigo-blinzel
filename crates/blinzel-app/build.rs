@@ -76,8 +76,8 @@ fn main() {
     }
 }
 
-/// VERSIONINFO from the crate version: file properties, Authenticode
-/// metadata and benchmark tools read it.
+/// VERSIONINFO from the crate version: file properties and
+/// benchmark tools read it.
 fn version_resource(out: &Path) {
     let Some(rc) = find_sdk_tool("rc.exe", "RC") else {
         println!("cargo:warning=rc.exe not found: no version resource");

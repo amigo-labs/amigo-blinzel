@@ -1,14 +1,16 @@
 //! The silent self-updater (M7). At most daily, ten seconds after start and
 //! on a background thread, it asks GitHub for the latest release, downloads
-//! the executable for this architecture, and verifies it three ways before
+//! the executable for this architecture, and verifies it two ways before
 //! swapping it in (active from the next start):
 //!
 //! 1. Ed25519 signature of `SHA256SUMS` with our own release key,
-//! 2. SHA-256 of the executable against `SHA256SUMS`,
-//! 3. Authenticode (`WinVerifyTrust`).
+//! 2. SHA-256 of the executable against `SHA256SUMS`.
+//!
+//! Releases carry no Authenticode signature (docs/PLAN.md, section 10), so
+//! the release key is the only proof of origin.
 //!
 //! A new version that fails to reach its first frame three times is
-//! replaced by the previous one again. WinHTTP, bcrypt and wintrust are
+//! replaced by the previous one again. WinHTTP and bcrypt are
 //! loaded only when needed, never on the startup path. Only an installed
 //! copy updates itself; a portable or development build never does.
 
@@ -24,10 +26,6 @@ use windows::core::{BOOL, PCSTR, PCWSTR, w};
 
 use crate::platform::{debug_log, wide};
 use crate::setup::{self, Layout, registry};
-
-/// Public key of the release signing key (docs/PLAN.md, section 10). Until
-/// it is set, the updater checks nothing and installs nothing.
-pub const RELEASE_KEY: Option<[u8; 32]> = None;
 
 /// Largest download accepted (the executable is about 3 MB).
 const MAX_DOWNLOAD: usize = 64 << 20;
@@ -135,7 +133,7 @@ pub fn on_first_frame() {
 /// Starts the daily background check. A resident instance runs for days,
 /// so it looks again every hour and reads the setting each time.
 pub fn schedule() {
-    if RELEASE_KEY.is_none() || installed_layout().is_none() {
+    if core::RELEASE_KEY.is_none() || installed_layout().is_none() {
         return;
     }
     let _ = std::thread::Builder::new()
@@ -143,7 +141,7 @@ pub fn schedule() {
         .spawn(|| {
             std::thread::sleep(Duration::from_secs(10));
             loop {
-                if crate::settings_store::load().auto_update {
+                if blinzel_ui::settings_store::load().auto_update {
                     check_if_due();
                 }
                 std::thread::sleep(Duration::from_secs(3600));
@@ -224,7 +222,7 @@ pub fn check_now(hwnd: HWND, notice_msg: u32) {
 }
 
 fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
-    let key = RELEASE_KEY.ok_or("no release signing key in this build")?;
+    let key = core::RELEASE_KEY.ok_or("no release signing key in this build")?;
     let api = format!(
         "https://api.github.com/repos/{}/releases/latest",
         core::REPO
@@ -236,7 +234,7 @@ fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
         exe_url,
         sums_url,
         sig_url,
-    } = core::parse_release(&json, arch()).ok_or("no usable release")?;
+    } = core::parse_release(&json, &core::asset_name(arch())).ok_or("no usable release")?;
     let running = running_version();
     if version <= running {
         return Ok(Outcome::Current(running));
@@ -258,7 +256,6 @@ fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let new = dir.join(setup::install::EXE_NAME);
     std::fs::write(&new, &exe).map_err(|e| e.to_string())?;
-    authenticode(&new)?;
 
     swap(&layout.exe(), &new, &old_exe(layout))?;
     let mut state = load_state(layout);
@@ -313,56 +310,6 @@ fn sha256(data: &[u8]) -> Result<[u8; 32], String> {
         return Err(format!("BCryptHash: 0x{status:08X}"));
     }
     Ok(out)
-}
-
-/// Authenticode check of a file, without UI and revocation checks of the
-/// whole chain (WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2).
-fn authenticode(path: &Path) -> Result<(), String> {
-    use windows::Win32::Security::WinTrust::{
-        WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
-        WTD_CHOICE_FILE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY,
-        WTD_UI_NONE,
-    };
-    type WinVerifyTrust =
-        unsafe extern "system" fn(HWND, *const windows::core::GUID, *mut c_void) -> i32;
-    let f = proc(w!("wintrust.dll"), windows::core::s!("WinVerifyTrust"))?;
-    let f: WinVerifyTrust = unsafe { std::mem::transmute(f) };
-    let p = wide(path);
-    let mut file = WINTRUST_FILE_INFO {
-        cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
-        pcwszFilePath: PCWSTR(p.as_ptr()),
-        ..Default::default()
-    };
-    let mut data = WINTRUST_DATA {
-        cbStruct: std::mem::size_of::<WINTRUST_DATA>() as u32,
-        dwUIChoice: WTD_UI_NONE,
-        fdwRevocationChecks: WTD_REVOKE_NONE,
-        dwUnionChoice: WTD_CHOICE_FILE,
-        Anonymous: WINTRUST_DATA_0 { pFile: &mut file },
-        dwStateAction: WTD_STATEACTION_VERIFY,
-        ..Default::default()
-    };
-    let action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-    let r = unsafe {
-        f(
-            HWND(-1isize as *mut _),
-            &action,
-            std::ptr::from_mut(&mut data).cast(),
-        )
-    };
-    data.dwStateAction = WTD_STATEACTION_CLOSE;
-    unsafe {
-        f(
-            HWND(-1isize as *mut _),
-            &action,
-            std::ptr::from_mut(&mut data).cast(),
-        );
-    }
-    if r == 0 {
-        Ok(())
-    } else {
-        Err(format!("Authenticode: 0x{r:08X}"))
-    }
 }
 
 /// HTTPS GET through WinHTTP (system proxy settings), following redirects;

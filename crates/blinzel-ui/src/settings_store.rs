@@ -1,12 +1,12 @@
-//! Settings file location: `%APPDATA%\amigo-blinzel\settings.toml`.
+//! The settings file, `settings.toml` in the platform's settings folder
+//! (see [`crate::dirs`]).
 
 use std::path::PathBuf;
 
 use blinzel_core::settings::Settings;
 
-fn path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA")
-        .map(|a| PathBuf::from(a).join("amigo-blinzel").join("settings.toml"))
+pub fn path() -> Option<PathBuf> {
+    crate::dirs::config().map(|d| d.join("settings.toml"))
 }
 
 /// Loads settings (defaults if missing or unreadable; never fails).

@@ -1,6 +1,7 @@
 //! The only visible UI: a hamburger button top left and minimize /
 //! maximize / close top right, drawn straight over the image (no bar).
-//! Right-to-left languages mirror both sides.
+//! Right-to-left languages mirror both sides. On macOS the system draws its
+//! window buttons top left, so the menu button moves to the other side.
 //! Pure geometry; icons are SDF shapes, so the first frame needs no font.
 
 use blinzel_core::geom::Rect;
@@ -26,6 +27,8 @@ pub struct Chrome {
     pub client: (f64, f64),
     /// Mirrored for right-to-left languages.
     pub rtl: bool,
+    /// The system draws minimize / maximize / close (macOS).
+    pub system_buttons: bool,
 }
 
 impl Chrome {
@@ -37,7 +40,9 @@ impl Chrome {
         let (w, h) = (BUTTON_W * self.scale, BUTTON_H * self.scale);
         let right = |i: f64| Rect::new(self.client.0 - w * i, 0.0, w, h);
         let r = match b {
+            Button::Menu if self.system_buttons => right(1.0),
             Button::Menu => Rect::new(0.0, 0.0, w, h),
+            _ if self.system_buttons => Rect::new(0.0, 0.0, 0.0, 0.0),
             Button::Close => right(1.0),
             Button::Maximize => right(2.0),
             Button::Minimize => right(3.0),
@@ -76,6 +81,9 @@ impl Chrome {
             Button::Maximize,
             Button::Close,
         ] {
+            if self.system_buttons && b != Button::Menu {
+                continue;
+            }
             let r = self.rect(b);
             if hover == Some(b) || pressed == Some(b) {
                 let color = match (b, pressed == Some(b)) {
@@ -176,6 +184,7 @@ mod tests {
             scale: 1.5,
             client: (1000.0, 600.0),
             rtl: false,
+            system_buttons: false,
         };
         assert_eq!(
             c.rect(Button::Close),
@@ -195,10 +204,27 @@ mod tests {
             scale: 1.0,
             client: (1000.0, 600.0),
             rtl: true,
+            system_buttons: false,
         };
         assert_eq!(c.rect(Button::Close), Rect::new(0.0, 0.0, 46.0, 32.0));
         assert_eq!(c.rect(Button::Menu), Rect::new(954.0, 0.0, 46.0, 32.0));
         assert_eq!(c.hit((990.0, 10.0)), Some(Button::Menu));
         assert_eq!(c.hit((60.0, 10.0)), Some(Button::Maximize));
+    }
+
+    #[test]
+    fn system_buttons_leave_the_menu_alone() {
+        let c = Chrome {
+            scale: 1.0,
+            client: (1000.0, 600.0),
+            rtl: false,
+            system_buttons: true,
+        };
+        assert_eq!(c.rect(Button::Menu), Rect::new(954.0, 0.0, 46.0, 32.0));
+        assert_eq!(c.hit((990.0, 10.0)), Some(Button::Menu));
+        assert_eq!(c.hit((10.0, 10.0)), None);
+        assert_eq!(c.hit((920.0, 10.0)), None);
+        // Only the menu icon: three lines with halos.
+        assert_eq!(c.shapes(None, None, false).len(), 6);
     }
 }

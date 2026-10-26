@@ -15,8 +15,12 @@ use blinzel_core::layout::{
 use blinzel_core::timing::{Stats, json_num, json_str};
 use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
 
+use blinzel_ui::gfx::Atlas;
+use blinzel_ui::loader::{self, Job, Stage};
+
+use crate::backend::{D3dDevice, Loader, WinServices};
+use crate::gfx::atlas::Pages;
 use crate::gfx::{Gfx, Offscreen, Renderer, Rgba, upload};
-use crate::loader::{self, Job, Loader, Stage};
 use crate::platform::{enumerate, io, threads};
 use crate::wic;
 
@@ -156,8 +160,13 @@ fn bench(dir: &Path, warp: bool) -> Result<String, String> {
 
     // 2. Navigation at 30 Hz key repeat with prefetching.
     let cpu = threads::cpu_info();
-    let loader = Loader::new(2, cpu.performance.clamp(2, 6), cpu.performance);
-    loader.set_device(gfx.device.clone(), gfx.max_texture_size());
+    let loader = Loader::new(
+        std::sync::Arc::new(WinServices::default()),
+        2,
+        cpu.performance.clamp(2, 6),
+        cpu.performance,
+    );
+    loader.set_device(std::sync::Arc::new(D3dDevice::new(&gfx)));
     loader.set_screen_box(SCREEN);
     let mut ready: HashSet<u64> = HashSet::new();
     let mut latencies = Vec::new();
@@ -278,7 +287,8 @@ fn thumb_grid(
         }
     }
     let threads = threads::cpu_info().performance.max(2);
-    let mut atlas = crate::gfx::atlas::Atlas::new(8);
+    let mut atlas = Atlas::new(8);
+    let mut pages = Pages::new(&gfx.device, &gfx.context);
     let mut runs = Vec::new();
     for run in 0..6 {
         let start = Instant::now();
@@ -301,9 +311,7 @@ fn thumb_grid(
         let id = |i: usize| (run * N + i) as u64;
         for (i, th) in got.into_inner().unwrap().into_iter().enumerate() {
             let th = th.ok_or("cache miss")?;
-            atlas
-                .insert(&gfx.device, &gfx.context, id(i), &th)
-                .map_err(|e| e.message())?;
+            atlas.insert(&mut pages, id(i), &th)?;
         }
         renderer.begin(&gfx.context, &target.rtv, SCREEN, Rgba(0.1, 0.1, 0.1, 1.0));
         let g = Grid::new(N, SCREEN.0 as f64, 176.0, 12.0);
@@ -312,7 +320,13 @@ fn thumb_grid(
             let size = p
                 .orientation
                 .oriented_size(p.size.0 as f64, p.size.1 as f64);
-            renderer.draw_thumb(&gfx.context, &p, &fit_in(&g.cell_rect(i, 0.0), size), 1.0);
+            renderer.draw_thumb(
+                &gfx.context,
+                &pages.pages[p.page],
+                &p,
+                &fit_in(&g.cell_rect(i, 0.0), size),
+                1.0,
+            );
         }
         target.sync(&gfx.context).map_err(|e| e.message())?;
         if run > 0 {

@@ -1,4 +1,5 @@
-//! `blinzel.exe`
+//! The viewer executable: `blinzel.exe` on Windows, `blinzel` on Linux and
+//! macOS (inside the app bundle there).
 
 // No console window for the viewer.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -8,8 +9,12 @@ fn main() {
     std::process::exit(blinzel_app::run::run());
 }
 
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn main() {
-    eprintln!("amigo-blinzel is a Windows application.");
-    std::process::exit(1);
+    std::process::exit(blinzel_app::linux::run());
+}
+
+#[cfg(target_os = "macos")]
+fn main() {
+    std::process::exit(blinzel_app::macos::run());
 }

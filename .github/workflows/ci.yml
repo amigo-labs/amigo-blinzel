@@ -10,23 +10,66 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
+# The jobs only read the repository (and upload artifacts).
+permissions:
+  contents: read
+
 jobs:
   linux:
-    name: Linux (core, fmt, clippy, tests)
+    name: Linux (core, app, fmt, clippy, tests)
     runs-on: ubuntu-latest
+    env:
+      # The wgpu golden test must find a GPU: lavapipe, Mesa's software
+      # Vulkan (the counterpart of WARP on Windows).
+      BLINZEL_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@v4
       # Toolchain, components and targets come from rust-toolchain.toml.
       - run: rustup toolchain install && rustup show active-toolchain
-      - name: Install NASM (libjpeg-turbo SIMD)
-        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Install NASM (libjpeg-turbo SIMD), lavapipe, Xvfb and xkbcommon-x11 (winit on X11)
+        run: sudo apt-get update && sudo apt-get install -y nasm mesa-vulkan-drivers xvfb libxkbcommon-x11-0
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The viewer starts, shows a test image and exits (X11 on Xvfb).
+      - name: Linux viewer smoke test
+        run: |
+          cargo build --release -p blinzel-app
+          XDG_RUNTIME_DIR=$RUNNER_TEMP timeout 120 xvfb-run -a ./target/release/blinzel \
+            crates/blinzel-core/testdata/rgb420-64x48.avif --exit-after-first-frame --json startup.json
+          cat startup.json
+          # The display profile published on the X root window (colord, KDE).
+          xvfb-run -a sh -c 'BLINZEL_X11_TEST=$DISPLAY cargo test -q --release -p blinzel-app --lib linux::color'
       # Fails when Cargo.lock changed without regenerating the notices.
       - name: Third-party notices up to date
         run: cargo run --locked -p blinzel-release -- notices --check
+
+  macos:
+    name: macOS (app, Metal, bundle)
+    # Apple silicon, macOS 14: the oldest macOS the viewer supports.
+    runs-on: macos-14
+    env:
+      # The Metal golden test must find a device (the runner's virtual GPU).
+      BLINZEL_REQUIRE_GPU: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release -p blinzel-race --all-targets -- -D warnings
+      - run: cargo test -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release -p blinzel-race
+      # The competitor benchmark finds the viewers (at least Preview); the
+      # measurement itself needs a real Mac with screen recording permission.
+      - run: cargo run -q -p blinzel-race -- list
+      # The app bundle starts, shows a test image and exits.
+      - name: App bundle and smoke test (window, first frame)
+        run: |
+          cargo build --release -p blinzel-app
+          cargo run --release -p blinzel-release -- macos-bundle target/amigo-blinzel.app target/release/blinzel
+          codesign --verify --verbose target/amigo-blinzel.app
+          perl -e 'alarm 120; exec @ARGV' target/amigo-blinzel.app/Contents/MacOS/blinzel \
+            crates/blinzel-core/testdata/rgb420-64x48.avif --exit-after-first-frame --json startup.json
+          cat startup.json
 
   windows:
     name: Windows (build, tests, WARP, bench)

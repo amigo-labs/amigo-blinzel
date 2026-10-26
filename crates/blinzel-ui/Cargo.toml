@@ -1,0 +1,17 @@
+[package]
+name = "blinzel-ui"
+description = "Platform-independent viewer UI: app state machine, loader, browser, menu model and the traits each platform shell implements"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["turbojpeg"]
+turbojpeg = ["blinzel-core/turbojpeg"]
+
+[dependencies]
+blinzel-core = { workspace = true, features = ["batch"] }
+blinzel-i18n.workspace = true
+blinzel-jpeg.workspace = true

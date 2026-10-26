@@ -53,7 +53,7 @@ Der vollständige Plan mit allen Entscheidungen und Checklisten steht in [docs/P
 | `blinzel-i18n` | Übersetzungen aus `i18n/*.toml`, zur Compile-Zeit in statische Tabellen übersetzt (DE, EN) |
 | `blinzel-app` | `blinzel.exe`: Fenster, D3D11-Renderer, Lade-Pipeline, WIC-Fallback (TIFF, HEIC, AVIF, WebP, RAW …) |
 | `blinzel-bench` | Testkorpus-Generator und Benchmarks Library vs. Eigenbau (`run --check` prüft auch die Byte-Gleichheit von `blinzel-jpeg`) |
-| `blinzel-race` | Wettbewerbsvergleich: misst Viewer von außen über Desktop Duplication |
+| `blinzel-race` | Wettbewerbsvergleich: misst Viewer von außen, unter Windows über Desktop Duplication, unter macOS über ScreenCaptureKit |
 | `blinzel-release` | Release-Schlüssel erzeugen, `SHA256SUMS` signieren und prüfen |
 | `blinzel-site` | baut die Website (`website/`) mit Diagrammen als Inline-SVG |
 
@@ -78,7 +78,8 @@ Wettbewerbsvergleich und Website:
 
 ```
 cargo run --release -p blinzel-race -- corpus race-images
-cargo run --release -p blinzel-race -- run race-images --json website/data/race.json
+cargo run --release -p blinzel-race -- run race-images --json website/data/race.json        # Windows
+cargo run --release -p blinzel-race -- run race-images --json website/data/race-macos.json  # macOS
 cargo run --release -p blinzel-site                       # website/dist
 ```
 
@@ -86,4 +87,4 @@ Unter Linux laufen alle plattformunabhängigen Tests. `cargo xwin check --target
 
 ## Lizenz
 
-[MIT](LICENSE). Die Lizenztexte der Bibliotheken in `blinzel.exe` (libjpeg-turbo, Rust-Crates) stehen in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) und im Menü unter „Lizenzhinweise“. Nach einer Änderung an `Cargo.lock` erneuert `cargo run -p blinzel-release -- notices` die Datei; CI prüft das.
+[MIT](LICENSE). Die Lizenztexte der eingebauten Bibliotheken (libjpeg-turbo, libwebp, Little CMS, Rust-Crates) stehen je Plattform in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) (Windows), [THIRD-PARTY-NOTICES-linux.txt](THIRD-PARTY-NOTICES-linux.txt) und [THIRD-PARTY-NOTICES-macos.txt](THIRD-PARTY-NOTICES-macos.txt) und im Menü unter „Lizenzhinweise“. Nach einer Änderung an `Cargo.lock` erneuert `cargo run -p blinzel-release -- notices` die Dateien; CI prüft das.

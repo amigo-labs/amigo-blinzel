@@ -2,10 +2,7 @@
 //! instant even for 100 MP. The pixels are decoded (only the selected
 //! region, at full resolution) when an application actually pastes.
 
-use std::path::PathBuf;
-
 use blinzel_core::decode::Request;
-use blinzel_core::geom::{Orientation, PixelRect};
 use blinzel_core::selection::orient_bgra;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::Graphics::Gdi::{BI_BITFIELDS, BITMAPV5HEADER};
@@ -20,14 +17,7 @@ use crate::platform::{debug_log, io};
 use crate::wic;
 
 /// What to put on the clipboard when asked.
-#[derive(Clone, Debug)]
-pub struct Source {
-    pub path: PathBuf,
-    /// Region in stored (file) orientation, full resolution.
-    pub stored_rect: PixelRect,
-    /// Orientation to apply (EXIF + user rotation).
-    pub orientation: Orientation,
-}
+pub use blinzel_ui::app::ClipSource as Source;
 
 pub fn png_format() -> u32 {
     unsafe { RegisterClipboardFormatW(w!("PNG")) }

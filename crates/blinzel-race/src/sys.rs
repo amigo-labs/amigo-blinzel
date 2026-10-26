@@ -18,7 +18,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
-    VIRTUAL_KEY, VK_MENU,
+    VIRTUAL_KEY, VK_MENU, VK_RIGHT,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -37,7 +37,7 @@ pub fn from_wide(w: &[u16]) -> String {
 }
 
 /// QueryPerformanceCounter, the clock DXGI present times use.
-pub fn qpc() -> i64 {
+pub fn now() -> i64 {
     let mut t = 0;
     unsafe {
         let _ = QueryPerformanceCounter(&mut t);
@@ -45,7 +45,7 @@ pub fn qpc() -> i64 {
     t
 }
 
-pub fn qpc_to_ms(ticks: i64) -> f64 {
+pub fn ticks_to_ms(ticks: i64) -> f64 {
     let mut f = 1;
     unsafe {
         let _ = QueryPerformanceFrequency(&mut f);
@@ -197,10 +197,10 @@ fn key(vk: VIRTUAL_KEY, up: bool) {
     }
 }
 
-/// Presses and releases a key.
-pub fn tap(vk: VIRTUAL_KEY) {
-    key(vk, false);
-    key(vk, true);
+/// Presses and releases the Right arrow key.
+pub fn tap_right() {
+    key(VK_RIGHT, false);
+    key(VK_RIGHT, true);
 }
 
 /// Parks the mouse in the middle of a monitor (viewers that open on the
@@ -213,7 +213,7 @@ pub fn park_cursor(rect: (i32, i32, i32, i32)) {
 
 /// Empties the standby list so the next start reads everything from disk
 /// (needs administrator rights).
-pub fn purge_standby() -> Result<(), String> {
+pub fn purge_cache() -> Result<(), String> {
     unsafe {
         // SeProfileSingleProcessPrivilege allows purging the standby list.
         let mut token = Default::default();
@@ -256,5 +256,80 @@ pub fn purge_standby() -> Result<(), String> {
                 "purging the standby list failed (0x{status:08X}); run as administrator"
             ))
         }
+    }
+}
+
+/// Physical pixels for monitor geometry and the mouse position. (`--cold`
+/// needs an elevated console, checked when purging.)
+pub fn prepare(_cold: bool) -> Result<(), String> {
+    use windows::Win32::UI::HiDpi::{
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+    };
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+    Ok(())
+}
+
+/// The machine, for the report.
+pub fn machine(cap: &crate::capture::Capture) -> Vec<(&'static str, String)> {
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut mem = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    unsafe {
+        let _ = GlobalMemoryStatusEx(&mut mem);
+    }
+    let (l, t, r, b) = cap.monitor;
+    vec![
+        ("cpu", blinzel_core::kernels::cpu_name()),
+        (
+            "logical_cpus",
+            std::thread::available_parallelism()
+                .map_or(0, |n| n.get())
+                .to_string(),
+        ),
+        (
+            "ram_gb",
+            format!("{:.0}", mem.ullTotalPhys as f64 / (1u64 << 30) as f64),
+        ),
+        ("gpu", cap.adapter.clone()),
+        ("monitor", format!("{}x{}", r - l, b - t)),
+        ("monitors", cap.monitors.to_string()),
+        ("os_build", os_build().to_string()),
+    ]
+}
+
+fn os_build() -> u32 {
+    #[repr(C)]
+    struct Info {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform: u32,
+        csd: [u16; 128],
+    }
+    unsafe {
+        let Ok(ntdll) = GetModuleHandleW(w!("ntdll.dll")) else {
+            return 0;
+        };
+        let Some(f) = GetProcAddress(ntdll, windows::core::s!("RtlGetVersion")) else {
+            return 0;
+        };
+        let f = std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            unsafe extern "system" fn(*mut Info) -> i32,
+        >(f);
+        let mut v = Info {
+            size: std::mem::size_of::<Info>() as u32,
+            major: 0,
+            minor: 0,
+            build: 0,
+            platform: 0,
+            csd: [0; 128],
+        };
+        if f(&mut v) == 0 { v.build } else { 0 }
     }
 }

@@ -17,7 +17,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["turbojpeg"]
-turbojpeg = ["blinzel-core/turbojpeg"]
+turbojpeg = ["blinzel-core/turbojpeg", "blinzel-ui/turbojpeg"]
 # Native HEIC where Windows has no HEVC codec; see blinzel-core's `heic`.
 heic = ["blinzel-core/heic"]
 
@@ -25,10 +25,40 @@ heic = ["blinzel-core/heic"]
 blinzel-core.workspace = true
 blinzel-i18n.workspace = true
 blinzel-jpeg.workspace = true
+blinzel-ui.workspace = true
 
-# AVIF with dav1d's assembly; ARM64 uses the Rust fallbacks.
+# AVIF with dav1d's assembly on x86-64. ARM64 uses the Rust fallbacks: the
+# published rav1d lacks the header its ARM assembly includes
+# (src/arm/asm-offsets.h), and MSVC cannot build it anyway.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 blinzel-core = { workspace = true, features = ["av1-asm"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+winit.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+cosmic-text.workspace = true
+rfd.workspace = true
+arboard.workspace = true
+trash.workspace = true
+notify.workspace = true
+lcms2.workspace = true
+x11rb.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+objc2-metal.workspace = true
+objc2-quartz-core.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-graphics.workspace = true
+objc2-core-text.workspace = true
+objc2-image-io.workspace = true
+block2.workspace = true
+dispatch2.workspace = true
+notify.workspace = true
+lcms2.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics.workspace = true
@@ -52,7 +82,6 @@ features = [
     "Win32_Graphics_Imaging",
     "Win32_Security",
     "Win32_Security_Cryptography",
-    "Win32_Security_WinTrust",
     "Win32_Storage_EnhancedStorage",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",

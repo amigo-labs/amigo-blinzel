@@ -1,26 +1,20 @@
 //! Thumbnails for the grid and the filmstrip: a background pool that
 //! takes them from the pack cache or makes them (and stores them), in the
-//! order the UI asks for; results go back to the window as [`WM_THUMB`].
+//! order the UI asks for; results go back to the window as
+//! [`Wake::Thumbs`].
 //!
 //! Workers run at normal priority: the image the user waits for decodes
 //! on above-normal threads and wins.
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use blinzel_core::thumb::{self, EDGE, Planes};
 use blinzel_core::thumbcache::{Key, ThumbCache};
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
-use crate::platform::{debug_log, io};
-use crate::wic;
-
-/// A thumbnail (or a failure) is ready in [`Thumbs::results`].
-pub const WM_THUMB: u32 = WM_APP + 9;
+use crate::backend::{Services, Wake};
 
 /// Cache size that starts a new generation.
 const CACHE_LIMIT: u64 = 1 << 30;
@@ -34,33 +28,33 @@ pub struct Request {
     pub mtime: u64,
 }
 
-struct Shared {
+struct Shared<S> {
+    services: Arc<S>,
     queue: Mutex<VecDeque<Request>>,
     wake: Condvar,
     /// Ids handed to a worker (done or in progress) since the last reset.
     taken: Mutex<HashSet<u64>>,
     cache: OnceLock<Option<ThumbCache>>,
     results: Mutex<Sender<(u64, Option<Planes>)>>,
-    hwnd: AtomicIsize,
     /// What transparent thumbnails are composited over.
     background: [u8; 3],
 }
 
-pub struct Thumbs {
-    shared: Arc<Shared>,
+pub struct Thumbs<S> {
+    shared: Arc<Shared<S>>,
     pub results: Receiver<(u64, Option<Planes>)>,
 }
 
-impl Thumbs {
-    pub fn new(hwnd: HWND, threads: usize, background: [u8; 3]) -> Thumbs {
+impl<S: Services> Thumbs<S> {
+    pub fn new(services: Arc<S>, threads: usize, background: [u8; 3]) -> Thumbs<S> {
         let (tx, rx) = channel();
         let shared = Arc::new(Shared {
+            services,
             queue: Mutex::new(VecDeque::new()),
             wake: Condvar::new(),
             taken: Mutex::new(HashSet::new()),
             cache: OnceLock::new(),
             results: Mutex::new(tx),
-            hwnd: AtomicIsize::new(hwnd.0 as isize),
             background,
         });
         for i in 0..threads.max(1) {
@@ -100,12 +94,7 @@ impl Thumbs {
     }
 }
 
-fn cache_dir() -> Option<PathBuf> {
-    let local = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(local).join("amigo-blinzel").join("thumbs"))
-}
-
-fn worker(s: &Shared) {
+fn worker<S: Services>(s: &Shared<S>) {
     loop {
         let req = {
             let mut q = s.queue.lock().unwrap();
@@ -121,20 +110,17 @@ fn worker(s: &Shared) {
         };
         let thumb = get_or_make(s, &req);
         let _ = s.results.lock().unwrap().send((req.id, thumb));
-        let hwnd = s.hwnd.load(Ordering::Relaxed);
-        unsafe {
-            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_THUMB, WPARAM(0), LPARAM(0));
-        }
+        s.services.wake(Wake::Thumbs);
     }
 }
 
-fn get_or_make(s: &Shared, r: &Request) -> Option<Planes> {
+fn get_or_make<S: Services>(s: &Shared<S>, r: &Request) -> Option<Planes> {
     let cache = s
         .cache
         .get_or_init(|| {
-            let dir = cache_dir()?;
+            let dir = s.services.cache_dir()?.join("thumbs");
             ThumbCache::open(&dir, CACHE_LIMIT)
-                .map_err(|e| debug_log(&format!("thumbnail cache: {e}")))
+                .map_err(|e| s.services.log(&format!("thumbnail cache: {e}")))
                 .ok()
         })
         .as_ref();
@@ -142,9 +128,10 @@ fn get_or_make(s: &Shared, r: &Request) -> Option<Planes> {
     if let Some(p) = cache.and_then(|c| c.get_planes(&key, s.background)) {
         return Some(p);
     }
-    let data = io::read_file(&r.path).ok()?;
-    let probe = wic::probe_any(&data).ok()?;
-    let t = thumb::make(&data, &probe, EDGE, &wic::decode_any).ok()?;
+    let data = s.services.read_file(&r.path).ok()?;
+    let probe = s.services.probe(&data).ok()?;
+    let decode = |d: &[u8], req| s.services.decode(d, req, 1);
+    let t = thumb::make(&data, &probe, EDGE, &decode).ok()?;
     if let Some(c) = cache {
         let _ = c.put(&key, &t);
     }

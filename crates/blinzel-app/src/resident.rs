@@ -21,9 +21,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use crate::app::Action;
 use crate::platform::debug_log;
 use crate::setup::install::{self, Layout};
+use blinzel_ui::app::Action;
 
 /// The tray icon's callback message.
 pub const WM_TRAY: u32 = WM_APP + 7;

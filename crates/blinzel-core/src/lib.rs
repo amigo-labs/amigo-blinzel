@@ -3,6 +3,8 @@
 //! Everything here is unit-tested on Linux; the Windows app wires it to
 //! Win32 and Direct3D.
 
+#[cfg(feature = "batch")]
+pub mod batch;
 pub mod bufpool;
 pub mod cache;
 pub mod cpuref;
