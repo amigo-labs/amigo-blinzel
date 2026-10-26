@@ -45,7 +45,6 @@ pub fn detect() -> Vec<Viewer> {
         ("Preview", &["Preview.app"]),
         ("XnView MP", &["XnViewMP.app", "XnView MP.app"]),
         ("qView", &["qView.app"]),
-        ("Xee³", &["Xee³.app"]),
         ("ApolloOne", &["ApolloOne.app"]),
         ("Phoenix Slides", &["Phoenix Slides.app"]),
         ("Pixea", &["Pixea.app"]),

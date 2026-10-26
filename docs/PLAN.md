@@ -364,7 +364,7 @@ Ein eigenes Messwerkzeug für Windows und macOS misst alle Viewer gleich, von au
   - Start über die Startdienste (`open -a App datei`), wie im Finder. Beenden höflich über `NSRunningApplication.terminate`, nach 3 s mit `SIGKILL`.
   - Tasten über `CGEvent`, nur solange das vorderste Fenster dem Viewer gehört (`CGWindowListCopyWindowInfo`). `--cold` ruft `purge` über `sudo` auf und fragt dafür einmal am Anfang nach dem Passwort; das Werkzeug selbst läuft nicht als root, sonst starteten auch die Viewer als root.
   - Das Terminal braucht die Freigaben „Bildschirmaufnahme“ und „Bedienungshilfen“; ohne sie bricht `run` mit einem Hinweis ab.
-  - Kandidaten: amigo-blinzel, Vorschau, XnView MP, qView, Xee³, ApolloOne, Phoenix Slides, Pixea. Vorschau blättert bei einer einzelnen Datei nicht durch den Ordner; für sie gibt es nur den Wert fürs Öffnen.
+  - Kandidaten: amigo-blinzel, Vorschau, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ wird nicht mehr vertrieben). Vorschau blättert bei einer einzelnen Datei nicht durch den Ordner; für sie gibt es nur den Wert fürs Öffnen.
   - Ergebnis nach `website/data/race-macos.json`; die Website zeigt es als eigenen macOS-Abschnitt (`{{race-macos:…}}`).
 
 **Erste Probeläufe** (Laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 Monitore; nur Funktionsnachweis, keine Referenzzahlen):
@@ -413,6 +413,7 @@ Ein eigenes Messwerkzeug für Windows und macOS misst alle Viewer gleich, von au
 | **M9** | Stapelverarbeitung: Engine, Dialog, Mehrfachauswahl | schneller als ImageMagick; Quellen nie überschrieben | 🟡 Engine und Dialog fertig, 8,6 statt 2,1 Bilder/s; offen: Sichtprüfung unter Windows und macOS, Vergleich mit vipsthumbnail/XnConvert |
 | **M10** | Linux-Hülle (winit + wgpu), Installation, Updater | Golden-Test auf lavapipe, Start bis zum ersten Bild im CI | 🟡 fertig, im CI geprüft (Xvfb); offen: Sichtprüfung unter Wayland, Startzeiten messen |
 | **M11** | macOS-Hülle (AppKit + Metal), App-Bundle, Updater | Metal-Golden-Test, Start bis zum ersten Bild im CI | 🟡 fertig, im macOS-CI gebaut; offen: Sichtprüfung auf einem Mac (Finder, HEIC, Farbprofil, Menüleiste), Startzeiten messen |
+| **M12** | Bildschirmfotos (nach dem Merge von PR #22, eigener PR) | Druck-Taste bis Overlay ohne spürbare Verzögerung | ⬜ geplant: globales Kürzel (Standard Druck-Taste, im Resident-Modus), Bereich/Fenster/Bildschirm über ein Overlay aus `blinzel-ui`, PNG nach `Bilder\Screenshots`, öffnet im Viewer; kein eigener Editor, stattdessen „Öffnen mit…“ und „Bearbeiten mit…“ (fester Editor, Taste E) für alle Bilder. Erst Windows, dann macOS, dann Linux (Wayland über das Screenshot-Portal) |
 
 **Reihenfolge:**
 1. PR #1: M0–M2 inklusive Windows-11-Baseline und „Ausschnitt speichern“.
