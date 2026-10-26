@@ -37,7 +37,9 @@ type CreateDeviceFn = unsafe extern "system" fn(
     context: *mut *mut c_void,
 ) -> HRESULT;
 
-/// Device, immediate context and the objects derived from them.
+/// Device, immediate context and the objects derived from them. Clones
+/// share them (a second swap chain on the same device).
+#[derive(Clone)]
 pub struct Gfx {
     pub device: ID3D11Device,
     /// Only ever used on the UI thread (or the single bench thread).

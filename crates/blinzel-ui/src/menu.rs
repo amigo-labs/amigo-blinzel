@@ -44,7 +44,23 @@ pub enum Cmd {
     /// Tray: exit for good, also in resident mode.
     Quit,
     Exit,
+    /// The system's "Open with" choice for the current image.
+    OpenWith,
+    /// The current image in the configured editor (asks for one first).
+    EditWith,
+    ChooseEditor,
+    /// Screenshot: pick a region, window or monitor.
+    Capture,
+    /// Screenshot of the monitor under the pointer, at once.
+    CaptureScreen,
+    ToggleScreenshotHotkey,
+    ToggleScreenshotClipboard,
+    ScreenshotFolder,
 }
+
+/// Whether this platform takes screenshots yet (Windows; macOS and Linux
+/// follow).
+pub const SCREENSHOTS: bool = cfg!(windows);
 
 const LANG_BASE: u32 = 1000;
 
@@ -86,6 +102,14 @@ impl Cmd {
             Cmd::ToggleGrid => 32,
             Cmd::Notices => 33,
             Cmd::Batch => 34,
+            Cmd::OpenWith => 35,
+            Cmd::EditWith => 36,
+            Cmd::ChooseEditor => 37,
+            Cmd::Capture => 38,
+            Cmd::CaptureScreen => 39,
+            Cmd::ToggleScreenshotHotkey => 40,
+            Cmd::ToggleScreenshotClipboard => 41,
+            Cmd::ScreenshotFolder => 42,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -106,7 +130,7 @@ impl Cmd {
     }
 }
 
-pub const ALL: [Cmd; 34] = [
+pub const ALL: [Cmd; 42] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -141,6 +165,14 @@ pub const ALL: [Cmd; 34] = [
     Cmd::ToggleGrid,
     Cmd::Notices,
     Cmd::Batch,
+    Cmd::OpenWith,
+    Cmd::EditWith,
+    Cmd::ChooseEditor,
+    Cmd::Capture,
+    Cmd::CaptureScreen,
+    Cmd::ToggleScreenshotHotkey,
+    Cmd::ToggleScreenshotClipboard,
+    Cmd::ScreenshotFolder,
 ];
 
 /// State the menu reflects.
@@ -162,6 +194,8 @@ pub struct MenuState {
     pub color_management: bool,
     pub filmstrip: bool,
     pub grid: bool,
+    pub screenshot_hotkey: bool,
+    pub screenshot_clipboard: bool,
 }
 
 /// One entry of a menu.
@@ -355,6 +389,20 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
         false,
         s.has_images,
     ));
+    m.push(MenuItem::item(
+        Cmd::OpenWith,
+        tr(Msg::MenuOpenWith),
+        None,
+        false,
+        s.has_image,
+    ));
+    m.push(MenuItem::item(
+        Cmd::EditWith,
+        tr(Msg::MenuEditWith),
+        Some("E".into()),
+        false,
+        s.has_image,
+    ));
     m.push(MenuItem::Separator);
 
     m.push(MenuItem::item(
@@ -412,7 +460,7 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
         ));
     }
     m.push(MenuItem::Sub(tr(Msg::MenuLanguage).into(), lang));
-    let settings = vec![
+    let mut settings = vec![
         MenuItem::item(
             Cmd::ToggleResident,
             tr(Msg::SettingResident),
@@ -441,7 +489,40 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
             s.auto_update,
             true,
         ),
+        MenuItem::item(
+            Cmd::ChooseEditor,
+            tr(Msg::MenuChooseEditor),
+            None,
+            false,
+            true,
+        ),
     ];
+    if SCREENSHOTS {
+        settings.extend([
+            MenuItem::Separator,
+            MenuItem::item(
+                Cmd::ToggleScreenshotHotkey,
+                tr(Msg::SettingScreenshotHotkey),
+                None,
+                s.screenshot_hotkey && s.resident,
+                true,
+            ),
+            MenuItem::item(
+                Cmd::ToggleScreenshotClipboard,
+                tr(Msg::SettingScreenshotClipboard),
+                None,
+                s.screenshot_clipboard,
+                true,
+            ),
+            MenuItem::item(
+                Cmd::ScreenshotFolder,
+                tr(Msg::MenuScreenshotFolder),
+                None,
+                false,
+                true,
+            ),
+        ]);
+    }
     m.push(MenuItem::Sub(tr(Msg::MenuSettings).into(), settings));
     m.push(MenuItem::Separator);
     m.push(MenuItem::item(
@@ -481,6 +562,15 @@ pub fn tray_items() -> Vec<MenuItem> {
     vec![
         MenuItem::item(Cmd::ShowWindow, tr(Msg::TrayShow), None, false, true),
         MenuItem::item(Cmd::Open, tr(Msg::MenuOpen), None, false, true),
+        MenuItem::Separator,
+        MenuItem::item(Cmd::Capture, tr(Msg::TrayCapture), None, false, true),
+        MenuItem::item(
+            Cmd::CaptureScreen,
+            tr(Msg::TrayCaptureScreen),
+            None,
+            false,
+            true,
+        ),
         MenuItem::Separator,
         MenuItem::item(Cmd::Quit, tr(Msg::Exit), None, false, true),
     ]

@@ -468,6 +468,29 @@ impl Shell {
                 el.exit();
                 vec![]
             }
+            Action::OpenWith(file) => {
+                open_with(&file);
+                vec![]
+            }
+            Action::EditWith { editor, file } => {
+                if let Err(e) = std::process::Command::new(&editor).arg(&file).spawn() {
+                    app.show_notice(trf(Msg::EditorFailed, &[("reason", &e.to_string())]));
+                }
+                vec![]
+            }
+            Action::ChooseEditor { then } => {
+                match rfd::FileDialog::new()
+                    .set_title(tr(Msg::MenuChooseEditor))
+                    .pick_file()
+                {
+                    Some(editor) => app.editor_chosen(editor, then),
+                    None => vec![],
+                }
+            }
+            // Screenshots are not on Linux yet (the menu does not offer them).
+            Action::Capture { .. }
+            | Action::SetScreenshotHotkey(_)
+            | Action::PickScreenshotFolder => vec![],
         }
     }
 
@@ -712,6 +735,42 @@ const URL: &str = "https://github.com/amigo-labs/amigo-blinzel";
 
 fn open_url(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// The desktop's "Open with" choice through the OpenURI portal (`ask`);
+/// without a portal, the default application.
+fn open_with(file: &Path) {
+    let uri = format!(
+        "file://{}",
+        file.to_string_lossy()
+            .bytes()
+            .map(|b| match b {
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect::<String>()
+    );
+    let asked = std::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.portal.Desktop",
+            "--object-path",
+            "/org/freedesktop/portal/desktop",
+            "--method",
+            "org.freedesktop.portal.OpenURI.OpenURI",
+            "",
+            &uri,
+            "{'ask': <true>}",
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !asked {
+        open_url(&file.to_string_lossy());
+    }
 }
 
 /// Writes the licence texts next to the cache and opens them.

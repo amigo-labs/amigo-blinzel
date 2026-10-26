@@ -40,6 +40,8 @@ pub mod resident;
 #[cfg(windows)]
 pub mod run;
 #[cfg(windows)]
+pub mod screenshot;
+#[cfg(windows)]
 pub mod setup;
 #[cfg(windows)]
 pub mod update;

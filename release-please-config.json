@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "draft": true,
+  "force-tag-creation": true,
+  "bootstrap-sha": "5eb2dcb224bd882d286b29ef6b9ff1630d1407f1",
+  "pull-request-title-pattern": "chore: release amigo-blinzel ${version}",
+  "pull-request-header": "Automated release proposed by release-please. Merging this PR tags the version and builds and publishes the release (Windows, macOS, Linux; signed SHA256SUMS).",
+  "changelog-sections": [
+    {"type": "feat", "section": "Features"},
+    {"type": "fix", "section": "Bug Fixes"},
+    {"type": "perf", "section": "Performance Improvements"},
+    {"type": "revert", "section": "Reverts"},
+    {"type": "docs", "section": "Documentation", "hidden": true},
+    {"type": "refactor", "section": "Code Refactoring", "hidden": true},
+    {"type": "test", "section": "Tests", "hidden": true},
+    {"type": "build", "section": "Build System", "hidden": true},
+    {"type": "ci", "section": "Continuous Integration", "hidden": true},
+    {"type": "chore", "section": "Miscellaneous", "hidden": true}
+  ],
+  "packages": {
+    ".": {
+      "package-name": "amigo-blinzel",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {"type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version"}
+      ]
+    }
+  }
+}

@@ -17,5 +17,6 @@ pub mod loader;
 pub mod menu;
 pub mod popup;
 pub mod settings_store;
+pub mod snip;
 pub mod thumbs;
 pub mod widgets;

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (not released yet)
+## The first version (0.1.0)
 
 The first version.
 

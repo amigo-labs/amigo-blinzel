@@ -98,7 +98,7 @@ pub fn export(
     let bgra = img.to_bgra();
     let (pixels, w, h) = orient_bgra(&bgra, img.width, img.height, cut.view_orientation);
     let bytes = match format {
-        SaveFormat::Png => encode_png(&pixels, w, h)?,
+        SaveFormat::Png => encode_png_bgra(&pixels, w, h)?,
         SaveFormat::Jpeg => encode_jpeg(&pixels, w, h, data, info.as_ref())?,
         SaveFormat::Webp | SaveFormat::Avif => encode_modern(&pixels, w, h, data, format)?,
     };
@@ -180,7 +180,8 @@ fn encode_modern(_: &[u8], _: u32, _: u32, _: &[u8], _: SaveFormat) -> Result<Ve
     Err("WebP and AVIF need the batch feature".into())
 }
 
-fn encode_png(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>, String> {
+/// Straight-alpha BGRA (tight rows) as PNG; RGB when fully opaque.
+pub fn encode_png_bgra(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>, String> {
     let opaque = bgra.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
     let (color, data): (png::ColorType, Vec<u8>) = if opaque {
         (

@@ -1,8 +1,11 @@
 name: Release
 
-# A tag v<version> builds every platform on GitHub-hosted runners (Windows
-# and Linux for x64 and ARM64, macOS as one universal app), writes
-# SHA256SUMS signed with our own Ed25519 key and creates a draft release.
+# Builds the release for a tag v<version>: every platform on GitHub-hosted
+# runners (Windows and Linux for x64 and ARM64, macOS as one universal
+# app), SHA256SUMS signed with our own Ed25519 key, all attached to the
+# tag's GitHub release, which is then published. release-please.yml calls
+# this after a release PR is merged (it creates the tag and the draft
+# release); by hand, run it for an existing tag.
 # Nothing carries a code signing certificate (docs/PLAN.md, section 10):
 # no Authenticode, the Mac app is signed ad hoc and not notarized.
 #
@@ -10,9 +13,17 @@ name: Release
 #   secret   RELEASE_SIGNING_KEY       Ed25519 seed (blinzel-release keygen)
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and publish (e.g. v0.1.0)
+        type: string
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,6 +48,8 @@ jobs:
             target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - run: rustup toolchain install && rustup show active-toolchain
       # Third-party actions are pinned to commits: this workflow handles the
       # release signing key.
@@ -46,11 +59,11 @@ jobs:
         shell: bash
         run: echo "version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
       - name: Tag matches the crate version
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: test "v$VERSION" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v$VERSION"; exit 1; }
+          TAG: ${{ inputs.tag }}
+        run: test "v$VERSION" = "$TAG" || { echo "tag $TAG != v$VERSION"; exit 1; }
       - run: cargo build --release --locked --target ${{ matrix.target }} -p blinzel-app
       - name: Name the setup executable
         shell: bash
@@ -77,6 +90,8 @@ jobs:
             runner: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - run: rustup toolchain install && rustup show active-toolchain
       - run: sudo apt-get update && sudo apt-get install -y nasm
       - run: cargo build --release --locked -p blinzel-app
@@ -104,6 +119,8 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - run: rustup toolchain install && rustup target add x86_64-apple-darwin
       # NASM: libjpeg-turbo's and dav1d's x86-64 assembly.
       - run: brew install nasm
@@ -124,13 +141,15 @@ jobs:
           path: dist/amigo-blinzel-macos.zip
 
   publish:
-    name: Checksums and draft release
+    name: Checksums and release
     needs: [build, linux, macos]
     runs-on: windows-2025
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - run: rustup toolchain install && rustup show active-toolchain
       - uses: actions/download-artifact@v4
         with:
@@ -147,12 +166,18 @@ jobs:
         run: |
           test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY secret is missing"; exit 1; }
           cargo run --release -p blinzel-release -- sign dist/SHA256SUMS dist/SHA256SUMS.sig
-      - name: Draft release
-        if: startsWith(github.ref, 'refs/tags/v')
+      # release-please created the tag's release as a draft (with the
+      # changelog as notes); the files go up first, then it is published,
+      # so the updaters never see a release without its files.
+      - name: Attach the files and publish
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --draft --title "amigo-blinzel ${GITHUB_REF_NAME#v}" \
-            --generate-notes dist/amigo-blinzel-* dist/SHA256SUMS dist/SHA256SUMS.sig \
-            THIRD-PARTY-NOTICES.txt THIRD-PARTY-NOTICES-linux.txt THIRD-PARTY-NOTICES-macos.txt
+          files="dist/amigo-blinzel-* dist/SHA256SUMS dist/SHA256SUMS.sig THIRD-PARTY-NOTICES.txt THIRD-PARTY-NOTICES-linux.txt THIRD-PARTY-NOTICES-macos.txt"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "amigo-blinzel ${TAG#v}" --generate-notes
+          fi
+          gh release upload "$TAG" --clobber $files
+          gh release edit "$TAG" --draft=false --latest --title "amigo-blinzel ${TAG#v}"
