@@ -47,8 +47,10 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
       - name: Cargo.lock on the release PR
         if: steps.release.outputs.pr
+        # A step's env is evaluated before its `if`; without a release PR
+        # the output is empty, and fromJSON('') would fail the job.
         env:
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr || '{}').headBranchName }}
         run: |
           cargo update --workspace
           if ! git diff --quiet Cargo.lock; then
