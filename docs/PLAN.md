@@ -351,7 +351,7 @@ Die Hüllen setzen dieselben Traits um wie Windows (`Device`, `Canvas`, `Host`, 
 
 ### Wettbewerbs-Benchmark `blinzel-race`
 
-Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
+Ein eigenes Messwerkzeug für Windows und macOS misst alle Viewer gleich, von außen.
 
 **Umsetzung (`crates/blinzel-race`, Branch `m8-race`):**
 - `corpus <dir>`: 24 JPEGs mit 24 MP und je ca. 8 MB (Sensorrauschen, damit der Entropie-Decoder so viel arbeitet wie bei echten Fotos), jedes um eine von sechs Signaturfarben (die farbigen Ecken des RGB-Würfels). Aufeinanderfolgende Bilder unterscheiden sich immer.
@@ -359,6 +359,13 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - Tasten gehen nur raus, solange der Viewer das Vordergrundfenster besitzt.
 - `list` zeigt die erkannten Viewer mit Version (Versionsressource; `blinzel.exe` hat jetzt eine).
 - `run <dir> [--reps N] [--cold] [--only …] [--viewer name=exe] [--json …]`. `--cold` leert die Standby-Liste und braucht Administratorrechte.
+- **macOS** (`capture_macos.rs`, `sys_macos.rs`, `viewers_macos.rs`; der Ablauf in `race.rs` ist derselbe):
+  - Erkennung über ScreenCaptureKit auf jedem Display. Ein Frame kommt nur, wenn sich der Bildschirm geändert hat, und trägt seine Anzeigezeit (`mach_absolute_time`). Das Raster skaliert ScreenCaptureKit auf der GPU herunter.
+  - Start über die Startdienste (`open -a App datei`), wie im Finder. Beenden höflich über `NSRunningApplication.terminate`, nach 3 s mit `SIGKILL`.
+  - Tasten über `CGEvent`, nur solange das vorderste Fenster dem Viewer gehört (`CGWindowListCopyWindowInfo`). `--cold` ruft `purge` über `sudo` auf und fragt dafür einmal am Anfang nach dem Passwort; das Werkzeug selbst läuft nicht als root, sonst starteten auch die Viewer als root.
+  - Das Terminal braucht die Freigaben „Bildschirmaufnahme“ und „Bedienungshilfen“; ohne sie bricht `run` mit einem Hinweis ab.
+  - Kandidaten: amigo-blinzel, Vorschau, XnView MP, qView, Xee³, ApolloOne, Phoenix Slides, Pixea. Vorschau blättert bei einer einzelnen Datei nicht durch den Ordner; für sie gibt es nur den Wert fürs Öffnen.
+  - Ergebnis nach `website/data/race-macos.json`; die Website zeigt es als eigenen macOS-Abschnitt (`{{race-macos:…}}`).
 
 **Erste Probeläufe** (Laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 Monitore; nur Funktionsnachweis, keine Referenzzahlen):
 
@@ -446,6 +453,7 @@ Ein eigenes Messwerkzeug für Windows misst alle Viewer gleich, von außen.
 - 🟡 Release-Signaturschlüssel: erzeugt, der öffentliche Teil steht in `crates/blinzel-core/src/update.rs`. Offen: den geheimen Teil als Secret `RELEASE_SIGNING_KEY` hinterlegen und sicher aufbewahren (geht er verloren, nehmen installierte Kopien keine Updates mehr an).
 - 🟡 Cloudflare: Workers Builds ist verbunden; optional eine eigene Domain. Die Secrets für den GitHub-Workflow braucht es damit nicht.
 - ⬜ Referenzmaschine für die Website-Benchmarks festlegen, dort `blinzel-race run … --cold --json website/data/race.json` (als Administrator) laufen lassen und die JSON committen.
+- ⬜ Dasselbe auf einem Mac (Apple Silicon): `blinzel-race corpus testbilder`, dann `blinzel-race run testbilder --cold --json website/data/race-macos.json` (fragt einmal nach dem `sudo`-Passwort). Vorher die Viewer installieren und dem Terminal „Bildschirmaufnahme“ und „Bedienungshilfen“ erlauben.
 - ⬜ Impressum: Angaben zum Betreiber der Website (Name, Anschrift, Kontakt), falls die Seite geschäftsmäßig betrieben wird. Die Website hat dafür noch keine Seite; die Angaben kann nur der Betreiber liefern.
 - ⬜ Erster manueller Test unter Windows 11 (siehe Verifikation).
 - ⬜ Erster manueller Test auf einem Mac und unter Linux (siehe Verifikation).

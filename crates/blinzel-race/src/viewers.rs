@@ -8,7 +8,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::PCWSTR;
 
-use crate::sys::wide;
+use crate::sys::{open_uri, wide};
 
 #[derive(Clone, Debug)]
 pub enum Launch {
@@ -97,6 +97,20 @@ pub fn detect() -> Vec<Viewer> {
         },
     });
     out
+}
+
+/// Starts the viewer with `file`.
+pub fn launch(v: &Viewer, file: &Path) -> Result<(), String> {
+    match &v.launch {
+        Launch::Exe(exe) => std::process::Command::new(exe)
+            .arg(file)
+            .spawn()
+            .map(drop)
+            .map_err(|e| format!("{}: {e}", exe.display())),
+        Launch::Uri { template, .. } => {
+            open_uri(&template.replace("{file}", &file.display().to_string()))
+        }
+    }
 }
 
 /// `name=path` from the command line.

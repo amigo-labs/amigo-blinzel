@@ -85,9 +85,14 @@ fn name(v: &Json) -> String {
 
 /// One chart or table: `open_warm`, `open_cold`, `next` (time, shorter
 /// is better), `burst` (share of images shown), `table`, `machine`.
-/// `t` translates the generator's keys; `decimal_sep` and `machine_*`
-/// included.
-pub fn race(kind: &str, race: &Json, t: impl Fn(&str) -> &'static str) -> Result<String, String> {
+/// `raw` links the report itself; `t` translates the generator's keys,
+/// `decimal_sep` and `machine_*` included.
+pub fn race(
+    kind: &str,
+    race: &Json,
+    raw: &str,
+    t: impl Fn(&str) -> &'static str,
+) -> Result<String, String> {
     let vs = viewers(race)?;
     let sep = t("decimal_sep");
     let none = || format!("<p class=\"pending\">{}</p>", t("none"));
@@ -154,8 +159,9 @@ pub fn race(kind: &str, race: &Json, t: impl Fn(&str) -> &'static str) -> Result
                 );
             }
             html += &format!(
-                "</tbody></table></div><p class=\"note\">{} · <a href=\"/race.json\">{}</a></p>",
+                "</tbody></table></div><p class=\"note\">{} · <a href=\"{}\">{}</a></p>",
                 t("median"),
+                esc(raw),
                 t("raw")
             );
             Ok(html)
@@ -212,19 +218,24 @@ pub mod tests {
                 _ => "",
             }
         };
-        let svg = race("open_warm", &j, t).unwrap();
+        let svg = race("open_warm", &j, "/race.json", t).unwrap();
         // Faster first, ours highlighted.
         assert!(svg.find("amigo-blinzel").unwrap() < svg.find("ImageGlass").unwrap());
         assert!(svg.contains("bar ours"));
         assert!(svg.contains("1,80 s") && svg.contains("270 ms"));
-        assert!(race("open_cold", &j, t).unwrap().contains("not measured"));
-        let burst = race("burst", &j, t).unwrap();
+        assert!(
+            race("open_cold", &j, "/race.json", t)
+                .unwrap()
+                .contains("not measured")
+        );
+        let burst = race("burst", &j, "/race.json", t).unwrap();
         assert!(burst.contains("20 / 20") && burst.contains("6 / 20"));
-        let table = race("table", &j, t).unwrap();
+        let table = race("table", &j, "/race.json", t).unwrap();
         assert!(table.contains("<tr class=\"ours\">"));
-        let machine = race("machine", &j, t).unwrap();
+        assert!(table.contains("href=\"/race.json\""));
+        let machine = race("machine", &j, "/race.json", t).unwrap();
         assert!(machine.contains("<dt>Processor</dt>") && machine.contains("<dt>gpu</dt>"));
-        assert!(race("bogus", &j, t).is_err());
+        assert!(race("bogus", &j, "/race.json", t).is_err());
         assert_eq!(esc("<a&\"b\">"), "&lt;a&amp;&quot;b&quot;&gt;");
     }
 }

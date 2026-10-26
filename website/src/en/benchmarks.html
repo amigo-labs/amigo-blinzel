@@ -1,13 +1,26 @@
 <!-- title: Benchmarks -->
-<p>All values: median over several repetitions, the 95th percentile in parentheses. Measured with <code>blinzel-race</code> on this machine:</p>
+<p>All values: median over several repetitions, the 95th percentile in parentheses. Measured with <code>blinzel-race</code>, on Windows and on macOS, each on one fixed machine.</p>
+<h2>Windows</h2>
 {{race:machine}}
-<h2>Opening (warm)</h2>
+<h3>Opening (warm)</h3>
 {{race:open_warm}}
-<h2>Opening (cold, file cache emptied)</h2>
+<h3>Opening (cold, file cache emptied)</h3>
 {{race:open_cold}}
-<h2>Next image</h2>
+<h3>Next image</h3>
 {{race:next}}
-<h2>Key repeat</h2>
+<h3>Key repeat</h3>
 {{race:burst}}
-<h2>All values</h2>
+<h3>All values</h3>
 {{race:table}}
+<h2>macOS</h2>
+{{race-macos:machine}}
+<h3>Opening (warm)</h3>
+{{race-macos:open_warm}}
+<h3>Opening (cold, file cache emptied)</h3>
+{{race-macos:open_cold}}
+<h3>Next image</h3>
+{{race-macos:next}}
+<h3>Key repeat</h3>
+{{race-macos:burst}}
+<h3>All values</h3>
+{{race-macos:table}}

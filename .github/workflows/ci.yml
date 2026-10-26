@@ -56,8 +56,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release --all-targets -- -D warnings
-      - run: cargo test -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release
+      - run: cargo clippy -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release -p blinzel-race --all-targets -- -D warnings
+      - run: cargo test -p blinzel-core -p blinzel-ui -p blinzel-app -p blinzel-release -p blinzel-race
+      # The competitor benchmark finds the viewers (at least Preview); the
+      # measurement itself needs a real Mac with screen recording permission.
+      - run: cargo run -q -p blinzel-race -- list
       # The app bundle starts, shows a test image and exits.
       - name: App bundle and smoke test (window, first frame)
         run: |

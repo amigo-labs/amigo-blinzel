@@ -1,6 +1,7 @@
 //! Builds the website (M8): `website/src` (layout, stylesheet, one HTML
-//! fragment per page and language) plus `website/data/race.json` (from
-//! `blinzel-race`) and `CHANGELOG.md` → `website/dist`, ready for Cloudflare
+//! fragment per page and language) plus `website/data/race.json` and
+//! `race-macos.json` (from `blinzel-race` on Windows and macOS) and
+//! `CHANGELOG.md` → `website/dist`, ready for Cloudflare
 //! Workers static assets. Charts are generated here as inline SVG; the
 //! browser runs no chart library.
 //!
@@ -15,6 +16,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use blinzel_core::json::Json;
+
+/// The `blinzel-race` reports: placeholder prefix (`{{race:open_warm}}`)
+/// and file in `website/data/`, published next to the pages.
+const RACES: [(&str, &str); 2] = [("race", "race.json"), ("race-macos", "race-macos.json")];
+
+/// One report, `None` until its reference measurement exists.
+struct Race {
+    prefix: &'static str,
+    file: &'static str,
+    data: Option<Json>,
+}
 
 /// Pages in navigation order; `index` is the start page.
 const PAGES: [&str; 9] = [
@@ -110,6 +122,8 @@ impl Lang {
             (Lang::En, "machine_monitors") => "Monitors",
             (Lang::De, "machine_os_build") => "Windows-Build",
             (Lang::En, "machine_os_build") => "Windows build",
+            (Lang::De, "machine_os") => "Betriebssystem",
+            (Lang::En, "machine_os") => "Operating system",
             _ => "",
         }
     }
@@ -148,27 +162,30 @@ fn url(lang: Lang, slug: &str) -> String {
 }
 
 /// Fills the `{{…}}` placeholders of a page body.
-fn expand(body: &str, lang: Lang, race: Option<&Json>, changelog: &str) -> Result<String, String> {
+fn expand(body: &str, lang: Lang, races: &[Race], changelog: &str) -> Result<String, String> {
     let mut out = String::with_capacity(body.len());
     let mut rest = body;
     while let Some(i) = rest.find("{{") {
         out.push_str(&rest[..i]);
         let end = rest[i..].find("}}").ok_or("unclosed {{")? + i;
         let key = rest[i + 2..end].trim();
-        out.push_str(&placeholder(key, lang, race, changelog)?);
+        out.push_str(&placeholder(key, lang, races, changelog)?);
         rest = &rest[end + 2..];
     }
     out.push_str(rest);
     Ok(out)
 }
 
-fn placeholder(
-    key: &str,
-    lang: Lang,
-    race: Option<&Json>,
-    changelog: &str,
-) -> Result<String, String> {
+fn placeholder(key: &str, lang: Lang, races: &[Race], changelog: &str) -> Result<String, String> {
     const RELEASES: &str = "https://github.com/amigo-labs/amigo-blinzel/releases/latest/download";
+    if let Some((prefix, kind)) = key.split_once(':')
+        && let Some(race) = races.iter().find(|r| r.prefix == prefix)
+    {
+        return match &race.data {
+            None => Ok(format!("<p class=\"pending\">{}</p>", lang.t("pending"))),
+            Some(r) => charts::race(kind, r, &format!("/{}", race.file), |k| lang.t(k)),
+        };
+    }
     Ok(match key {
         "version" => env!("CARGO_PKG_VERSION").to_string(),
         "download:x64" => format!("{RELEASES}/amigo-blinzel-setup-x64.exe"),
@@ -178,10 +195,6 @@ fn placeholder(
         "download:linux-arm64" => format!("{RELEASES}/amigo-blinzel-linux-arm64.tar.gz"),
         "download:sums" => format!("{RELEASES}/SHA256SUMS"),
         "changelog" => markdown::to_html(changelog),
-        k if k.starts_with("race:") => match race {
-            None => format!("<p class=\"pending\">{}</p>", lang.t("pending")),
-            Some(r) => charts::race(&k[5..], r, |key| lang.t(key))?,
-        },
         other => return Err(format!("unknown placeholder {{{{{other}}}}}")),
     })
 }
@@ -233,13 +246,17 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
     let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()));
     let layout = read(&src.join("layout.html"))?;
     let changelog = read(changelog).unwrap_or_default();
-    let race_path = site.join("data").join("race.json");
-    let race = match fs::read_to_string(&race_path) {
-        Ok(t) => {
-            Some(Json::parse(&t).ok_or_else(|| format!("{}: invalid JSON", race_path.display()))?)
-        }
-        Err(_) => None,
-    };
+    let mut races = Vec::new();
+    for (prefix, file) in RACES {
+        let path = site.join("data").join(file);
+        let data = match fs::read_to_string(&path) {
+            Ok(t) => {
+                Some(Json::parse(&t).ok_or_else(|| format!("{}: invalid JSON", path.display()))?)
+            }
+            Err(_) => None,
+        };
+        races.push(Race { prefix, file, data });
+    }
 
     if dist.exists() {
         fs::remove_dir_all(&dist).map_err(|e| e.to_string())?;
@@ -250,7 +267,7 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
         let mut pages = Vec::new();
         for slug in PAGES {
             let mut p = read_page(&src, lang, slug)?;
-            p.body = expand(&p.body, lang, race.as_ref(), &changelog)
+            p.body = expand(&p.body, lang, &races, &changelog)
                 .map_err(|e| format!("{}/{slug}: {e}", lang.code()))?;
             pages.push(p);
         }
@@ -272,8 +289,9 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
             fs::copy(&from, dist.join(file)).map_err(|e| format!("{file}: {e}"))?;
         }
     }
-    if race.is_some() {
-        fs::copy(&race_path, dist.join("race.json")).map_err(|e| e.to_string())?;
+    for race in races.iter().filter(|r| r.data.is_some()) {
+        fs::copy(site.join("data").join(race.file), dist.join(race.file))
+            .map_err(|e| format!("{}: {e}", race.file))?;
     }
     Ok(dist)
 }
@@ -297,13 +315,19 @@ mod tests {
 
     #[test]
     fn expands_placeholders() {
-        let s = expand("a {{version}} b {{download:x64}}", Lang::De, None, "").unwrap();
+        let races = [Race {
+            prefix: "race",
+            file: "race.json",
+            data: None,
+        }];
+        let s = expand("a {{version}} b {{download:x64}}", Lang::De, &races, "").unwrap();
         assert!(s.starts_with(&format!("a {} b https://", env!("CARGO_PKG_VERSION"))));
         assert!(s.ends_with("amigo-blinzel-setup-x64.exe"));
-        let pending = expand("{{race:open_warm}}", Lang::En, None, "").unwrap();
+        let pending = expand("{{race:open_warm}}", Lang::En, &races, "").unwrap();
         assert!(pending.contains("reference measurement"));
-        assert!(expand("{{nope}}", Lang::De, None, "").is_err());
-        assert!(expand("{{version", Lang::De, None, "").is_err());
+        assert!(expand("{{nope}}", Lang::De, &races, "").is_err());
+        assert!(expand("{{race-other:next}}", Lang::De, &races, "").is_err());
+        assert!(expand("{{version", Lang::De, &races, "").is_err());
     }
 
     /// The real website sources build, with and without measurements.
@@ -324,6 +348,15 @@ mod tests {
         let html = fs::read_to_string(dist.join("en/benchmarks.html")).unwrap();
         assert!(html.contains("<svg"));
         assert!(html.contains("ImageGlass"));
+        // macOS still pending; then both reports, each linking its own data.
+        assert!(html.contains("reference measurement"));
+        assert!(!dist.join("race-macos.json").exists());
+        fs::write(tmp.join("data/race-macos.json"), charts::tests::SAMPLE).unwrap();
+        let dist = build(&tmp, &root.join("CHANGELOG.md")).unwrap();
+        let html = fs::read_to_string(dist.join("en/benchmarks.html")).unwrap();
+        assert!(!html.contains("reference measurement"));
+        assert!(html.contains("href=\"/race.json\"") && html.contains("href=\"/race-macos.json\""));
+        assert!(dist.join("race-macos.json").is_file());
         for lang in ["de", "en"] {
             for p in PAGES {
                 let html = fs::read_to_string(dist.join(lang).join(format!("{p}.html")))
