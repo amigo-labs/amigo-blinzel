@@ -232,175 +232,175 @@ Principle as above: source files stay unchanged. Every output is a new file; a n
 - ✅ **"Save cutout as"** also as WebP and AVIF (the same encoders).
 - ⬜ Comparison with `vipsthumbnail` and XnConvert in `blinzel-race`.
 
-## 8. Mehrsprachigkeit
+## 8. Localization
 
-- 🟡 `i18n/<sprache>.toml`; `build.rs` erzeugt `enum Msg` und statische Tabellen. Zur Laufzeit ist eine Übersetzung nur ein Array-Index.
-- 🟡 Fehlende Keys fallen auf Englisch zurück (Build-Warnung). Platzhalterfehler brechen den Build ab.
-- 🟡 Sprachwahl über `GetUserPreferredUILanguages`; im Menü überschreibbar, ohne Neustart.
-- 🟡 Plural-Regeln (CLDR-Familien).
-- 🟡 RTL-Sprachen: `[meta] direction = "rtl"` in `i18n/<sprache>.toml` ergibt `Lang::is_rtl()`. Dann spiegelt die App die Bedienelemente (Menü rechts, Fensterknöpfe links), öffnet Menüs gespiegelt (`TPM_LAYOUTRTL`) von der rechten Kante, setzt die Leserichtung von DirectWrite und der Meldungsfenster (`MB_RTLREADING`) und tauscht ← und → beim Blättern. Offen: Filmstreifen/Raster und der Setup-Dialog bleiben links-nach-rechts; eine RTL-Sprache liefern wir noch nicht aus (Übersetzung von Muttersprachlern nötig).
+- 🟡 `i18n/<sprache>.toml`; `build.rs` generates `enum Msg` and static tables. At runtime a translation is just an array index.
+- 🟡 Missing keys fall back to English (build warning). Placeholder errors abort the build.
+- 🟡 Language selection via `GetUserPreferredUILanguages`; can be overridden in the menu, without a restart.
+- 🟡 Plural rules (CLDR families).
+- 🟡 RTL languages: `[meta] direction = "rtl"` in `i18n/<sprache>.toml` yields `Lang::is_rtl()`. The app then mirrors the controls (menu on the right, window buttons on the left), opens menus mirrored (`TPM_LAYOUTRTL`) from the right edge, sets the reading direction of DirectWrite and of the message boxes (`MB_RTLREADING`) and swaps ← and → when flipping through images. Open: filmstrip/grid and the setup dialog stay left-to-right; we do not ship an RTL language yet (translation by native speakers needed).
 
-## 9. Plattformen
+## 9. Platforms
 
-### Windows 11 ab 24H2
+### Windows 11 24H2 or later
 
-Nur Versionen mit Microsoft-Support. Stand Oktober 2026:
+Only versions with Microsoft support. As of October 2026:
 
 | Version | Support |
 |---|---|
-| Windows 11 25H2 | Home/Pro bis Okt. 2027, Enterprise bis Okt. 2028 |
-| Windows 11 24H2 | Enterprise/Education bis Okt. 2027 |
+| Windows 11 25H2 | Home/Pro until Oct. 2027, Enterprise until Oct. 2028 |
+| Windows 11 24H2 | Enterprise/Education until Oct. 2027 |
 
-Windows 10 wird nicht unterstützt: Für Home/Pro ist der Support beendet, nur Commercial ESU und LTSC laufen noch.
+Windows 10 is not supported: support has ended for Home/Pro, only Commercial ESU and LTSC are still running.
 
-**Konsequenzen:**
-- 🟡 Minimum Direct3D Feature Level 11_0 und Shader Model 5. Jedes Windows-11-Gerät hat eine DX12/WDDM-2-GPU. Keine FL-10-Fallbacks.
-- 🟡 Versionsprüfung: Build < 26100 → lokalisierte Meldung beim Start bzw. im Installer.
-- 🟡 Anwendungsmanifest: supportedOS, PerMonitorV2, longPathAware, UTF-8-Codepage.
-- 🟡 ARM64-Build im CI (cross von x64); Tests laufen auf x64.
-- Ohne Fallbacks nutzbar: EcoQoS, CPU-Sets, Snap-Layouts, Dark-Mode-Attribute, WIC-Codecs für HEIF, AVIF und WebP (soweit die Store-Erweiterungen installiert sind).
+**Consequences:**
+- 🟡 Minimum Direct3D feature level 11_0 and Shader Model 5. Every Windows 11 device has a DX12/WDDM 2 GPU. No FL 10 fallbacks.
+- 🟡 Version check: build < 26100 → localized message at startup or in the installer.
+- 🟡 Application manifest: supportedOS, PerMonitorV2, longPathAware, UTF-8 code page.
+- 🟡 ARM64 build in CI (cross from x64); tests run on x64.
+- Usable without fallbacks: EcoQoS, CPU sets, snap layouts, dark mode attributes, WIC codecs for HEIF, AVIF and WebP (as far as the Store extensions are installed).
 
-### macOS und Linux (M10, M11)
+### macOS and Linux (M10, M11)
 
-Die Hüllen setzen dieselben Traits um wie Windows (`Device`, `Canvas`, `Host`, `Services` in `blinzel-ui/src/backend.rs`). Die Uniforms jedes Zeichenaufrufs kommen für wgpu und Metal aus `blinzel_ui::draws`; die Shader sind Zeile-für-Zeile-Ports von `blinzel.hlsl` und werden wie WARP gegen den CPU-Referenz-Renderer geprüft (lavapipe im Linux-CI, das Metal-Gerät des macOS-Runners).
+The shells implement the same traits as Windows (`Device`, `Canvas`, `Host`, `Services` in `blinzel-ui/src/backend.rs`). The uniforms of each draw call come from `blinzel_ui::draws` for wgpu and Metal; the shaders are line-by-line ports of `blinzel.hlsl` and, like WARP, are checked against the CPU reference renderer (lavapipe in the Linux CI, the Metal device of the macOS runner).
 
 **Linux:**
-- 🟡 Rahmenloses winit-Fenster (Ränder ziehen die Größe, der obere Streifen verschiebt), Menü und Dialoge von der App selbst gezeichnet, Dateidialoge über das xdg-Portal (rfd), Papierkorb, Zwischenablage, Ordner beobachten (inotify), Einzelinstanz über einen Unix-Socket.
-- 🟡 Farbmanagement über Little CMS; Ziel ist unter X11 das Profil, das colord oder KDE als `_ICC_PROFILE` am Root-Fenster veröffentlichen (über RandR dem Monitor des Fensters zugeordnet). Wayland hat dafür noch kein Protokoll: dort sRGB.
-- 🟡 `blinzel --install` / `--uninstall`: `~/.local/share/amigo-blinzel/`, Link `~/.local/bin/blinzel`, Desktop-Eintrag mit MIME-Typen, Icon; app id/WM_CLASS passen zum Eintrag.
-- 🟡 Updater wie unter Windows für die installierte Kopie; Asset `amigo-blinzel-linux-<arch>` (die nackte Datei), Downloads über `curl`.
-- Nicht unter Linux: Resident-Modus und Tray.
+- 🟡 Frameless winit window (the borders resize, the top strip moves), menu and dialogs drawn by the app itself, file dialogs via the xdg portal (rfd), trash, clipboard, folder watching (inotify), single instance via a Unix socket.
+- 🟡 Color management via Little CMS; under X11 the target is the profile that colord or KDE publish as `_ICC_PROFILE` on the root window (mapped to the window's monitor via RandR). Wayland has no protocol for this yet: sRGB there.
+- 🟡 `blinzel --install` / `--uninstall`: `~/.local/share/amigo-blinzel/`, link `~/.local/bin/blinzel`, desktop entry with MIME types, icon; app id/WM_CLASS match the entry.
+- 🟡 Updater as on Windows for the installed copy; asset `amigo-blinzel-linux-<arch>` (the bare file), downloads via `curl`.
+- Not on Linux: resident mode and tray.
 
 **macOS:**
-- 🟡 NSWindow mit Inhalt unter der transparenten Titelleiste, `CAMetalLayer` als Ebene der Ansicht, Menüleiste (Programm-Menü und „Bild“, beim Öffnen aus dem Menübaum gefüllt) und Kontextmenü als NSMenu, NSOpenPanel/NSSavePanel, Papierkorb, Zwischenablage (PNG), Ordner beobachten (FSEvents), Dateien aus dem Finder über `application:openURLs:`, Drag & Drop.
-- 🟡 ImageIO als System-Decoder: HEIC zuerst dort (Hardware-HEVC, Apples Lizenz), RAW, TIFF und Übriges als Rückfall; verkleinerte Anfragen über den Thumbnail-Pfad.
-- 🟡 Farbmanagement: Ziel ist das Profil des Bildschirms (`CGDisplayCopyColorSpace`); die Metal-Ebene hat keinen eigenen Farbraum, macOS zeigt ihre Pixel also unverändert, wie unter Windows.
-- 🟡 App-Bundle (`blinzel-release macos-bundle`): Info.plist mit Dokumenttypen, Icon (ICNS aus dem Icon-Generator), Universal-Binary per `lipo`, ad hoc signiert, nicht notarisiert. Updater tauscht das Bundle, das vorige bleibt für den Rollback daneben.
-- dav1d-Assembler nur auf x86-64: Das veröffentlichte `rav1d` enthält `src/arm/asm-offsets.h` nicht, das seine ARM-Assembler-Dateien einbinden. ARM64 (Mac und Linux) nutzt die Rust-Fallbacks.
+- 🟡 NSWindow with content under the transparent title bar, `CAMetalLayer` as the view's layer, menu bar (application menu and "Image", filled from the menu tree when opened) and context menu as NSMenu, NSOpenPanel/NSSavePanel, Trash, clipboard (PNG), folder watching (FSEvents), files from the Finder via `application:openURLs:`, drag & drop.
+- 🟡 ImageIO as the system decoder: HEIC there first (hardware HEVC, Apple's license), RAW, TIFF and the rest as fallback; downscaled requests via the thumbnail path.
+- 🟡 Color management: the target is the display's profile (`CGDisplayCopyColorSpace`); the Metal layer has no color space of its own, so macOS shows its pixels unchanged, as on Windows.
+- 🟡 App bundle (`blinzel-release macos-bundle`): Info.plist with document types, icon (ICNS from the icon generator), universal binary via `lipo`, ad hoc signed, not notarized. The updater swaps the bundle; the previous one stays next to it for rollback.
+- dav1d assembly only on x86-64: the published `rav1d` does not contain `src/arm/asm-offsets.h`, which its ARM assembly files include. ARM64 (Mac and Linux) uses the Rust fallbacks.
 
-## 10. Installation, Updates, Signierung (M7)
+## 10. Installation, updates, signing (M7)
 
-### Setup-Exe
+### Setup exe
 
-- 🟡 **Release-Assets** pro Release auf GitHub:
-  - `amigo-blinzel-setup-x64.exe` und `amigo-blinzel-setup-arm64.exe`, das ist dieselbe Exe wie der Viewer.
-  - `SHA256SUMS` und `SHA256SUMS.sig`.
-  - `THIRD-PARTY-NOTICES.txt` (dieselben Lizenztexte, die die Exe im Menü zeigt).
-- 🟡 **Installationsdialog:** Als Setup gestartet (Dateiname enthält `setup` oder `--install`), erscheint ein Dialog in Viewer-Optik, rahmenlos und mehrsprachig.
-- 🟡 **Installation pro Benutzer, ohne Admin**, nach `%LOCALAPPDATA%\Programs\amigo-blinzel\`:
-  - Startmenü-Verknüpfung (`IShellLinkW`, AppUserModelID).
-  - Eintrag unter `HKCU\…\Uninstall`.
-  - ProgIDs, Capabilities und RegisteredApplications anlegen.
-  - Danach die Standard-Apps-Seite öffnen (programmatisch setzen erlaubt Windows nicht).
+- 🟡 **Release assets** per release on GitHub:
+  - `amigo-blinzel-setup-x64.exe` and `amigo-blinzel-setup-arm64.exe`; this is the same exe as the viewer.
+  - `SHA256SUMS` and `SHA256SUMS.sig`.
+  - `THIRD-PARTY-NOTICES.txt` (the same license texts the exe shows in the menu).
+- 🟡 **Installation dialog:** When started as setup (file name contains `setup`, or `--install`), a dialog appears in the viewer's look, frameless and multilingual.
+- 🟡 **Per-user installation, without admin**, to `%LOCALAPPDATA%\Programs\amigo-blinzel\`:
+  - Start menu shortcut (`IShellLinkW`, AppUserModelID).
+  - Entry under `HKCU\…\Uninstall`.
+  - Create ProgIDs, Capabilities and RegisteredApplications.
+  - Then open the Default apps page (Windows does not allow setting it programmatically).
   - `SHChangeNotify`.
-- 🟡 **Deinstallation:** über die Systemeinstellungen. Die Exe kopiert sich nach `%TEMP%` und räumt von dort auf.
-- 🟡 **Silent-Modus:** `--install --silent` und `--uninstall --silent` (für winget).
-- 🟡 **Versionsprüfung im Setup:** Build < 26100 → abbrechen mit Meldung.
-- 🟡 **winget-Manifest**; ein PR an winget-pkgs nach jedem Release, optional automatisiert.
+- 🟡 **Uninstallation:** via the system settings. The exe copies itself to `%TEMP%` and cleans up from there.
+- 🟡 **Silent mode:** `--install --silent` and `--uninstall --silent` (for winget).
+- 🟡 **Version check in setup:** build < 26100 → abort with a message.
+- 🟡 **winget manifest**; a PR to winget-pkgs after every release, optionally automated.
 
-### Keine Code-Signatur
+### No code signature
 
-- ✅ **Entschieden:** Releases werden nicht mit einem Code-Signing-Zertifikat signiert (kein SignPath, kein Authenticode, auf dem Mac keine Notarisierung). Folge: Windows SmartScreen warnt beim ersten Start („Weitere Informationen“ → „Trotzdem ausführen“); die Download-Seite erklärt das.
-- 🟡 **Releases automatisch über release-please** (wie bei amigo-native):
-  1. Jeder Push auf `main` legt einen Release-PR an oder aktualisiert ihn (`.github/workflows/release-please.yml`). Er enthält die nächste Version in `Cargo.toml` und `Cargo.lock` sowie den `CHANGELOG.md`-Eintrag aus den Conventional Commits seit dem letzten Release. `feat` erhöht vor 1.0 die zweite Stelle, `fix` die dritte; `docs`, `ci`, `chore` usw. lösen kein Release aus.
-  2. Wird der Release-PR gemergt, setzt release-please den Tag `v<version>` und legt das Release als Entwurf mit dem Changelog an.
-  3. Danach baut `release.yml` alle Plattformen, erzeugt `SHA256SUMS`, signiert sie mit Ed25519, hängt die Dateien an und veröffentlicht das Release. Erst dann sehen es die Updater.
-  - `release.yml` lässt sich für einen bestehenden Tag auch von Hand starten.
-  - Konfiguration: `release-please-config.json` und `.release-please-manifest.json`. Das Manifest startet bei 0.0.0, das erste Release wird so 0.1.0. `bootstrap-sha` ist der Merge von PR #22.
-  - Optional das Secret `RELEASE_PLEASE_TOKEN` (fein granulierter PAT mit Schreibrechten für contents und pull-requests), damit auch auf dem Release-PR die CI läuft. Ohne Token muss unter Settings → Actions → General „Allow GitHub Actions to create and approve pull requests“ an sein.
-- ✅ **Eigene Signatur der Prüfsummen (Ed25519).** Den Public Key kennt die App fest (`276b0fbd4a1f9eb68476f0b8a14c5cc0bab403cbca24bcf07d8cff333d3fa9b7`). Sie ist der einzige Herkunftsnachweis: Der Updater installiert nur, was mit dem Release-Schlüssel signiert ist.
+- ✅ **Decided:** Releases are not signed with a code signing certificate (no SignPath, no Authenticode, no notarization on the Mac). Consequence: Windows SmartScreen warns on the first start ("More info" → "Run anyway"); the download page explains this.
+- 🟡 **Releases automatically via release-please** (as in amigo-native):
+  1. Every push to `main` creates or updates a release PR (`.github/workflows/release-please.yml`). It contains the next version in `Cargo.toml` and `Cargo.lock` as well as the `CHANGELOG.md` entry from the Conventional Commits since the last release. Before 1.0, `feat` bumps the second digit, `fix` the third; `docs`, `ci`, `chore` etc. do not trigger a release.
+  2. When the release PR is merged, release-please sets the tag `v<version>` and creates the release as a draft with the changelog.
+  3. Then `release.yml` builds all platforms, generates `SHA256SUMS`, signs them with Ed25519, attaches the files and publishes the release. Only then do the updaters see it.
+  - `release.yml` can also be started by hand for an existing tag.
+  - Configuration: `release-please-config.json` and `.release-please-manifest.json`. The manifest starts at 0.0.0, so the first release becomes 0.1.0. `bootstrap-sha` is the merge of PR #22.
+  - Optionally the secret `RELEASE_PLEASE_TOKEN` (fine-grained PAT with write access for contents and pull-requests), so that CI also runs on the release PR. Without a token, "Allow GitHub Actions to create and approve pull requests" must be on under Settings → Actions → General.
+- ✅ **Own signature of the checksums (Ed25519).** The app has the public key built in (`276b0fbd4a1f9eb68476f0b8a14c5cc0bab403cbca24bcf07d8cff333d3fa9b7`). It is the only proof of origin: the updater installs only what is signed with the release key.
 
-**Umsetzung (Branch `m7-install`):**
-- `blinzel-app/src/setup/`: Moduserkennung, Installation über ein `Layout` (echte Pfade oder Sandbox für Tests), Registry-Hilfe nur für HKCU, Startmenü-Verknüpfung mit AppUserModelID `amigo-labs.amigo-blinzel`, Setup-Fenster mit Renderer und DirectWrite des Viewers (ohne Direct3D: Meldungsfenster).
-- Exit-Codes des Setups: 0 installiert, 1 fehlgeschlagen, 2 Windows zu alt, 3 abgebrochen.
-- `packaging/winget/`: Vorlagen der drei Manifeste (Scope user, Silent-Schalter, ProductCode = Uninstall-Schlüssel).
-- `.github/workflows/release.yml`: baut x64 und ARM64, erzeugt und signiert `SHA256SUMS`, legt einen Release-Entwurf an.
-- Test `blinzel-app/tests/setup.rs`: Installation, Update an Ort und Stelle und Deinstallation in einer Sandbox (Temp-Ordner, eigener HKCU-Zweig).
+**Implementation (branch `m7-install`):**
+- `blinzel-app/src/setup/`: mode detection, installation via a `Layout` (real paths or a sandbox for tests), registry helpers for HKCU only, Start menu shortcut with AppUserModelID `amigo-labs.amigo-blinzel`, setup window with the viewer's renderer and DirectWrite (without Direct3D: message box).
+- Exit codes of the setup: 0 installed, 1 failed, 2 Windows too old, 3 cancelled.
+- `packaging/winget/`: templates of the three manifests (scope user, silent switch, ProductCode = uninstall key).
+- `.github/workflows/release.yml`: builds x64 and ARM64, generates and signs `SHA256SUMS`, creates a draft release.
+- Test `blinzel-app/tests/setup.rs`: installation, in-place update and uninstallation in a sandbox (temp folder, own HKCU branch).
 
-### Self-Updater (still im Hintergrund)
+### Self-updater (silently in the background)
 
-- 🟡 **Prüfen:**
-  - Höchstens 1× pro Tag, frühestens 10 s nach dem Start, auf einem Hintergrund-Thread (nie auf dem kritischen Pfad).
-  - Quelle: `GET https://api.github.com/repos/amigo-labs/amigo-blinzel/releases/latest` über WinHTTP, das per `LoadLibrary` geladen wird und den Proxy des Systems nutzt.
-- 🟡 **Laden** des passenden Assets (x64/ARM64) plus `SHA256SUMS(.sig)` nach `%LOCALAPPDATA%\amigo-blinzel\updates\`.
-- 🟡 **Prüfen in zwei Schritten:**
-  1. Ed25519-Signatur der Prüfsummen.
-  2. SHA-256 der Exe.
+- 🟡 **Check:**
+  - At most 1× a day, no earlier than 10 s after startup, on a background thread (never on the critical path).
+  - Source: `GET https://api.github.com/repos/amigo-labs/amigo-blinzel/releases/latest` via WinHTTP, which is loaded via `LoadLibrary` and uses the system proxy.
+- 🟡 **Download** the matching asset (x64/ARM64) plus `SHA256SUMS(.sig)` to `%LOCALAPPDATA%\amigo-blinzel\updates\`.
+- 🟡 **Verify in two steps:**
+  1. Ed25519 signature of the checksums.
+  2. SHA-256 of the exe.
 
-  Erst dann wird getauscht.
-- 🟡 **Tauschen:**
-  - Die laufende Exe in `.old` umbenennen (unter NTFS erlaubt) und die neue an ihren Platz legen.
-  - Der nächste Start nutzt die neue Version ohne Zusatzkosten.
-  - `.old` wird beim nächsten Start gelöscht.
-- 🟡 **Rollback:** Startet die neue Version dreimal nicht bis zum ersten Frame, wird `.old` zurückgeholt.
-- 🟡 **Menü:** „Nach Updates suchen“ und „Über amigo-blinzel (Version)“. Einstellung `auto_update = true`.
+  Only then is it swapped.
+- 🟡 **Swap:**
+  - Rename the running exe to `.old` (allowed on NTFS) and put the new one in its place.
+  - The next start uses the new version at no extra cost.
+  - `.old` is deleted on the next start.
+- 🟡 **Rollback:** If the new version fails three times to start up to the first frame, `.old` is restored.
+- 🟡 **Menu:** "Check for updates" and "About amigo-blinzel (version)". Setting `auto_update = true`.
 
-**Umsetzung:**
-- Entscheidungen ohne Windows in `blinzel-core::update` (Version, Release-JSON über einen kleinen eigenen JSON-Leser, `SHA256SUMS`, Ed25519 über `ed25519-compact`, Zeitplan, Startzähler) mit Unit-Tests.
-- Windows-Teil in `blinzel-app/src/update.rs`: WinHTTP und `BCryptHash` werden erst bei Bedarf geladen. Nur eine installierte Kopie aktualisiert sich; Entwickler- und portable Builds nie.
-- `blinzel-release keygen | sign | verify` für den eigenen Signaturschlüssel.
-- Der öffentliche Schlüssel steht als `RELEASE_KEY` in `crates/blinzel-core/src/update.rs`, der geheime (Seed als Hex) nur im Repository-Secret `RELEASE_SIGNING_KEY`. Ohne `RELEASE_KEY` (`None`) prüft und installiert der Updater nichts. Neuer Schlüssel: `cargo run -p blinzel-release -- keygen <datei>`, den Inhalt der Datei als Secret hinterlegen, die Datei löschen, die ausgegebene Zeile eintragen. Ein Schlüsselwechsel erreicht installierte Kopien nur über ein Release, das noch mit dem alten Schlüssel signiert ist.
+**Implementation:**
+- Decisions without Windows in `blinzel-core::update` (version, release JSON via a small JSON reader of our own, `SHA256SUMS`, Ed25519 via `ed25519-compact`, schedule, start counter) with unit tests.
+- Windows part in `blinzel-app/src/update.rs`: WinHTTP and `BCryptHash` are loaded only when needed. Only an installed copy updates itself; developer and portable builds never do.
+- `blinzel-release keygen | sign | verify` for our own signing key.
+- The public key is stored as `RELEASE_KEY` in `crates/blinzel-core/src/update.rs`, the secret one (seed as hex) only in the repository secret `RELEASE_SIGNING_KEY`. Without `RELEASE_KEY` (`None`), the updater verifies and installs nothing. New key: `cargo run -p blinzel-release -- keygen <datei>`, store the file's content as the secret, delete the file, enter the printed line. A key change reaches installed copies only via a release that is still signed with the old key.
 
-## 11. Website und Wettbewerbsvergleich (M8)
+## 11. Website and competitive comparison (M8)
 
-### Website auf Cloudflare Workers
+### Website on Cloudflare Workers
 
-- 🟡 `website/`: statisches HTML/CSS mit minimalem JS, extrem schnell (passend zum Produkt), Deutsch und Englisch.
-  - Seiten: Start, Funktionen, **Vergleich**, **Benchmarks**, Methodik, Download, Changelog, Datenschutz.
-  - Charts werden beim Build als Inline-SVG aus den Benchmark-JSONs erzeugt; keine Chart-Library im Browser.
-  - Der Download-Link zeigt auf `releases/latest/download/amigo-blinzel-setup-x64.exe` (stabile URL).
-- 🟡 **Deployment** über Cloudflare Workers Static Assets (`wrangler.toml` im Repo-Wurzelverzeichnis).
-  - Cloudflare Workers Builds ist mit dem Repo verbunden (Root-Verzeichnis `/`, Standard-Deploy-Befehl). Wrangler führt vor jedem Deploy `website/build.sh` aus: Das installiert die fehlende Rust-Toolchain im Build-Image und erzeugt `website/dist` mit `blinzel-site`.
-  - Alternativ deployt `.github/workflows/website.yml`, sobald die Secrets `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` gesetzt sind; mit Workers Builds ist das nicht nötig.
-  - Zunächst die `workers.dev`-Subdomain; eine eigene Domain kann jederzeit dazukommen.
+- 🟡 `website/`: static HTML/CSS with minimal JS, extremely fast (in keeping with the product), German and English.
+  - Pages: home, features, **comparison**, **benchmarks**, methodology, download, changelog, privacy.
+  - Charts are generated at build time as inline SVG from the benchmark JSONs; no chart library in the browser.
+  - The download link points to `releases/latest/download/amigo-blinzel-setup-x64.exe` (stable URL).
+- 🟡 **Deployment** via Cloudflare Workers Static Assets (`wrangler.toml` in the repo root directory).
+  - Cloudflare Workers Builds is connected to the repo (root directory `/`, default deploy command). Before every deploy, Wrangler runs `website/build.sh`: it installs the missing Rust toolchain in the build image and generates `website/dist` with `blinzel-site`.
+  - Alternatively, `.github/workflows/website.yml` deploys as soon as the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set; with Workers Builds this is not necessary.
+  - Initially the `workers.dev` subdomain; a custom domain can be added at any time.
 
-### Wettbewerbs-Benchmark `blinzel-race`
+### Competitive benchmark `blinzel-race`
 
-Ein eigenes Messwerkzeug für Windows und macOS misst alle Viewer gleich, von außen.
+A dedicated measurement tool for Windows and macOS measures all viewers the same way, from the outside.
 
-**Umsetzung (`crates/blinzel-race`, Branch `m8-race`):**
-- `corpus <dir>`: 24 JPEGs mit 24 MP und je ca. 8 MB (Sensorrauschen, damit der Entropie-Decoder so viel arbeitet wie bei echten Fotos), jedes um eine von sechs Signaturfarben (die farbigen Ecken des RGB-Würfels). Aufeinanderfolgende Bilder unterscheiden sich immer.
-- Erkennung: Desktop Duplication auf jedem Monitor (Viewer öffnen dort, wo sie zuletzt waren); jeder präsentierte Frame liefert `LastPresentTime` (QPC) und ein Raster aus 40 × 24 Abtastpunkten.
-- Tasten gehen nur raus, solange der Viewer das Vordergrundfenster besitzt.
-- `list` zeigt die erkannten Viewer mit Version (Versionsressource; `blinzel.exe` hat jetzt eine).
-- `run <dir> [--reps N] [--cold] [--only …] [--viewer name=exe] [--json …]`. `--cold` leert die Standby-Liste und braucht Administratorrechte.
-- **macOS** (`capture_macos.rs`, `sys_macos.rs`, `viewers_macos.rs`; der Ablauf in `race.rs` ist derselbe):
-  - Erkennung über ScreenCaptureKit auf jedem Display. Ein Frame kommt nur, wenn sich der Bildschirm geändert hat, und trägt seine Anzeigezeit (`mach_absolute_time`). Das Raster skaliert ScreenCaptureKit auf der GPU herunter.
-  - Start über die Startdienste (`open -a App datei`), wie im Finder. Beenden höflich über `NSRunningApplication.terminate`, nach 3 s mit `SIGKILL`.
-  - Tasten über `CGEvent`, nur solange das vorderste Fenster dem Viewer gehört (`CGWindowListCopyWindowInfo`). `--cold` ruft `purge` über `sudo` auf und fragt dafür einmal am Anfang nach dem Passwort; das Werkzeug selbst läuft nicht als root, sonst starteten auch die Viewer als root.
-  - Das Terminal braucht die Freigaben „Bildschirmaufnahme“ und „Bedienungshilfen“; ohne sie bricht `run` mit einem Hinweis ab.
-  - Kandidaten: amigo-blinzel, Vorschau, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ wird nicht mehr vertrieben). Vorschau blättert bei einer einzelnen Datei nicht durch den Ordner; für sie gibt es nur den Wert fürs Öffnen.
-  - Ergebnis nach `website/data/race-macos.json`; die Website zeigt es als eigenen macOS-Abschnitt (`{{race-macos:…}}`).
+**Implementation (`crates/blinzel-race`, branch `m8-race`):**
+- `corpus <dir>`: 24 JPEGs with 24 MP and approx. 8 MB each (sensor noise, so that the entropy decoder works as hard as with real photos), each around one of six signature colors (the colored corners of the RGB cube). Consecutive images always differ.
+- Detection: Desktop Duplication on every monitor (viewers open where they last were); every presented frame delivers `LastPresentTime` (QPC) and a grid of 40 × 24 sample points.
+- Keys are only sent while the viewer owns the foreground window.
+- `list` shows the detected viewers with version (version resource; `blinzel.exe` now has one).
+- `run <dir> [--reps N] [--cold] [--only …] [--viewer name=exe] [--json …]`. `--cold` empties the standby list and needs administrator rights.
+- **macOS** (`capture_macos.rs`, `sys_macos.rs`, `viewers_macos.rs`; the flow in `race.rs` is the same):
+  - Detection via ScreenCaptureKit on every display. A frame only arrives when the screen has changed, and carries its display time (`mach_absolute_time`). ScreenCaptureKit scales the grid down on the GPU.
+  - Launch via Launch Services (`open -a App datei`), as in the Finder. Quit politely via `NSRunningApplication.terminate`, after 3 s with `SIGKILL`.
+  - Keys via `CGEvent`, only while the frontmost window belongs to the viewer (`CGWindowListCopyWindowInfo`). `--cold` calls `purge` via `sudo` and asks for the password once at the beginning for this; the tool itself does not run as root, otherwise the viewers would also start as root.
+  - The terminal needs the "Screen Recording" and "Accessibility" permissions; without them, `run` aborts with a hint.
+  - Candidates: amigo-blinzel, Preview, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ is no longer distributed). Preview does not flip through the folder for a single file; for it there is only the value for opening.
+  - Result to `website/data/race-macos.json`; the website shows it as a separate macOS section (`{{race-macos:…}}`).
 
-**Erste Probeläufe** (Laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 Monitore; nur Funktionsnachweis, keine Referenzzahlen):
+**First trial runs** (laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 monitors; proof of function only, no reference figures):
 
-| Viewer | Öffnen warm | Weiter | Dauerfeuer 6 Tasten |
+| Viewer | Open warm | Next | Rapid fire 6 keys |
 |---|---|---|---|
-| amigo-blinzel 0.1.0 | 270–295 ms | 9–14 ms | alle gezeigt |
-| ImageGlass 8.8 | 1,8 s | 0,8 s | alle, langsam |
-| Windows Photos 2026.11 | 1,2 s | 45 ms | 3 gezeigt, Tasten verschluckt |
+| amigo-blinzel 0.1.0 | 270–295 ms | 9–14 ms | all shown |
+| ImageGlass 8.8 | 1.8 s | 0.8 s | all, slowly |
+| Windows Photos 2026.11 | 1.2 s | 45 ms | 3 shown, keys swallowed |
 
-- 🟡 **Kandidaten:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Fotos; optional JPEGView und qimgv. Jeweils mit Standardeinstellungen; Versionen werden protokolliert.
-- 🟡 **Messgrößen:**
-  1. **Öffnen:** Zeit vom Prozessstart bis das Bild sichtbar ist, warm und kalt (Standby-Liste geleert).
-     - Erkannt über die Desktop Duplication API (Frame-Zeitstempel `LastPresentTime`).
-     - Die Testbilder tragen eine eindeutige Farbsignatur.
-  2. **Weiterblättern:** `SendInput` (Pfeil rechts), Zeit bis die Farbsignatur wechselt; einzeln nach Leerlauf (Prefetch-Fall) und als Dauerfeuer mit 30 Hz (wie viele Bilder werden wirklich gezeigt).
-  3. **Thumbnails** (ab M4): Zeit bis das Raster eines 1000er-Ordners gefüllt ist, für Viewer mit Raster-Modus.
-- 🟡 **Fairness und Recht:**
-  - Gleiche Maschine, gleiche Dateien, 10 Wiederholungen, Median und p95.
-  - Rohdaten, Versionen und Methodik werden veröffentlicht.
-  - Damit sachlich, nachprüfbar und relevant, wie es vergleichende Werbung (UWG §6) verlangt.
-- ⬜ **Zahlen:** Referenzwerte von einer definierten Referenzmaschine (Hardware wird angegeben). CI-Werte nur als Trend.
-- 🟡 **Vergleichstabelle der Funktionen** (`compare.html`, DE/EN): Lizenz, Firmennutzung, Werbung, Telemetrie, ARM64, Downloadgröße, Farbprofile, HEIC/AVIF/JPEG XL/WebP/RAW für IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv und Windows Fotos. Stand 23.10.2026, jede Zelle verlinkt ihre Quelle; Unbelegtes steht als „nicht belegt“. Vor der Veröffentlichung einmal von Hand gegenlesen. Startzeit und Speicher kommen aus der Referenzmessung.
+- 🟡 **Candidates:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Photos; optionally JPEGView and qimgv. Each with default settings; versions are logged.
+- 🟡 **Metrics:**
+  1. **Open:** time from process start until the image is visible, warm and cold (standby list emptied).
+     - Detected via the Desktop Duplication API (frame timestamp `LastPresentTime`).
+     - The test images carry a unique color signature.
+  2. **Next image:** `SendInput` (right arrow), time until the color signature changes; individually after idle (prefetch case) and as rapid fire at 30 Hz (how many images are really shown).
+  3. **Thumbnails** (from M4): time until the grid of a 1000-image folder is filled, for viewers with a grid mode.
+- 🟡 **Fairness and legal:**
+  - Same machine, same files, 10 repetitions, median and p95.
+  - Raw data, versions and methodology are published.
+  - Thus objective, verifiable and relevant, as comparative advertising law requires (UWG §6).
+- ⬜ **Figures:** Reference values from a defined reference machine (hardware is stated). CI values only as a trend.
+- 🟡 **Feature comparison table** (`compare.html`, DE/EN): license, commercial use, ads, telemetry, ARM64, download size, color profiles, HEIC/AVIF/JPEG XL/WebP/RAW for IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv and Windows Photos. As of 2026-10-23, every cell links its source; anything unconfirmed reads "not documented". Proofread once by hand before publishing. Startup time and memory come from the reference measurement.
 
-### Animationen (M5)
+### Animations (M5)
 
-- 🟡 **GIF:** `decode::gif::decode_animation` komponiert jeden Frame auf die Leinwand wie Browser: transparente Pixel lassen die Leinwand stehen, Disposal „Hintergrund“ leert das Frame-Rechteck, „Vorheriges“ stellt den Stand davor wieder her; Verzögerungen unter 20 ms spielen mit 100 ms; die Wiederholungszahl aus der NETSCAPE-Erweiterung gilt (sonst einmal). Höchstens 256 MB an Frames, längere Animationen spielen, was hineinpasst.
-- Der Loader hat dafür die Stufe `Anim`, nur für das aktuelle Bild und erst, wenn dessen Probe GIF sagt: Das erste Bild erscheint wie bisher sofort, die Animation läuft an, sobald alle Frames auf der GPU sind (480 × 270: 1,2 ms je Frame decodieren). Ein Timer schaltet die Frames weiter; beim Wechsel des Bildes wird die Animation verworfen.
-- 🟡 **WebP:** `decode::webp::decode_animation` (`image-webp` komponiert die Frames selbst), gleiche Regeln für Verzögerungen, Wiederholungen und das 256-MB-Budget; die Stufe `Anim` gilt jetzt für GIF und WebP. Ein stilles WebP meldet die Stufe als Standbild.
-- 🟡 **JPEG XL:** `decode::jxl::decode_animation` rendert jedes Keyframe (Dauer aus Ticks und `tps`, Wiederholungen aus dem Header), gleiche Regeln und Budget. Stille Dateien prüft schon der Header.
-- 🟡 **Abspielen während des Decodierens:** Die Decoder liefern jeden Frame einzeln (`stream_animation` mit Frame-Callback), der Loader lädt ihn sofort auf die GPU und schickt ab dem zweiten Frame alle 200 ms den Stand. Die Wiedergabe startet damit nach zwei Frames; erreicht sie den letzten bisher decodierten, hält sie dort und läuft mit der nächsten Lieferung weiter. Ein Decode-Fehler mittendrin beendet die Animation mit den Frames bis dahin. Sichtprüfung offen (große GIFs).
+- 🟡 **GIF:** `decode::gif::decode_animation` composites every frame onto the canvas like browsers do: transparent pixels leave the canvas as is, disposal "background" clears the frame rectangle, "previous" restores the state before; delays under 20 ms play at 100 ms; the loop count from the NETSCAPE extension applies (otherwise once). At most 256 MB of frames; longer animations play what fits.
+- For this, the loader has the stage `Anim`, only for the current image and only once its probe says GIF: the first image appears immediately as before, the animation starts as soon as all frames are on the GPU (480 × 270: 1.2 ms decode per frame). A timer advances the frames; when the image changes, the animation is discarded.
+- 🟡 **WebP:** `decode::webp::decode_animation` (`image-webp` composites the frames itself), same rules for delays, loop counts and the 256 MB budget; the stage `Anim` now applies to GIF and WebP. A still WebP reports the stage as a still image.
+- 🟡 **JPEG XL:** `decode::jxl::decode_animation` renders every keyframe (duration from ticks and `tps`, loop count from the header), same rules and budget. Still files are already detected by the header.
+- 🟡 **Playback while decoding:** The decoders deliver every frame individually (`stream_animation` with a frame callback); the loader uploads it to the GPU immediately and, from the second frame on, sends the current state every 200 ms. Playback thus starts after two frames; if it reaches the last frame decoded so far, it holds there and continues with the next delivery. A decode error midway ends the animation with the frames up to that point. Visual check open (large GIFs).
 
 ## 12. Meilensteine
 
