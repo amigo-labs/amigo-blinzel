@@ -445,6 +445,9 @@ fn handle(
                 }
                 if wanted && left == 0 {
                     if app.hidden {
+                        // Now in the tray, and again in the window: a
+                        // notification may be switched off.
+                        resident::balloon(hwnd, &screenshot::hotkey_taken());
                         screenshot::hint_pending(true);
                     } else {
                         app.show_notice(screenshot::hotkey_taken());

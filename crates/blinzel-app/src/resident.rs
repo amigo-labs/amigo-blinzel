@@ -12,8 +12,9 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
-    NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_LARGE_ICON, NIIF_USER, NIM_ADD,
+    NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONUSERCLICK, NIN_SELECT, NOTIFYICON_VERSION_4,
+    NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     HICON, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, LoadIconW, LoadImageW,
@@ -76,11 +77,33 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
         hIcon: app_icon(true),
         ..Default::default()
     };
-    let tip: Vec<u16> = tr(Msg::AppName).encode_utf16().collect();
-    let n = tip.len().min(d.szTip.len() - 1);
-    d.szTip[..n].copy_from_slice(&tip[..n]);
+    copy_wide(&mut d.szTip, tr(Msg::AppName));
     d.Anonymous.uVersion = NOTIFYICON_VERSION_4;
     d
+}
+
+/// `s` into a fixed, NUL-terminated field, cut to fit.
+fn copy_wide(dst: &mut [u16], s: &str) {
+    let w: Vec<u16> = s.encode_utf16().collect();
+    let n = w.len().min(dst.len() - 1);
+    dst[..n].copy_from_slice(&w[..n]);
+}
+
+/// A balloon on the tray icon (a notification on Windows 10 and 11);
+/// clicking it shows the window.
+pub fn balloon(hwnd: HWND, text: &str) {
+    if !TRAY_SHOWN.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut d = tray_data(hwnd);
+    d.uFlags = NIF_INFO;
+    copy_wide(&mut d.szInfoTitle, tr(Msg::AppName));
+    copy_wide(&mut d.szInfo, text);
+    d.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
+    d.hBalloonIcon = app_icon(false);
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &d);
+    }
 }
 
 /// Shows the tray icon (again, after an Explorer restart).
@@ -119,7 +142,7 @@ pub fn on_tray(wp: WPARAM, lp: LPARAM) -> Option<Action> {
         ((wp.0 >> 16) & 0xFFFF) as i16 as i32,
     );
     match event {
-        NIN_SELECT | NIN_KEYSELECT => Some(Action::Wake { opened: false }),
+        NIN_SELECT | NIN_KEYSELECT | NIN_BALLOONUSERCLICK => Some(Action::Wake { opened: false }),
         WM_CONTEXTMENU => Some(Action::TrayMenu { x, y }),
         _ => None,
     }
