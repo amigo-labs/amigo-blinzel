@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
@@ -41,6 +42,9 @@ thread_local! {
 
 const TIMER_UNCLOAK: usize = 1;
 const TIMER_NOTICE: usize = 2;
+const TIMER_HOTKEY: usize = 3;
+/// Attempts left to get the Print key after it was taken at start.
+static HOTKEY_TRIES: AtomicU32 = AtomicU32::new(0);
 /// A message for the notice toast; LPARAM is a `Box<String>`.
 pub const WM_NOTICE: u32 = WM_APP + 4;
 
@@ -430,6 +434,28 @@ fn handle(
             app.on_anim_timer();
             done
         }
+        WM_TIMER if wp.0 == TIMER_HOTKEY => {
+            let wanted = app.settings.resident && app.settings.screenshot_hotkey;
+            let left = HOTKEY_TRIES
+                .fetch_sub(1, Ordering::Relaxed)
+                .saturating_sub(1);
+            if !wanted || screenshot::set_hotkey(hwnd, true) || left == 0 {
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), TIMER_HOTKEY);
+                }
+                if wanted && left == 0 {
+                    if app.hidden {
+                        screenshot::hint_pending(true);
+                    } else {
+                        app.show_notice(screenshot::hotkey_taken());
+                        unsafe {
+                            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                        }
+                    }
+                }
+            }
+            done
+        }
         WM_TIMER if wp.0 == TIMER_NOTICE => {
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_NOTICE);
@@ -795,6 +821,11 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::SetScreenshotHotkey(on) => {
+            // Replaces the attempts from the start; a failure shows now.
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER_HOTKEY);
+            }
+            screenshot::hint_pending(false);
             if !screenshot::set_hotkey(hwnd, on) {
                 with_app(|a| a.show_notice(screenshot::hotkey_taken()));
                 unsafe {
@@ -994,6 +1025,12 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
         hidden
     })
     .unwrap_or(false);
+    if screenshot::take_hint() {
+        with_app(|a| a.show_notice(screenshot::hotkey_taken()));
+        unsafe {
+            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+        }
+    }
     if !was_hidden {
         return vec![Action::Activate];
     }
@@ -1010,6 +1047,16 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
         let mut more = with_app(|a| a.render()).unwrap_or_default();
         more.push(Action::Uncloak);
         more
+    }
+}
+
+/// Windows (the Snipping Tool, or another app while signing in) holds the
+/// Print key: tries again for a minute, then leaves a notice for the next
+/// wake. Ctrl+Shift+Print works meanwhile.
+pub fn retry_hotkey(hwnd: HWND) {
+    HOTKEY_TRIES.store(12, Ordering::Relaxed);
+    unsafe {
+        SetTimer(Some(hwnd), TIMER_HOTKEY, 5000, None);
     }
 }
 
