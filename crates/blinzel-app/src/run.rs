@@ -433,8 +433,8 @@ pub fn run() -> i32 {
     if resident_mode {
         resident::add_tray(hwnd);
         resident::refresh_autostart();
-        if screenshot_hotkey {
-            crate::screenshot::set_hotkey(hwnd, true);
+        if screenshot_hotkey && !crate::screenshot::set_hotkey(hwnd, true) {
+            window::retry_hotkey(hwnd);
         }
     }
     if args.resident {

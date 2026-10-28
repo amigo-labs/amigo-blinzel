@@ -7,6 +7,7 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use blinzel_core::geom::{Orientation, Rect};
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
@@ -50,6 +51,10 @@ pub const WM_SCREENSHOT: u32 = WM_APP + 11;
 const HOTKEY_PRINT: i32 = 1;
 const HOTKEY_CTRL_SHIFT_PRINT: i32 = 2;
 
+/// Windows kept the Print key at start; the window says so when it next
+/// shows.
+static HOTKEY_HINT: AtomicBool = AtomicBool::new(false);
+
 /// Registers (or drops) the screenshot keys on `hwnd`: Print, and
 /// Ctrl+Shift+Print, which Windows never takes. Returns whether Print
 /// itself was free (Windows 11 gives it to the Snipping Tool by default).
@@ -68,6 +73,16 @@ pub fn set_hotkey(hwnd: HWND, on: bool) -> bool {
         );
         RegisterHotKey(Some(hwnd), HOTKEY_PRINT, MOD_NOREPEAT, VK_SNAPSHOT.0 as u32).is_ok()
     }
+}
+
+/// Marks (or clears) the [`hotkey_taken`] notice for the next wake.
+pub fn hint_pending(on: bool) {
+    HOTKEY_HINT.store(on, Ordering::Relaxed);
+}
+
+/// Whether the [`hotkey_taken`] notice is due; it is shown once.
+pub fn take_hint() -> bool {
+    HOTKEY_HINT.swap(false, Ordering::Relaxed)
 }
 
 /// Whether a `WM_HOTKEY` is ours.
