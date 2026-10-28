@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.1](https://github.com/amigo-labs/amigo-blinzel/compare/v1.2.0...v1.2.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **screenshot:** retry the Print key at sign-in and say when Windows keeps it ([bf453fa](https://github.com/amigo-labs/amigo-blinzel/commit/bf453fa9a5a0fbcf72609d340a177eae9e091bba))
+* **screenshot:** retry the Print key at sign-in and say when Windows keeps it ([03dc373](https://github.com/amigo-labs/amigo-blinzel/commit/03dc373bbf44bfbf2487427a9e4a8ea0062d25c6))
+* **screenshot:** tell in the tray when Windows keeps the Print key ([3c5610a](https://github.com/amigo-labs/amigo-blinzel/commit/3c5610ab2d2b015583a5fe4871b5482474572605))
+
 ## [1.2.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.1.0...v1.2.0) (2026-10-26)
 
 
