@@ -106,7 +106,9 @@ pub fn fill(text: &str, args: &[(&str, &dyn Display)]) -> String {
 
 /// Picks the best shipped language for a list of BCP 47 tags in order of
 /// preference (e.g. from `GetUserPreferredUILanguages`): exact match, then
-/// base language (`de-AT` → `de`), then the next tag, finally English.
+/// base language (`de-AT` → `de`), then a shipped regional variant of the
+/// base language (`pt-PT` → `pt-br`), then the next tag, finally English.
+/// Traditional Chinese never gets Simplified Chinese.
 pub fn negotiate<'a>(preferred: impl IntoIterator<Item = &'a str>) -> Lang {
     for tag in preferred {
         let tag = tag.trim().to_ascii_lowercase().replace('_', "-");
@@ -120,8 +122,23 @@ pub fn negotiate<'a>(preferred: impl IntoIterator<Item = &'a str>) -> Lang {
         if let Some(l) = Lang::ALL.iter().find(|l| l.code() == base) {
             return *l;
         }
+        if is_traditional_chinese(&tag) {
+            continue;
+        }
+        if let Some(l) = Lang::ALL
+            .iter()
+            .find(|l| l.code().split('-').next() == Some(base))
+        {
+            return *l;
+        }
     }
     FALLBACK
+}
+
+/// `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*` (lowercase tag).
+fn is_traditional_chinese(tag: &str) -> bool {
+    let mut parts = tag.split('-');
+    parts.next() == Some("zh") && parts.any(|p| matches!(p, "hant" | "tw" | "hk" | "mo"))
 }
 
 /// Looks up a language by its code (`"de"`), case-insensitively.
@@ -219,8 +236,49 @@ mod tests {
         assert_eq!(negotiate(["de-DE", "en-US"]), de);
         assert_eq!(negotiate(["de_AT"]), de);
         assert_eq!(negotiate(["xx-YY", "de-CH"]), de);
-        assert_eq!(negotiate(["fr-FR"]), FALLBACK);
+        assert_eq!(negotiate(["xx-YY"]), FALLBACK);
         assert_eq!(negotiate([]), FALLBACK);
+    }
+
+    #[test]
+    fn negotiation_of_regional_variants() {
+        let code = |tags: &[&str]| negotiate(tags.iter().copied()).code();
+        assert_eq!(code(&["fr-FR"]), "fr");
+        assert_eq!(code(&["fr-CA"]), "fr");
+        assert_eq!(code(&["pt-BR"]), "pt-br");
+        assert_eq!(code(&["pt-PT"]), "pt-br");
+        assert_eq!(code(&["zh-CN"]), "zh-cn");
+        assert_eq!(code(&["zh-Hans-CN"]), "zh-cn");
+        assert_eq!(code(&["zh-SG"]), "zh-cn");
+        // Traditional Chinese falls through to the next tag, then English.
+        assert_eq!(code(&["zh-TW"]), "en");
+        assert_eq!(code(&["zh-Hant-HK", "ja-JP"]), "ja");
+        assert_eq!(code(&["zh-HK"]), "en");
+    }
+
+    #[test]
+    fn plural_forms_of_shipped_languages() {
+        let ru = lang_from_code("ru").unwrap();
+        let forms: Vec<String> = [1, 2, 5, 21]
+            .into_iter()
+            .map(|n| trp_in(ru, PluralMsg::ImagesCount, n, &[]))
+            .collect();
+        assert_eq!(forms[0], tr_n(ru, Category::One, 1));
+        assert_eq!(forms[1], tr_n(ru, Category::Few, 2));
+        assert_eq!(forms[2], tr_n(ru, Category::Many, 5));
+        assert_eq!(forms[3], tr_n(ru, Category::One, 21));
+        assert_ne!(forms[1], forms[2]);
+        // No plural forms: every count uses `other`.
+        let ja = lang_from_code("ja").unwrap();
+        assert_eq!(plural_category(ja, 1), Category::Other);
+        let fr = lang_from_code("fr").unwrap();
+        assert_eq!(plural_category(fr, 0), Category::One);
+    }
+
+    /// The `images_count` form `cat` of `lang`, filled with `n`.
+    fn tr_n(lang: Lang, cat: Category, n: u64) -> String {
+        let text = PLURAL_TABLE[lang as usize][PluralMsg::ImagesCount as usize][cat as usize];
+        fill(text, &[("n", &n)])
     }
 
     #[test]

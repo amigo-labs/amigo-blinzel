@@ -28,7 +28,7 @@ IrfanView and ImageGlass are too slow. amigo-blinzel is meant to be measurably f
 | Resident mode | optional (tray, kept warm) |
 | UI | frameless, no toolbars; ☰ at the top left, min/max/close at the top right, everything else in the menu. macOS: the system window buttons on the left, ☰ on the right, all commands also in the menu bar |
 | View modes | fit window to image (original size), fit image to window, 100 % |
-| Languages | multilingual, starting with German + English |
+| Languages | English, German, Spanish, French, Italian, Japanese, Portuguese (Brazil), Russian, Simplified Chinese |
 | Selection | rectangle; Ctrl+C copies; Ctrl+X = copy + crop view |
 | Saving | image files are never modified; **optionally save a cutout** (Ctrl+S, "Save as") |
 | Batch processing | **resize many images**, in the app only (no CLI): JPEG, PNG, WebP, AVIF or same as source; keep metadata, rename by pattern, crop to an aspect ratio, sharpen |
