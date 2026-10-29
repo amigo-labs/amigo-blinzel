@@ -419,7 +419,10 @@ mod tests {
             for id in SECTIONS {
                 assert!(html.contains(&format!("id=\"{id}\"")), "{code}: #{id}");
             }
-            for line in redirects.lines().filter(|l| l.starts_with(&format!("/{code}/"))) {
+            for line in redirects
+                .lines()
+                .filter(|l| l.starts_with(&format!("/{code}/")))
+            {
                 let target = line.split_whitespace().nth(1).unwrap();
                 if let Some((_, id)) = target.split_once('#') {
                     assert!(html.contains(&format!("id=\"{id}\"")), "{line}");
