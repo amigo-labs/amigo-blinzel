@@ -48,9 +48,11 @@ pub enum Action {
         y: i32,
     },
     /// Resize the window so its client area becomes `client` (physical
-    /// pixels), centred where it is now.
+    /// pixels), centred where it is now. With `grow_only` the window only
+    /// grows towards that size when `client` exceeds it, never shrinks.
     FitWindow {
         client: (u32, u32),
+        grow_only: bool,
     },
     ToggleFullscreen,
     ToggleMaximize,
@@ -941,12 +943,15 @@ impl<B: Backend> App<B> {
         Some(o.oriented_size(p.width, p.height))
     }
 
-    /// In "fit window to image" mode the window follows each image.
+    /// In "fit window to image" mode the window follows each image; in "fit
+    /// image to window" it grows for images larger than the window.
     fn fit_window_actions(&mut self) -> Vec<Action> {
-        if self.settings.view.mode != ViewMode::FitWindowToImage
-            || self.fullscreen
-            || self.maximized
-        {
+        let grow_only = match self.settings.view.mode {
+            ViewMode::FitWindowToImage => false,
+            ViewMode::FitImageToWindow => true,
+            ViewMode::ActualSize => return vec![],
+        };
+        if self.fullscreen || self.maximized {
             return vec![];
         }
         let Some(cur) = &self.current else {
@@ -971,6 +976,7 @@ impl<B: Backend> App<B> {
         };
         vec![Action::FitWindow {
             client: (size.0, size.1 + strip),
+            grow_only,
         }]
     }
 
