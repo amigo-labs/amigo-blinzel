@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.2.1...v1.3.0) (2026-10-29)
+
+
+### Features
+
+* **i18n:** add es, fr, it, ja, pt-BR, ru and zh-CN ([0dcf877](https://github.com/amigo-labs/amigo-blinzel/commit/0dcf877e1413d065daeae3818163e81b5046e923))
+* **view:** grow the window for images larger than it ([c3864df](https://github.com/amigo-labs/amigo-blinzel/commit/c3864df38c3c56676a1e960785f9345107f97d79))
+* **website:** one-page site with screenshots and batch tool comparison ([730777e](https://github.com/amigo-labs/amigo-blinzel/commit/730777e7e33e6a59e00f6728f3e562339782beba))
+* **website:** one-page site with screenshots and batch tool comparison ([0ab9c76](https://github.com/amigo-labs/amigo-blinzel/commit/0ab9c765bc72a3131468002d42c2f01cc266b1ab))
+
 ## [1.2.1](https://github.com/amigo-labs/amigo-blinzel/compare/v1.2.0...v1.2.1) (2026-10-28)
 
 
