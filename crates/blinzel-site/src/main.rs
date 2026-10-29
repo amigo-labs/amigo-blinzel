@@ -1,16 +1,14 @@
 //! Builds the website (M8): `website/src` (layout, stylesheet, one HTML
 //! fragment per page and language) plus `website/data/race.json` and
-//! `race-macos.json` (from `blinzel-race` on Windows and macOS) and
-//! `CHANGELOG.md` → `website/dist`, ready for Cloudflare
-//! Workers static assets. Charts are generated here as inline SVG; the
-//! browser runs no chart library.
+//! `race-macos.json` (from `blinzel-race` on Windows and macOS) →
+//! `website/dist`, ready for Cloudflare Workers static assets. Charts are
+//! generated here as inline SVG; the browser runs no chart library.
 //!
 //! ```text
-//! cargo run -p blinzel-site [-- <website-dir> <changelog>]
+//! cargo run -p blinzel-site [-- <website-dir>]
 //! ```
 
 mod charts;
-mod markdown;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,29 +30,14 @@ struct Race {
     data: Option<Json>,
 }
 
-/// Pages in navigation order; `index` is the start page.
-const PAGES: [&str; 9] = [
-    "index",
-    "features",
-    "batch",
-    "compare",
-    "benchmarks",
-    "method",
-    "download",
-    "changelog",
-    "privacy",
-];
+/// The one-page site plus the privacy page (linked from the footer).
+const PAGES: [&str; 2] = ["index", "privacy"];
 
-/// Shown in the navigation bar; the rest is linked from the footer.
-const NAV: [&str; 7] = [
-    "index",
-    "features",
-    "batch",
-    "compare",
-    "benchmarks",
-    "method",
-    "download",
-];
+/// Sections of the start page in the navigation bar: anchor id, which is
+/// also the key of its title in [`Lang::t`].
+const SECTIONS: [&str; 3] = ["features", "measured", "download"];
+
+const RELEASES_PAGE: &str = "https://github.com/amigo-labs/amigo-blinzel/releases";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Lang {
@@ -88,6 +71,14 @@ impl Lang {
             (Lang::En, "og_locale") => "en_US",
             (Lang::De, "skip") => "Zum Inhalt springen",
             (Lang::En, "skip") => "Skip to content",
+            (Lang::De, "features") => "Funktionen",
+            (Lang::En, "features") => "Features",
+            (Lang::De, "measured") => "Vergleiche",
+            (Lang::En, "measured") => "Comparisons",
+            (Lang::De, "download") => "Download",
+            (Lang::En, "download") => "Download",
+            (Lang::De, "changes") => "Änderungen",
+            (Lang::En, "changes") => "Changes",
             (Lang::De, "pending") => {
                 "Die Referenzmessung steht noch aus. Sobald sie vorliegt, erscheinen hier die Zahlen mit Rohdaten."
             }
@@ -185,21 +176,21 @@ fn url(lang: Lang, slug: &str) -> String {
 }
 
 /// Fills the `{{…}}` placeholders of a page body.
-fn expand(body: &str, lang: Lang, races: &[Race], changelog: &str) -> Result<String, String> {
+fn expand(body: &str, lang: Lang, races: &[Race]) -> Result<String, String> {
     let mut out = String::with_capacity(body.len());
     let mut rest = body;
     while let Some(i) = rest.find("{{") {
         out.push_str(&rest[..i]);
         let end = rest[i..].find("}}").ok_or("unclosed {{")? + i;
         let key = rest[i + 2..end].trim();
-        out.push_str(&placeholder(key, lang, races, changelog)?);
+        out.push_str(&placeholder(key, lang, races)?);
         rest = &rest[end + 2..];
     }
     out.push_str(rest);
     Ok(out)
 }
 
-fn placeholder(key: &str, lang: Lang, races: &[Race], changelog: &str) -> Result<String, String> {
+fn placeholder(key: &str, lang: Lang, races: &[Race]) -> Result<String, String> {
     const RELEASES: &str = "https://github.com/amigo-labs/amigo-blinzel/releases/latest/download";
     if let Some((prefix, kind)) = key.split_once(':')
         && let Some(race) = races.iter().find(|r| r.prefix == prefix)
@@ -217,28 +208,23 @@ fn placeholder(key: &str, lang: Lang, races: &[Race], changelog: &str) -> Result
         "download:linux-x64" => format!("{RELEASES}/amigo-blinzel-linux-x64.tar.gz"),
         "download:linux-arm64" => format!("{RELEASES}/amigo-blinzel-linux-arm64.tar.gz"),
         "download:sums" => format!("{RELEASES}/SHA256SUMS"),
-        "changelog" => markdown::to_html(changelog),
         other => return Err(format!("unknown placeholder {{{{{other}}}}}")),
     })
 }
 
 fn render(layout: &str, lang: Lang, pages: &[Page], page: &Page) -> String {
-    let nav: String = NAV
+    let nav: String = SECTIONS
         .iter()
-        .filter_map(|slug| pages.iter().find(|p| p.slug == *slug))
-        .map(|p| {
-            let current = if p.slug == page.slug {
-                " aria-current=\"page\""
-            } else {
-                ""
-            };
-            format!("<a href=\"{}\"{current}>{}</a>", url(lang, p.slug), p.title)
-        })
+        .map(|id| format!("<a href=\"{}#{id}\">{}</a>", url(lang, "index"), lang.t(id)))
         .collect();
     let footer: String = pages
         .iter()
-        .filter(|p| !NAV.contains(&p.slug))
+        .filter(|p| p.slug != "index")
         .map(|p| format!("<a href=\"{}\">{}</a>", url(lang, p.slug), p.title))
+        .chain([format!(
+            "<a href=\"{RELEASES_PAGE}\">{}</a>",
+            lang.t("changes")
+        )])
         .collect();
     // A page that brings its own <h1> (the start page's hero) gets no
     // generic page heading.
@@ -269,12 +255,11 @@ fn render(layout: &str, lang: Lang, pages: &[Page], page: &Page) -> String {
         .replace("{{content}}", &page.body)
 }
 
-pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
+pub fn build(site: &Path) -> Result<PathBuf, String> {
     let src = site.join("src");
     let dist = site.join("dist");
     let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()));
     let layout = read(&src.join("layout.html"))?;
-    let changelog = read(changelog).unwrap_or_default();
     let mut races = Vec::new();
     for (prefix, file) in RACES {
         let path = site.join("data").join(file);
@@ -296,7 +281,7 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
         let mut pages = Vec::new();
         for slug in PAGES {
             let mut p = read_page(&src, lang, slug)?;
-            p.body = expand(&p.body, lang, &races, &changelog)
+            p.body = expand(&p.body, lang, &races)
                 .map_err(|e| format!("{}/{slug}: {e}", lang.code()))?;
             pages.push(p);
         }
@@ -320,6 +305,7 @@ pub fn build(site: &Path, changelog: &Path) -> Result<PathBuf, String> {
         "index.html",
         "404.html",
         "_headers",
+        "_redirects",
     ] {
         let from = src.join(file);
         if from.exists() {
@@ -357,8 +343,7 @@ fn sitemap() -> String {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let site = PathBuf::from(args.first().map_or("website", String::as_str));
-    let changelog = PathBuf::from(args.get(1).map_or("CHANGELOG.md", String::as_str));
-    match build(&site, &changelog) {
+    match build(&site) {
         Ok(dist) => println!("built {}", dist.display()),
         Err(e) => {
             eprintln!("{e}");
@@ -378,14 +363,14 @@ mod tests {
             file: "race.json",
             data: None,
         }];
-        let s = expand("a {{version}} b {{download:x64}}", Lang::De, &races, "").unwrap();
+        let s = expand("a {{version}} b {{download:x64}}", Lang::De, &races).unwrap();
         assert!(s.starts_with(&format!("a {} b https://", env!("CARGO_PKG_VERSION"))));
         assert!(s.ends_with("amigo-blinzel-setup-x64.exe"));
-        let pending = expand("{{race:open_warm}}", Lang::En, &races, "").unwrap();
+        let pending = expand("{{race:open_warm}}", Lang::En, &races).unwrap();
         assert!(pending.contains("reference measurement"));
-        assert!(expand("{{nope}}", Lang::De, &races, "").is_err());
-        assert!(expand("{{race-other:next}}", Lang::De, &races, "").is_err());
-        assert!(expand("{{version", Lang::De, &races, "").is_err());
+        assert!(expand("{{nope}}", Lang::De, &races).is_err());
+        assert!(expand("{{race-other:next}}", Lang::De, &races).is_err());
+        assert!(expand("{{version", Lang::De, &races).is_err());
     }
 
     /// The real website sources build, with and without measurements.
@@ -396,22 +381,22 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("data")).unwrap();
         copy_dir(&root.join("website/src"), &tmp.join("src"));
-        let dist = build(&tmp, &root.join("CHANGELOG.md")).unwrap();
-        let html = fs::read_to_string(dist.join("de/benchmarks.html")).unwrap();
+        let dist = build(&tmp).unwrap();
+        let html = fs::read_to_string(dist.join("de/index.html")).unwrap();
         assert!(html.contains("Referenzmessung"));
         assert!(!html.contains("{{"));
 
         fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
-        let dist = build(&tmp, &root.join("CHANGELOG.md")).unwrap();
-        let html = fs::read_to_string(dist.join("en/benchmarks.html")).unwrap();
+        let dist = build(&tmp).unwrap();
+        let html = fs::read_to_string(dist.join("en/index.html")).unwrap();
         assert!(html.contains("<svg"));
         assert!(html.contains("ImageGlass"));
         // macOS still pending; then both reports, each linking its own data.
         assert!(html.contains("reference measurement"));
         assert!(!dist.join("race-macos.json").exists());
         fs::write(tmp.join("data/race-macos.json"), charts::tests::SAMPLE).unwrap();
-        let dist = build(&tmp, &root.join("CHANGELOG.md")).unwrap();
-        let html = fs::read_to_string(dist.join("en/benchmarks.html")).unwrap();
+        let dist = build(&tmp).unwrap();
+        let html = fs::read_to_string(dist.join("en/index.html")).unwrap();
         assert!(!html.contains("reference measurement"));
         assert!(html.contains("href=\"/race.json\"") && html.contains("href=\"/race-macos.json\""));
         assert!(dist.join("race-macos.json").is_file());
@@ -421,8 +406,25 @@ mod tests {
             "site.js",
             "og.png",
             "style.css",
+            "_redirects",
         ] {
             assert!(dist.join(file).is_file(), "{file}");
+        }
+        // Every section in the navigation exists on the start page, and the
+        // old page addresses lead there.
+        let redirects = fs::read_to_string(dist.join("_redirects")).unwrap();
+        for lang in Lang::ALL {
+            let code = lang.code();
+            let html = fs::read_to_string(dist.join(code).join("index.html")).unwrap();
+            for id in SECTIONS {
+                assert!(html.contains(&format!("id=\"{id}\"")), "{code}: #{id}");
+            }
+            for line in redirects.lines().filter(|l| l.starts_with(&format!("/{code}/"))) {
+                let target = line.split_whitespace().nth(1).unwrap();
+                if let Some((_, id)) = target.split_once('#') {
+                    assert!(html.contains(&format!("id=\"{id}\"")), "{line}");
+                }
+            }
         }
         let sitemap = fs::read_to_string(dist.join("sitemap.xml")).unwrap();
         assert_eq!(sitemap.matches("<url>").count(), 2 * PAGES.len());

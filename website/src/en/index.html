@@ -1,5 +1,5 @@
 <!-- title: Home -->
-<!-- description: amigo-blinzel is an image viewer for Windows, macOS and Linux: open and page through images, resize many images at once, no ads and no telemetry. -->
+<!-- description: amigo-blinzel is an image viewer for Windows, macOS and Linux: open and page through images, resize many images at once, take screenshots, with no ads and no telemetry. -->
 <section class="hero">
 <div class="hero-photo" aria-hidden="true">
 <svg class="scenes" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"><defs>
@@ -19,21 +19,248 @@
 <div class="hero-text">
 <p class="eyebrow">Version {{version}} · Windows · macOS · Linux</p>
 <h1>Open images, <span class="accent">page, resize.</span></h1>
-<p class="lead">An image viewer for Windows, macOS and Linux, built for short times when opening and paging through images. It also resizes many images at once. No toolbars, no ads, no telemetry.</p>
+<p class="lead">An image viewer for Windows, macOS and Linux, built for short times when opening and paging through images. It also resizes many images at once and takes screenshots. No toolbars, no ads, no telemetry.</p>
 <div class="cta">
-<a class="button" href="/en/download" data-download data-x64="{{download:x64}}" data-arm64="{{download:arm64}}" data-macos="{{download:macos}}" data-linux-x64="{{download:linux-x64}}" data-linux-arm64="{{download:linux-arm64}}" data-label-x64="Download for Windows" data-label-arm64="Download for Windows (ARM64)" data-label-macos="Download for macOS" data-label-linux-x64="Download for Linux" data-label-linux-arm64="Download for Linux (ARM64)">Download</a>
+<a class="button" href="#download" data-download data-x64="{{download:x64}}" data-arm64="{{download:arm64}}" data-macos="{{download:macos}}" data-linux-x64="{{download:linux-x64}}" data-linux-arm64="{{download:linux-arm64}}" data-label-x64="Download for Windows" data-label-arm64="Download for Windows (ARM64)" data-label-macos="Download for macOS" data-label-linux-x64="Download for Linux" data-label-linux-arm64="Download for Linux (ARM64)">Download</a>
 <a class="button secondary" href="#measured">Measurements</a>
 </div>
-<p class="cta-note"><a href="/en/download">All platforms, checksums and notes on the first start</a></p>
+<p class="cta-note"><a href="#download">All platforms, checksums and notes on the first start</a></p>
 </div>
 <div class="filmstrip" aria-hidden="true"><div class="thumbs"><svg viewBox="0 0 1600 900"><use href="#scene-0"/></svg><svg viewBox="0 0 1600 900"><use href="#scene-1"/></svg><svg viewBox="0 0 1600 900"><use href="#scene-2"/></svg><svg viewBox="0 0 1600 900"><use href="#scene-3"/></svg><span class="cursor"></span></div><span class="strip-keys"><kbd>←</kbd><kbd>→</kbd></span></div>
 </section>
-<div class="grid features-grid">
-<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span><h3>Window with the image</h3><p>The window appears with the image already on it. Images are decoded only as large as the screen needs.</p></div>
-<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M19.5 7v10M22.5 9.5v5"/></svg></span><h3>Preloading</h3><p>The next images are ready as GPU textures ahead of time, in the direction you page.</p></div>
-<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></span><h3>Own JPEG decoder</h3><p>Parallel on all cores and byte-identical with libjpeg-turbo.</p></div>
-<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span><h3>Verifiable</h3><p>Every number on this site comes from an open measuring tool. Raw data and method are published.</p></div>
+
+<section id="features">
+<h2>Features</h2>
+<div class="grid tools">
+<div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span><h3>Viewing</h3><p>The window appears with the image already on it. Images are decoded only as large as the screen needs; the next images wait as GPU textures in the direction you page. Image files stay unchanged: cutouts are only written as new files through “Save as”, losslessly from JPEG where possible.</p></div>
+<div class="card" id="batch"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="12" height="12" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v11"/></svg></span><h3>Resize many images</h3><p>Ctrl+B opens the dialog; drag images and folders into it. Long edge, width, height, box or percent; JPEG, PNG, WebP or AVIF; EXIF and the colour profile can be kept, GPS removed. A name pattern shows every new name in advance. Source files are never overwritten.</p></div>
+<div class="card" id="screenshots"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3"/></svg></span><h3>Screenshots (Windows)</h3><p>The Print key freezes the screen: drag a region, click a window or press Enter for the whole screen. The screenshot is saved as PNG in “Pictures\Screenshots”, optionally also copied, and opens in the viewer. E hands it to your editor.</p></div>
 </div>
-<h2 id="measured">Measured</h2>
+<div class="formats">
+<div><h3>Our own decoders, on every platform</h3><ul class="badges"><li>JPEG</li><li>PNG</li><li>GIF</li><li>BMP</li><li>TIFF</li><li>WebP</li><li>AVIF</li><li>JPEG XL</li></ul></div>
+<div><h3>Through the system</h3><ul class="badges system"><li>HEIC</li><li>Camera RAW</li></ul></div>
+</div>
+<p class="note">HEIC and camera RAW through the installed Windows codecs on Windows, through ImageIO on macOS (HEIC with Apple's hardware decoder), and RAW through the embedded previews on Linux.</p>
+
+<details>
+<summary>Controls and shortcuts</summary>
+<p>There are no toolbars. The menu (☰) sits top left; minimize, maximize and close sit top right. On a Mac the system's window buttons sit there, the menu goes right and is in the menu bar as well. Everything else is in the menu or on a key; on a Mac ⌘ replaces Ctrl.</p>
+<div class="table-wrap"><table class="keys">
+<thead><tr><th>Key / mouse</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td><kbd>→</kbd> / <kbd>Space</kbd>, <kbd>←</kbd> / <kbd>Backspace</kbd></td><td>next / previous image</td></tr>
+<tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>first / last image</td></tr>
+<tr><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td><td>fit window to image / fit image to window / 100 %</td></tr>
+<tr><td>Mouse wheel, <kbd>+</kbd> / <kbd>−</kbd>, <kbd>0</kbd></td><td>zoom around the cursor, reset</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>X</kbd></td><td>copy selection / crop the view</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>save cutout as (lossless JPEG where possible; also PNG, WebP, AVIF)</td></tr>
+<tr><td><kbd>G</kbd>, <kbd>Ctrl</kbd>+click, <kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>grid of all images, mark images</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>resize images (drag images and folders into the dialog)</td></tr>
+<tr><td><kbd>E</kbd></td><td>edit with the editor you chose (e.g. Paint.NET, GIMP, Photoshop); “Open with…” in the menu</td></tr>
+<tr><td><kbd>R</kbd> / <kbd>L</kbd></td><td>rotate (view only)</td></tr>
+<tr><td><kbd>F11</kbd>, double-click</td><td>full screen</td></tr>
+<tr><td><kbd>Del</kbd></td><td>move to the Recycle Bin</td></tr>
+<tr><td><kbd>Print</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Print</kbd></td><td>screenshot (Windows, background mode)</td></tr>
+</tbody>
+</table></div>
+</details>
+
+<details>
+<summary>Screenshots in detail</summary>
+<ul>
+<li>Taking one: with the Print key while amigo-blinzel stays ready in the background (Settings → “Keep ready in the background”), or through the icon in the notification area: “Take screenshot…” or “Screenshot of the whole screen” for the monitor under the pointer.</li>
+<li>The picture freezes at once, across all monitors. Dragging picks a region, a click the window under the pointer, Enter the whole screen; Esc cancels.</li>
+<li>It is saved as PNG with the date in its name, by default in “Pictures\Screenshots”; the folder can be changed in the menu. Optionally the screenshot is also copied to the clipboard.</li>
+<li>The screenshot then opens in the viewer. There is no editor of its own: E or “Edit with…” hands the image to the program of your choice.</li>
+<li>Windows 11 gives the Print key to the Snipping Tool by default. Then Ctrl+Shift+Print works, or turn off Settings › Accessibility › Keyboard › “Use the Print screen key to open screen capture”.</li>
+<li>macOS and Linux follow.</li>
+</ul>
+</details>
+
+<details>
+<summary>Resizing many images in detail</summary>
+<ol>
+<li>Menu → “Resize images…” or Ctrl+B (⌘B on a Mac).</li>
+<li>Drag images or folders from the file manager into the dialog. A folder adds its images, not those of its subfolders. Remove single files with ×.</li>
+<li>Choose size, format and names, pick the output folder, start. Progress and a report appear in the dialog; “Open folder” shows the result.</li>
+</ol>
+<ul>
+<li><strong>Size:</strong> long edge, width, height, fit into a box, fill a box (centre crop) or percent. Small images are not enlarged unless you ask. Scaling is Lanczos3 in linear light with premultiplied alpha; an unsharp mask can sharpen afterwards.</li>
+<li><strong>Formats:</strong> JPEG, PNG, WebP (lossy or lossless), AVIF or “same as source”. Sources without an encoder (GIF, BMP, TIFF, HEIC, JPEG XL, RAW) become JPEG, or PNG when they have transparency. For animations the first frame is used.</li>
+<li><strong>Metadata:</strong> EXIF is kept and adjusted (orientation, pixel size, without the embedded thumbnail and maker notes). GPS coordinates can be removed. The colour profile is carried over unchanged, also into WebP and AVIF.</li>
+<li><strong>Files:</strong> source files are never overwritten. If a name exists, the new file gets “ (2)” appended; every file is written completely before it is put in place.</li>
+<li><strong>Speed:</strong> all cores work in parallel, within a memory budget; JPEGs shrink while decoding (DCT scaling). Measured with <code>blinzel-bench batch</code>: 8.6 photos per second (12 MP to 1920 px, 4 cores) against 2.1 with ImageMagick on the same files.</li>
+</ul>
+<div class="table-wrap"><table>
+<thead><tr><th>Name pattern placeholder</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>{name}</code></td><td>source name without extension</td></tr>
+<tr><td><code>{n}</code>, <code>{n:3}</code></td><td>running number, optionally with leading zeros</td></tr>
+<tr><td><code>{w}</code>, <code>{h}</code></td><td>width and height of the result</td></tr>
+<tr><td><code>{date}</code></td><td>date taken from EXIF, else the modification date, as <code>YYYY-MM-DD</code></td></tr>
+<tr><td><code>{date:DD.MM.YYYY_hh-mm}</code></td><td>the same date in your own format: <code>YYYY</code>, <code>YY</code>, <code>MM</code>, <code>DD</code>, <code>hh</code>, <code>mm</code>, <code>ss</code>; everything else stays as typed</td></tr>
+<tr><td><code>{ext}</code></td><td>extension of the source</td></tr>
+</tbody>
+</table></div>
+</details>
+
+<details id="batch-compare">
+<summary>Resizing compared with other tools</summary>
+<p>As of 2026-10-29. Every entry links its source (the maker's website, documentation, release notes or source code); what could not be confirmed there reads “not documented”. Please report corrections as an issue on GitHub.</p>
+<div class="table-wrap"><table class="features">
+<thead><tr><th>Program</th><th>Checked version</th><th>Platforms</th><th>Licence</th><th>Interface</th><th>Output</th><th>Size modes</th><th>Keep EXIF</th><th>Remove GPS</th><th>Keep colour profile</th><th>Name pattern</th></tr></thead>
+<tbody>
+<tr><th scope="row">amigo-blinzel</th><td><a href="https://github.com/amigo-labs/amigo-blinzel/releases/tag/v1.2.1">1.2.1 (2026-10-29)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">Windows, macOS, Linux</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE">MIT</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-ui/src/batch_dialog.rs">GUI (dialog in the viewer)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/encode.rs">JPEG, PNG, WebP, AVIF</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/mod.rs">long edge, width, height, fit in box, fill box (crop), percent</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/meta.rs">yes (size and orientation updated)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/meta.rs">yes, on its own</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/encode.rs">yes, also in WebP and AVIF</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/naming.rs">placeholders, preview old → new</a></td></tr>
+<tr><th scope="row">PowerToys Image Resizer</th><td><a href="https://github.com/microsoft/PowerToys/releases/tag/v0.102.3001">0.102.3001 (2026-10-27)</a></td><td><a href="https://learn.microsoft.com/en-us/windows/powertoys/image-resizer">Windows</a></td><td><a href="https://github.com/microsoft/PowerToys/blob/v0.102.3001/LICENSE">MIT</a></td><td><a href="https://learn.microsoft.com/en-us/windows/powertoys/image-resizer">Explorer context menu, GUI, command line</a></td><td><a href="https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Utilities/CodecHelper.cs">JPEG, PNG (source format)</a></td><td><a href="https://learn.microsoft.com/en-us/windows/powertoys/image-resizer#sizes">width, height, fit in box, fill box (crop), stretch, percent</a></td><td><a href="https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Models/ResizeOperation.cs">yes</a></td><td><a href="https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Models/ResizeOperation.cs">only with all metadata</a></td><td><a href="https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Models/ResizeOperation.cs">PNG yes, JPEG no</a></td><td><a href="https://learn.microsoft.com/en-us/windows/powertoys/image-resizer#file">placeholders %1–%6</a>; preview not documented</td></tr>
+<tr><th scope="row">XnConvert</th><td><a href="https://www.xnview.com/en/xnconvert/">1.118.0 (2026-10-12)</a></td><td><a href="https://www.xnview.com/en/xnconvert/">Windows, macOS, Linux</a></td><td><a href="https://www.xnview.com/en/xnconvert/">freeware (private, education), business: licence from €15</a></td><td><a href="https://www.xnview.com/en/batch-image-converter/">GUI</a></td><td><a href="https://www.xnview.com/en/batch-image-converter/">JPEG, PNG, WebP, AVIF</a></td><td><a href="https://www.xnview.com/en/how-to-batch-convert-and-batch-process/">long edge, short edge, width, height, fit in box, fill box (crop not documented), megapixels</a>, <a href="https://www.xnview.com/en/batch-image-converter/">percent</a></td><td><a href="https://www.xnview.com/en/batch-image-converter/">yes</a></td><td><a href="https://www.xnview.com/en/batch-image-converter/">yes</a></td><td>not documented</td><td><a href="https://www.xnview.com/en/batch-image-converter/">pattern with counter, date, metadata</a>; preview not documented</td></tr>
+<tr><th scope="row">IrfanView (batch conversion)</th><td><a href="https://www.irfanview.com/main_history.htm">4.76 (2026-09-18)</a></td><td><a href="https://www.irfanview.com/main_what_is_engl.htm">Windows</a></td><td><a href="https://www.irfanview.com/main_what_is_engl.htm">freeware (private, education), business: licence (€15)</a></td><td><a href="https://www.irfanview.com/history_old.htm">GUI, command line</a>, <a href="https://www.irfanview.com/plugins.htm">Explorer context menu (plugin)</a></td><td><a href="https://www.irfanview.com/main_formats.htm">JPEG, PNG, WebP (plugin)</a></td><td><a href="https://www.irfanview.com/history_old.htm">long edge, short edge, fit in box (maximum size), megapixels</a></td><td><a href="https://www.irfanview.com/faq.htm">yes (JPEG save option)</a></td><td>not documented</td><td>not documented</td><td><a href="https://www.irfanview.com/faq.htm">placeholders ($N etc.)</a>, <a href="https://www.irfanview.com/history_old.htm">test run when renaming</a></td></tr>
+<tr><th scope="row">FastStone Photo Resizer</th><td><a href="https://www.faststone.org/FSResizerDetail.htm">4.5 (2025-12-29)</a></td><td><a href="https://www.faststone.org/FSResizerDetail.htm">Windows</a></td><td><a href="https://www.faststone.org/order.htm">freeware (private, education), business: licence (USD 19.95)</a></td><td><a href="https://www.faststone.org/FSResizerDetail.htm">GUI</a></td><td><a href="https://www.faststone.org/FSResizerDetail.htm">JPEG, PNG</a></td><td>not documented</td><td>not documented</td><td>not documented</td><td>not documented</td><td><a href="https://www.faststone.org/FSResizerDetail.htm">sequence number, search/replace, with preview</a></td></tr>
+<tr><th scope="row">ImageMagick (magick/mogrify)</th><td><a href="https://github.com/ImageMagick/ImageMagick/releases/tag/7.1.2-34">7.1.2-34 (2026-10-14)</a></td><td><a href="https://imagemagick.org/download/">Windows, macOS, Linux</a></td><td><a href="https://imagemagick.org/license/">ImageMagick License (open source)</a></td><td><a href="https://imagemagick.org/mogrify/">command line</a></td><td><a href="https://imagemagick.org/formats/">JPEG, PNG, WebP, AVIF</a></td><td><a href="https://imagemagick.org/command-line-processing/#geometry">fit in box, fill box (^, no crop), percent, pixel area</a></td><td><a href="https://imagemagick.org/command-line-options/#profile">yes</a></td><td><a href="https://imagemagick.org/command-line-options/#profile">with the EXIF profile (+profile)</a>, on its own not documented</td><td><a href="https://imagemagick.org/command-line-options/#thumbnail">yes (-thumbnail removes it)</a></td><td><a href="https://imagemagick.org/command-line-processing/#output">placeholders (%[filename:…])</a>, <a href="https://imagemagick.org/mogrify/">mogrify keeps the name</a>; preview not documented</td></tr>
+<tr><th scope="row">libvips (vipsthumbnail)</th><td><a href="https://github.com/libvips/libvips/releases/tag/v8.18.7">8.18.7 (2026-09-26)</a></td><td><a href="https://www.libvips.org/install.html">Windows, macOS, Linux</a></td><td><a href="https://github.com/libvips/libvips/blob/v8.18.7/LICENSE">LGPL-2.1</a></td><td><a href="https://www.libvips.org/API/current/using-vipsthumbnail.html">command line</a></td><td><a href="https://github.com/libvips/libvips/blob/v8.18.7/README.md">JPEG, PNG, WebP, AVIF (depending on build)</a></td><td><a href="https://www.libvips.org/API/current/using-vipsthumbnail.html">width, height, fit in box, fill box (crop)</a></td><td><a href="https://www.libvips.org/API/current/flags.ForeignKeep.html">yes</a></td><td><a href="https://www.libvips.org/API/current/flags.ForeignKeep.html">with all EXIF data (keep)</a>, on its own not documented</td><td><a href="https://www.libvips.org/API/current/flags.ForeignKeep.html">yes</a></td><td><a href="https://www.libvips.org/API/current/using-vipsthumbnail.html">placeholders (%s, %d, %c)</a>; preview not documented</td></tr>
+</tbody>
+</table></div>
+</details>
+
+<details>
+<summary>How it works</summary>
+<ul>
+<li>Decoding at screen resolution: JPEGs are decoded with DCT scaling straight into YCbCr planes; the GPU does colour conversion and scaling.</li>
+<li>An own JPEG decoder spreads Huffman decoding over all cores, even without restart markers, and is byte-identical with libjpeg-turbo.</li>
+<li>Prefetching in paging direction, with priorities and cancellation.</li>
+<li>Parallel start: window, GPU and decoder start at the same time.</li>
+<li>Native on every platform: Win32 and Direct3D 11 on Windows, AppKit and Metal on macOS, Vulkan (wgpu) on Linux. No runtime, no framework in between.</li>
+</ul>
+</details>
+</section>
+
+<section id="measured">
+<h2>Comparisons</h2>
+<p>Measured from the outside, the same way for every viewer, with the open tool <code>blinzel-race</code>: from process start until the image is on screen, and from a key press until the next image appears. Median over several repetitions, the 95th percentile in parentheses.</p>
+<h3>Windows: opening</h3>
 {{race:open_warm}}
-<p class="more"><a href="/en/benchmarks">All measurements</a> · <a href="/en/method">How we measure</a></p>
+<h3>Windows: next image</h3>
+{{race:next}}
+<h3>Windows: key repeat (held arrow key, 30 Hz)</h3>
+{{race:burst}}
+
+<details>
+<summary>macOS</summary>
+<p>The same measurements with the same test images, on a Mac with ScreenCaptureKit instead of Desktop Duplication. Preview does not page through the folder when a single file is opened, so for Preview there is only the opening time.</p>
+<h3>Opening</h3>
+{{race-macos:open_warm}}
+<h3>Next image</h3>
+{{race-macos:next}}
+<h3>Key repeat</h3>
+{{race-macos:burst}}
+</details>
+
+<details>
+<summary>All values and test machines</summary>
+<h3>Windows</h3>
+{{race:machine}}
+<h4>Opening (cold, file cache emptied)</h4>
+{{race:open_cold}}
+{{race:table}}
+<h3>macOS</h3>
+{{race-macos:machine}}
+<h4>Opening (cold, file cache emptied)</h4>
+{{race-macos:open_cold}}
+{{race-macos:table}}
+</details>
+
+<details id="method">
+<summary>How we measure</summary>
+<p>Every viewer is measured with the same tool, from the outside and without touching the programs. The tool is part of the source code (<code>crates/blinzel-race</code>); every measurement can be reproduced.</p>
+<ul>
+<li><strong>Test images:</strong> 24 JPEGs of 24 megapixels and about 8 MB each, as from a typical camera. Every image has its own base colour; consecutive images always differ.</li>
+<li><strong>Detection:</strong> through the Desktop Duplication API on Windows and ScreenCaptureKit on macOS the tool sees every frame that reaches the screen, with its presentation time. A grid of sample points recognizes from the base colour which image is visible. On macOS the tool starts every viewer through Launch Services (<code>open -a</code>).</li>
+<li><strong>Opening:</strong> from process start until the first image is visible. Warm: program and image are in the file cache. Cold: the file cache is emptied first.</li>
+<li><strong>Next image:</strong> after 1.5 seconds of rest, one arrow key press until the next image is visible.</li>
+<li><strong>Key repeat:</strong> 20 presses at 30 Hz, like a held key. Counted: how many images actually appear.</li>
+<li><strong>Fairness:</strong> same machine, same files, every viewer with default settings; the versions are part of the results. A first, uncounted start loads every program into the cache.</li>
+</ul>
+<p><strong>Measure yourself:</strong> <code>blinzel-race corpus images</code> creates the images, <code>blinzel-race run images --json result.json</code> measures every viewer found. Cold starts need administrator rights (<code>--cold</code>; on macOS the tool asks for the password once). On macOS the terminal also needs the Screen Recording and Accessibility permissions (System Settings, Privacy &amp; Security).</p>
+</details>
+
+<details id="compare">
+<summary>Viewers compared: features and formats</summary>
+<h3>Windows</h3>
+<p>As of 2026-10-23. Every entry links its source (the maker's website, documentation, release notes or source code); what could not be confirmed there reads “not documented”. Download is the size of the x64 installer. Please report corrections as an issue on GitHub.</p>
+<div class="table-wrap"><table class="features">
+<thead><tr><th>Viewer</th><th>Checked version</th><th>Licence</th><th>Business use</th><th>Ads</th><th>Telemetry</th><th>Native ARM64</th><th>Download</th><th>Colour profiles</th><th>HEIC</th><th>AVIF</th><th>JPEG XL</th><th>WebP</th><th>RAW</th></tr></thead>
+<tbody>
+<tr><th scope="row">amigo-blinzel</th><td><a href="https://github.com/amigo-labs/amigo-blinzel">0.1.0 (in development)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE">MIT</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE">allowed</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">none</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">none</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">yes</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">about 2.4 MB (one executable)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">embedded + monitor</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">Windows codec</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode">own decoder</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode">own decoder</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode">own decoder</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">Windows codec</a></td></tr>
+<tr><th scope="row">IrfanView 64</th><td><a href="https://www.irfanview.com/64bit.htm">4.76 (2026-09-18)</a></td><td><a href="https://www.irfanview.com/eula.htm">freeware, proprietary</a></td><td><a href="https://www.irfanview.com/eula.htm">licence required (EUR 15)</a></td><td><a href="https://www.irfanview.com/faq.htm">not documented</a></td><td><a href="https://www.irfanview.com/privacy_policy.htm">no personal data</a></td><td><a href="https://www.irfanview.com/arm64.htm">yes</a></td><td><a href="https://www.irfanview.com/64bit.htm">4.3 MB (+ 30.1 MB plugins)</a></td><td><a href="https://www.irfanview.com/plugins.htm">embedded (plugin), monitor not documented</a></td><td><a href="https://www.irfanview.com/faq.htm">plugin / Windows codec</a></td><td><a href="https://www.irfanview.com/main_formats.htm">plugin</a></td><td><a href="https://www.irfanview.com/plugins.htm">plugin</a></td><td><a href="https://www.irfanview.com/main_formats.htm">plugin</a></td><td><a href="https://www.irfanview.com/plugins.htm">plugin</a></td></tr>
+<tr><th scope="row">ImageGlass</th><td><a href="https://github.com/d2phap/ImageGlass/releases/tag/10.0.6.906">10.0.6.906 (2026-09-05)</a></td><td><a href="https://imageglass.org/pricing">GPLv3 (Classic), paid Pro</a></td><td><a href="https://imageglass.org/license?type=classic">allowed (Classic)</a></td><td><a href="https://imageglass.org/classic">none</a></td><td><a href="https://imageglass.org/privacy">anonymous stats with the update check, opt-out</a></td><td><a href="https://github.com/d2phap/ImageGlass/releases/tag/10.0.6.906">yes (MSIX/ZIP)</a></td><td><a href="https://github.com/d2phap/ImageGlass/releases/tag/10.0.6.906">35.4 MB</a></td><td><a href="https://github.com/d2phap/ImageGlass/blob/develop/source/ImageGlass.Lib/Settings/Config.cs">embedded + monitor</a></td><td><a href="https://imageglass.org/docs/supported-formats">yes</a></td><td><a href="https://imageglass.org/docs/supported-formats">yes</a></td><td><a href="https://imageglass.org/docs/supported-formats">yes</a></td><td><a href="https://imageglass.org/docs/supported-formats">yes</a></td><td><a href="https://imageglass.org/docs/supported-formats">yes</a></td></tr>
+<tr><th scope="row">XnView MP</th><td><a href="https://www.xnview.com/en/xnview-mp/">1.12.2 (2026-10-12)</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">freeware, proprietary</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">licence required (from EUR 29)</a></td><td><a href="https://www.xnview.com/en/faq/">none</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">not documented</a></td><td><a href="https://newsgroup.xnview.com/viewtopic.php?t=51463">no</a></td><td><a href="https://download.xnview.com/XnViewMP-win-x64.exe">69.1 MB</a></td><td><a href="https://www.xnview.com/en/faq/">embedded, monitor not documented</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td></tr>
+<tr><th scope="row">FastStone Image Viewer</th><td><a href="https://www.faststone.org/FSViewerDetail.htm">8.5 (2026-06-24)</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">freeware, proprietary</a></td><td><a href="https://www.faststone.org/order.htm">licence required (USD 34.95)</a></td><td><a href="https://www.faststone.org/PrivacyPolicy.htm">none</a></td><td><a href="https://www.faststone.org/PrivacyPolicy.htm">no personal data</a></td><td><a href="https://www.faststone.org/FSViewerDownload.htm">no</a></td><td><a href="https://www.faststonesoft.net/DN/FSViewerSetup85.exe">12.5 MB</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">embedded, monitor optional</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">Windows codec</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">yes</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">yes</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">yes</a></td><td><a href="https://www.faststone.org/FSViewerDetail.htm">yes</a></td></tr>
+<tr><th scope="row">JPEGView</th><td><a href="https://github.com/sylikc/jpegview/releases/tag/v1.3.46">1.3.46 (2023-10-07)</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/LICENSE.txt">GPL-2.0</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/LICENSE.txt">allowed</a></td><td><a href="https://github.com/sylikc/jpegview">none</a></td><td><a href="https://github.com/sylikc/jpegview">none</a></td><td><a href="https://github.com/sylikc/jpegview/releases/tag/v1.3.46">no</a></td><td><a href="https://github.com/sylikc/jpegview/releases/tag/v1.3.46">5.2 MB</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/src/JPEGView/Config/JPEGView.ini">partly (JPEG/PNG/TIFF opt-in), monitor not documented</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/README.md">yes</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/README.md">yes</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/README.md">yes</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/README.md">yes</a></td><td><a href="https://github.com/sylikc/jpegview/blob/master/README.md">yes</a></td></tr>
+<tr><th scope="row">qimgv</th><td><a href="https://github.com/easymodo/qimgv/releases/tag/v1.0.2">1.0.2 (2021-09-29)</a></td><td><a href="https://github.com/easymodo/qimgv">GPL-3.0</a></td><td><a href="https://github.com/easymodo/qimgv">allowed</a></td><td><a href="https://github.com/easymodo/qimgv">none</a></td><td><a href="https://github.com/easymodo/qimgv">none</a></td><td><a href="https://github.com/easymodo/qimgv/releases/tag/v1.0.2">no</a></td><td><a href="https://github.com/easymodo/qimgv/releases/tag/v1.0.2">29.3 MB</a></td><td><a href="https://github.com/easymodo/qimgv">no</a></td><td><a href="https://github.com/easymodo/qimgv/blob/master/README.md">plugin (bundled)</a></td><td><a href="https://github.com/easymodo/qimgv/blob/master/README.md">plugin (bundled)</a></td><td><a href="https://github.com/easymodo/qimgv/blob/master/README.md">plugin (bundled)</a></td><td><a href="https://github.com/easymodo/qimgv/blob/master/qimgv/sourcecontainers/documentinfo.cpp">yes</a></td><td><a href="https://github.com/easymodo/qimgv/blob/master/README.md">plugin (bundled)</a></td></tr>
+<tr><th scope="row">Windows Photos</th><td><a href="https://apps.microsoft.com/detail/9wzdncrfjbh4">2026.11090.22001.0 (2026-10-19)</a></td><td><a href="https://apps.microsoft.com/detail/9wzdncrfjbh4">proprietary, part of Windows</a></td><td><a href="https://apps.microsoft.com/detail/9wzdncrfjbh4">not documented</a></td><td><a href="https://apps.microsoft.com/detail/9wzdncrfjbh4">not documented</a></td><td><a href="https://www.microsoft.com/en-us/privacy/privacystatement">yes (Windows diagnostic data)</a></td><td><a href="https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=9WZDNCRFJBH4&amp;market=US&amp;languages=en-US">yes</a></td><td><a href="https://apps.microsoft.com/detail/9wzdncrfjbh4">preinstalled</a></td><td><a href="https://blogs.windows.com/windowsexperience/2026/10/15/meet-the-new-photos-app-on-windows-11/">not documented</a></td><td><a href="https://apps.microsoft.com/detail/9PMMSR1CGPWG">Windows codec (extension)</a></td><td><a href="https://apps.microsoft.com/detail/9PMMSR1CGPWG">Windows codec (extension)</a></td><td><a href="https://apps.microsoft.com/detail/9MZPRTH5C0TB">Windows codec (extension)</a></td><td><a href="https://apps.microsoft.com/detail/9PG2DK419DRG">Windows codec (extension)</a></td><td><a href="https://apps.microsoft.com/detail/9NCTDW2W1BH8">Windows codec (extension)</a></td></tr>
+</tbody>
+</table></div>
+<h3>macOS</h3>
+<p>As of 2026-10-26. Every entry links its source (the maker's website, documentation, App Store page, release notes or source code); what could not be confirmed there reads “not documented”. “macOS codec” means the program reads the format through Apple's ImageIO. Download is the size of the macOS download. Please report corrections as an issue on GitHub.</p>
+<div class="table-wrap"><table class="features">
+<thead><tr><th>Viewer</th><th>Checked version</th><th>Licence</th><th>Business use</th><th>Ads</th><th>Telemetry</th><th>Native on Apple silicon</th><th>Download</th><th>Colour profiles</th><th>HEIC</th><th>AVIF</th><th>JPEG XL</th><th>WebP</th><th>RAW</th></tr></thead>
+<tbody>
+<tr><th scope="row">amigo-blinzel</th><td><a href="https://github.com/amigo-labs/amigo-blinzel">0.1.0 (in development)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE">MIT</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE">allowed</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">none</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel">none</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-release/src/macos.rs">yes (universal)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/releases">one app bundle (ZIP)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-app/src/macos/color.rs">embedded + monitor</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-app/src/macos/imageio.rs">macOS codec (hardware)</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode">own decoder</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode">own decoder</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode">own decoder</a></td><td><a href="https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-app/src/macos/imageio.rs">macOS codec</a></td></tr>
+<tr><th scope="row">Preview</th><td><a href="https://support.apple.com/en-us/100100">macOS 27.0.1 (2026-09-28)</a></td><td><a href="https://www.apple.com/legal/sla/docs/macOS27.pdf">proprietary, part of macOS</a></td><td><a href="https://www.apple.com/legal/sla/docs/macOS27.pdf">allowed</a></td><td><a href="https://support.apple.com/guide/preview/open-pdfs-and-images-prvw81f73d4e/mac">not documented</a></td><td><a href="https://support.apple.com/guide/mac-help/share-analytics-information-mac-mh27990/mac">Mac Analytics, opt-in</a></td><td><a href="https://support.apple.com/en-us/127455">yes</a></td><td><a href="https://www.apple.com/legal/sla/docs/macOS27.pdf">preinstalled</a></td><td><a href="https://support.apple.com/guide/preview/apply-a-color-profile-to-an-image-prvw41540291/mac">not documented</a></td><td><a href="https://support.apple.com/en-us/116944">yes</a></td><td><a href="https://support.apple.com/guide/preview/prvw1012/mac">not documented</a></td><td><a href="https://support.apple.com/guide/preview/prvw1012/mac">not documented</a></td><td><a href="https://support.apple.com/guide/preview/prvw1012/mac">not documented</a></td><td><a href="https://support.apple.com/en-us/127493">macOS codec</a></td></tr>
+<tr><th scope="row">XnView MP</th><td><a href="https://www.xnview.com/en/xnview-mp/">1.12.2 (2026-10-12)</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">freeware, proprietary</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">licence required (from EUR 29)</a></td><td><a href="https://www.xnview.com/en/faq/">none</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">not documented</a></td><td><a href="https://www.xnview.com/en/xnview-mp/">yes (Universal DMG)</a></td><td><a href="https://download.xnview.com/XnViewMP-mac.dmg">136.7 MB</a></td><td><a href="https://www.xnview.com/en/faq/">embedded, monitor not documented</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td><td><a href="https://www.xnview.com/en/faq/">yes</a></td></tr>
+<tr><th scope="row">qView</th><td><a href="https://github.com/jurplel/qView/releases/tag/7.1">7.1 (2025-07-26)</a></td><td><a href="https://github.com/jurplel/qView/blob/master/LICENSE">GPL-3.0</a></td><td><a href="https://github.com/jurplel/qView/blob/master/LICENSE">allowed</a></td><td><a href="https://github.com/jurplel/qView">none</a></td><td><a href="https://github.com/jurplel/qView/blob/7.1/src/settingsmanager.cpp">none (update check off by default)</a></td><td><a href="https://github.com/jurplel/qView/blob/7.1/dist/scripts/build.ps1">yes (universal)</a></td><td><a href="https://github.com/jurplel/qView/releases/tag/7.1">43.1 MB</a></td><td><a href="https://github.com/jurplel/qView/blob/7.1/src/qvimagecore.cpp">embedded + monitor</a></td><td><a href="https://github.com/jurplel/qView/blob/7.1/dist/scripts/macdeploy.sh">plugin (bundled)</a></td><td><a href="https://github.com/jurplel/kimageformats-binaries/blob/master/pwsh/get-vcpkg-deps.ps1">plugin (bundled)</a></td><td><a href="https://github.com/jurplel/kimageformats-binaries/blob/master/pwsh/buildkimageformats.ps1">plugin (bundled)</a></td><td><a href="https://interversehq.com/qview/">yes</a></td><td><a href="https://github.com/jurplel/kimageformats-binaries/blob/master/pwsh/get-vcpkg-deps.ps1">plugin (bundled)</a></td></tr>
+<tr><th scope="row">Pixea</th><td><a href="https://apps.apple.com/us/app/pixea/id1507782672?mt=12">8.4 (2026-10-10)</a></td><td><a href="https://apps.apple.com/us/app/pixea/id1507782672?mt=12">freeware, proprietary (Pixea Plus optional, USD 19.99 once)</a></td><td><a href="https://www.apple.com/legal/internet-services/itunes/us/terms.html">allowed (App Store licence)</a></td><td><a href="https://www.imagetasks.com/pixea/">not documented</a></td><td><a href="https://apps.apple.com/us/app/pixea/id1507782672?mt=12">none (Data Not Collected)</a></td><td><a href="https://www.imagetasks.com/pixea/">yes</a></td><td><a href="https://apps.apple.com/us/app/pixea/id1507782672?mt=12">275.8 MB (App Store)</a></td><td><a href="https://www.imagetasks.com/pixea/">not documented</a></td><td><a href="https://www.imagetasks.com/pixea/">yes</a></td><td><a href="https://www.imagetasks.com/pixea/">yes</a></td><td><a href="https://www.imagetasks.com/pixea/">yes</a></td><td><a href="https://www.imagetasks.com/pixea/">yes</a></td><td><a href="https://www.imagetasks.com/pixea/">yes</a></td></tr>
+<tr><th scope="row">ApolloOne</th><td><a href="https://apps.apple.com/us/app/apolloone-photo-video-viewer/id1044484672?mt=12">5.1.0 (2026-10-22)</a></td><td><a href="https://anogeissus.com/apolloone-faq.html">free edition, paid Standard/Pro/Max (from USD 14.99/year), proprietary</a></td><td><a href="https://anogeissus.com/termsofuse.html">not documented</a></td><td><a href="https://anogeissus.com/apolloone.html">not documented</a></td><td><a href="https://apps.apple.com/us/app/apolloone-photo-video-viewer/id1044484672?mt=12">usage data for analytics, not linked to you</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">yes</a></td><td><a href="https://apps.apple.com/us/app/apolloone-photo-video-viewer/id1044484672?mt=12">38.2 MB (App Store)</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">not documented</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">yes</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">yes (macOS 13+)</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">yes</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">yes (macOS 11+)</a></td><td><a href="https://anogeissus.com/downloads/ApolloOne-Help-en.pdf">macOS codec + LibRaw</a></td></tr>
+<tr><th scope="row">Phoenix Slides</th><td><a href="https://blyt.net/phxslides/">1.6.2 (2026-06-17)</a></td><td><a href="https://blyt.net/phxslides/">CC BY-NC-SA 4.0</a></td><td><a href="https://blyt.net/phxslides/">no (non-commercial only)</a></td><td><a href="https://github.com/gobbledegook/creevey">none</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/DYVersChecker.m">none (weekly update check, on by default)</a></td><td><a href="https://blyt.net/phxslides/version.html">yes</a></td><td><a href="https://blyt.net/phxslides/phoenix-slides-162.dmg">0.9 MB</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/DYImageCache.m">not documented</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/README.md">macOS codec</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/CreeveyController.m">macOS codec</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/CreeveyController.m">macOS codec</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/README.md">macOS codec</a></td><td><a href="https://github.com/gobbledegook/creevey/blob/master/README.md">macOS codec</a></td></tr>
+</tbody>
+</table></div>
+</details>
+</section>
+
+<section id="download">
+<h2>Download</h2>
+<p>Version {{version}}. Installs for you only, without administrator rights. Source code open on GitHub; no ads, no telemetry, the only network connection is the daily update check with GitHub (can be turned off).</p>
+<div class="downloads">
+<div class="platform" id="windows">
+<h3>Windows</h3>
+<p>Windows 11 version 24H2 or newer.</p>
+<div class="cta">
+<a class="button" href="{{download:x64}}">x64</a>
+<a class="button secondary" href="{{download:arm64}}">ARM64</a>
+</div>
+<p>The file is viewer and installer in one and installs to <code>%LOCALAPPDATA%\Programs\amigo-blinzel</code>.</p>
+</div>
+<div class="platform" id="macos">
+<h3>macOS</h3>
+<p>macOS 14 Sonoma or newer, Apple silicon and Intel in one app.</p>
+<div class="cta">
+<a class="button" href="{{download:macos}}">Universal</a>
+</div>
+<p>The ZIP holds <code>amigo-blinzel.app</code>; drag the app into the Applications folder.</p>
+</div>
+<div class="platform" id="linux">
+<h3>Linux</h3>
+<p>x64 and ARM64, Wayland or X11, glibc 2.35 or newer, a Vulkan or OpenGL ES 3 driver.</p>
+<div class="cta">
+<a class="button" href="{{download:linux-x64}}">x64</a>
+<a class="button secondary" href="{{download:linux-arm64}}">ARM64</a>
+</div>
+<p>Unpack, then <code>./amigo-blinzel/blinzel --install</code>.</p>
+</div>
+</div>
+
+<details>
+<summary>First start, installation and updates</summary>
+<h3>Windows</h3>
+<p>The file is not signed with a code signing certificate, so Windows SmartScreen shows “Windows protected your PC” at the first start: click <em>More info</em>, then <em>Run anyway</em>. To make amigo-blinzel the default for images, use Windows Settings; the setup opens the page if you like. Uninstall: Settings → Apps → Installed apps.</p>
+<h3>macOS</h3>
+<p>The app is not notarized by Apple, so macOS reports at the first start that it cannot check it. On macOS 14: Control-click the app in Finder, choose <em>Open</em> and confirm. From macOS 15: open it once, then System Settings → Privacy &amp; Security → <em>Open Anyway</em>. Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app</code>. Make it the default through “Get Info” → “Open with” → “Change All”.</p>
+<h3>Linux</h3>
+<pre><code>tar xzf amigo-blinzel-linux-x64.tar.gz
+./amigo-blinzel/blinzel --install</code></pre>
+<p>This puts the program in <code>~/.local/share/amigo-blinzel</code>, a <code>blinzel</code> command in <code>~/.local/bin</code> and an entry in the application menu with “Open with” for images. To make it the default image viewer: <code>xdg-mime default amigo-blinzel.desktop image/jpeg image/png image/webp image/avif</code>. Uninstall: <code>blinzel --uninstall</code>.</p>
+<h3>Checksums</h3>
+<p>The checksums of all files are in <a href="{{download:sums}}">SHA256SUMS</a>, signed with the project's release key. On Windows: <code>Get-FileHash amigo-blinzel-setup-x64.exe</code>; on macOS and Linux: <code>shasum -a 256</code> or <code>sha256sum</code>.</p>
+<h3>Updates</h3>
+<p>amigo-blinzel asks GitHub at most once a day whether there is a new version and installs it silently; it takes effect at the next start. To turn it off: <code>auto_update = false</code> in <code>settings.toml</code>, on Windows in <code>%APPDATA%\amigo-blinzel</code>, on macOS in <code>~/Library/Application Support/amigo-blinzel</code>, on Linux in <code>~/.config/amigo-blinzel</code>.</p>
+</details>
+</section>

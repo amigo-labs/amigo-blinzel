@@ -4,7 +4,7 @@
 "use strict";
 
 // The release asset for this browser's system, or null (phones, tablets,
-// unknown systems keep the link to the download page).
+// unknown systems keep the link to the download section).
 async function platform() {
   const ua = navigator.userAgent;
   const uad = navigator.userAgentData;

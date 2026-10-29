@@ -15,4 +15,4 @@ if ! command -v rustup >/dev/null 2>&1; then
   . "$HOME/.cargo/env"
 fi
 rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
-cargo run --locked -p blinzel-site -- website CHANGELOG.md
+cargo run --locked -p blinzel-site -- website
