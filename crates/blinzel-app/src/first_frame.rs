@@ -133,11 +133,12 @@ fn prepare(hwnd: HWND, ff: FirstFrame) {
         return;
     }
     let img = &ff.image;
-    if view.mode == ViewMode::FitWindowToImage {
+    if view.mode != ViewMode::ActualSize {
         let oriented = ff
             .orientation
             .oriented_size(img.full_width, img.full_height);
-        crate::window::fit_window(hwnd, oriented);
+        let grow_only = view.mode == ViewMode::FitImageToWindow;
+        crate::window::fit_window(hwnd, oriented, grow_only);
     }
     let mut r = RECT::default();
     unsafe {

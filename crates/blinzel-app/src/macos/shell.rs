@@ -398,9 +398,33 @@ impl Shell {
                 );
                 vec![]
             }
-            Action::FitWindow { client } => {
+            Action::FitWindow { client, grow_only } => {
                 if !self.app.fullscreen && !self.window.isZoomed() {
                     let k = self.scale();
+                    let client = if grow_only {
+                        let Some(screen) = self.window.screen() else {
+                            return vec![];
+                        };
+                        let work = screen.visibleFrame().size;
+                        let title = self.window.frame().size.height
+                            - self.window.contentRectForFrameRect(self.window.frame()).size.height;
+                        let max = (
+                            (work.width * k) as u32,
+                            ((work.height - title) * k) as u32,
+                        );
+                        let min = ((320.0 * k) as u32, (220.0 * k) as u32);
+                        match blinzel_core::layout::grown_client_size(
+                            client,
+                            self.app.client,
+                            max,
+                            min,
+                        ) {
+                            Some(size) => size,
+                            None => return vec![],
+                        }
+                    } else {
+                        client
+                    };
                     let size = NSSize::new(client.0 as f64 / k, client.1 as f64 / k);
                     let old = self.window.frame();
                     let content = NSRect::new(NSPoint::new(0.0, 0.0), size);

@@ -688,8 +688,8 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
                 None => vec![],
             }
         }
-        Action::FitWindow { client } => {
-            fit_window(hwnd, client);
+        Action::FitWindow { client, grow_only } => {
+            fit_window(hwnd, client, grow_only);
             vec![]
         }
         Action::ToggleFullscreen => {
@@ -1094,7 +1094,8 @@ fn window_rect_for_client(client: RECT, dpi: u32) -> RECT {
     }
 }
 
-pub(crate) fn fit_window(hwnd: HWND, image: (u32, u32)) {
+/// Sizes the client area for `image` (see [`Action::FitWindow`]).
+pub(crate) fn fit_window(hwnd: HWND, image: (u32, u32), grow_only: bool) {
     if is_maximized(hwnd) {
         return;
     }
@@ -1108,7 +1109,19 @@ pub(crate) fn fit_window(hwnd: HWND, image: (u32, u32)) {
         (work.bottom - work.top) as u32,
     );
     let min = ((320.0 * s) as u32, (220.0 * s) as u32);
-    let (cw, ch) = blinzel_core::layout::window_client_size(image, max, min);
+    let (cw, ch) = if grow_only {
+        let mut cr = RECT::default();
+        unsafe {
+            let _ = GetClientRect(hwnd, &mut cr);
+        }
+        let current = ((cr.right - cr.left) as u32, (cr.bottom - cr.top) as u32);
+        match blinzel_core::layout::grown_client_size(image, current, max, min) {
+            Some(size) => size,
+            None => return,
+        }
+    } else {
+        blinzel_core::layout::window_client_size(image, max, min)
+    };
     // Keep the current centre, stay inside the work area.
     let mut wr = RECT::default();
     unsafe {

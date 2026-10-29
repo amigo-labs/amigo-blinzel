@@ -367,10 +367,27 @@ impl Shell {
                 app.open_menu((x as f64, y as f64));
                 vec![]
             }
-            Action::FitWindow { client } => {
-                if !app.fullscreen && !window.is_maximized() {
-                    let _ = window.request_inner_size(PhysicalSize::new(client.0, client.1));
+            Action::FitWindow { client, grow_only } => {
+                if app.fullscreen || window.is_maximized() {
+                    return vec![];
                 }
+                let client = if grow_only {
+                    // winit knows no work area; the monitor size is the
+                    // limit and the window manager keeps panels free.
+                    let Some(monitor) = window.current_monitor() else {
+                        return vec![];
+                    };
+                    let k = window.scale_factor();
+                    let max = (monitor.size().width, monitor.size().height);
+                    let min = ((320.0 * k) as u32, (220.0 * k) as u32);
+                    match blinzel_core::layout::grown_client_size(client, app.client, max, min) {
+                        Some(size) => size,
+                        None => return vec![],
+                    }
+                } else {
+                    client
+                };
+                let _ = window.request_inner_size(PhysicalSize::new(client.0, client.1));
                 vec![]
             }
             Action::ToggleFullscreen => {

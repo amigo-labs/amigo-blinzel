@@ -255,6 +255,27 @@ pub fn window_client_size(image: (u32, u32), max: (u32, u32), min: (u32, u32)) -
     (cw, ch)
 }
 
+/// Client size for [`ViewMode::FitImageToWindow`] when an image larger than
+/// the window arrives: the window grows towards [`window_client_size`] but
+/// never shrinks on either axis and stays within `max`. `None` when the
+/// image fits or the window cannot grow any further.
+pub fn grown_client_size(
+    image: (u32, u32),
+    current: (u32, u32),
+    max: (u32, u32),
+    min: (u32, u32),
+) -> Option<(u32, u32)> {
+    if image.0 <= current.0 && image.1 <= current.1 {
+        return None;
+    }
+    let target = window_client_size(image, max, min);
+    let grown = (
+        current.0.max(target.0).min(max.0),
+        current.1.max(target.1).min(max.1),
+    );
+    (grown.0 > current.0 || grown.1 > current.1).then_some(grown)
+}
+
 /// Stage texel coordinates → client pixels, for an image stage of size
 /// `stage` (texels) of a source whose stored full size is `full`, shown
 /// with `orientation` under `layout`. Shared by the GPU renderer and the
@@ -454,6 +475,35 @@ mod tests {
         );
         assert_eq!(needed_decode_size((6000, 4000), 0.26), (1560, 1040));
         assert_eq!(needed_decode_size((6000, 4000), 2.0), (6000, 4000));
+    }
+
+    #[test]
+    fn window_grows_for_large_images_only() {
+        let (max, min) = ((1920, 1040), (320, 200));
+        // Fits: no change, also for small images.
+        assert_eq!(grown_client_size((800, 600), (1000, 700), max, min), None);
+        assert_eq!(grown_client_size((50, 20), (1000, 700), max, min), None);
+        // Larger than the window but not the screen: 100 %.
+        assert_eq!(
+            grown_client_size((1200, 900), (1000, 700), max, min),
+            Some((1200, 900))
+        );
+        // Larger than the screen: fitted into the work area.
+        assert_eq!(
+            grown_client_size((6000, 4000), (1000, 700), max, min),
+            Some((1560, 1040))
+        );
+        // Never shrinks an axis: a wide window keeps its width for a tall image.
+        assert_eq!(
+            grown_client_size((900, 1200), (1600, 700), max, min),
+            Some((1600, 1040))
+        );
+        // Already as large as it can get.
+        assert_eq!(grown_client_size((6000, 4000), max, max, min), None);
+        assert_eq!(
+            grown_client_size((6000, 4000), (1700, 1040), max, min),
+            None
+        );
     }
 
     #[test]
