@@ -407,11 +407,12 @@ impl Shell {
                         };
                         let work = screen.visibleFrame().size;
                         let title = self.window.frame().size.height
-                            - self.window.contentRectForFrameRect(self.window.frame()).size.height;
-                        let max = (
-                            (work.width * k) as u32,
-                            ((work.height - title) * k) as u32,
-                        );
+                            - self
+                                .window
+                                .contentRectForFrameRect(self.window.frame())
+                                .size
+                                .height;
+                        let max = ((work.width * k) as u32, ((work.height - title) * k) as u32);
                         let min = ((320.0 * k) as u32, (220.0 * k) as u32);
                         match blinzel_core::layout::grown_client_size(
                             client,
