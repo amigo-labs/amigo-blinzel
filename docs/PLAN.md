@@ -302,15 +302,21 @@ The shells implement the same traits as Windows (`Device`, `Canvas`, `Host`, `Se
 ### No code signature
 
 - ✅ **Decided:** Releases are not signed with a code signing certificate (no SignPath, no Authenticode, no notarization on the Mac). Consequence: Windows SmartScreen warns on the first start ("More info" → "Run anyway"), and macOS Gatekeeper refuses the first start until it is allowed in System Settings → Privacy & Security; the download page explains both.
-- 🟡 **Mac: our own self-signed certificate** instead of an ad hoc signature. It is not trusted by Gatekeeper (the first start warning stays), but it gives the app a stable identity: macOS keeps permissions such as "Screen Recording" across updates, while an ad hoc signature changes with every build and loses them. `release.yml` imports it from the secrets `MACOS_SIGNING_CERT` (the .p12 as base64) and `MACOS_SIGNING_CERT_PASSWORD` into a temporary keychain and passes its SHA-1 hash to `blinzel-release macos-bundle` as `BLINZEL_MACOS_SIGN_IDENTITY`; without the secrets it signs ad hoc. The certificate must keep its name `amigo-blinzel` and must not be replaced, or installed copies lose their permissions once more. Creating it (once, valid for ten years):
+- 🟡 **Mac: our own self-signed certificate** instead of an ad hoc signature. It is not trusted by Gatekeeper (the first start warning stays), but it gives the app a stable identity: macOS keeps permissions such as "Screen Recording" across updates, while an ad hoc signature changes with every build and loses them. `release.yml` imports it from the secrets `MACOS_SIGNING_CERT` (the .p12 as base64) and `MACOS_SIGNING_CERT_PASSWORD` into a temporary keychain and passes its SHA-1 hash to `blinzel-release macos-bundle` as `BLINZEL_MACOS_SIGN_IDENTITY`; without the secrets it signs ad hoc. The certificate must keep its name `amigo-blinzel` and must not be replaced, or installed copies lose their permissions once more. Creating it (once, valid for ten years; outside the repository, so the key never gets committed):
   ```
+  mkdir -p ~/blinzel-signing && cd ~/blinzel-signing
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=amigo-blinzel" \
     -addext "keyUsage=critical,digitalSignature" -addext "extendedKeyUsage=critical,codeSigning" \
     -keyout key.pem -out cert.pem
-  openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -name amigo-blinzel -out blinzel.p12
-  base64 -w0 blinzel.p12
+  read -rs -p "p12 password: " P12_PASS; echo; export P12_PASS
+  openssl pkcs12 -export -inkey key.pem -in cert.pem -name amigo-blinzel \
+    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+    -passout env:P12_PASS -out blinzel.p12
+  base64 -w0 blinzel.p12 | gh secret set MACOS_SIGNING_CERT -R amigo-labs/amigo-blinzel
+  printf %s "$P12_PASS" | gh secret set MACOS_SIGNING_CERT_PASSWORD -R amigo-labs/amigo-blinzel
+  rm key.pem; unset P12_PASS
   ```
-  The output of the last line is the secret `MACOS_SIGNING_CERT`, the password given to `pkcs12 -export` is `MACOS_SIGNING_CERT_PASSWORD`; then delete `key.pem` and keep `blinzel.p12` safe.
+  The explicit 3DES/SHA-1 encryption is what macOS' `security import` reads everywhere, and unlike `-legacy` it needs no OpenSSL legacy provider (Git Bash on Windows has none). Keep `blinzel.p12` safe: a new certificate resets the Screen Recording permission on every Mac once more.
 - 🟡 **Releases automatically via release-please** (as in amigo-native):
   1. Every push to `main` creates or updates a release PR (`.github/workflows/release-please.yml`). It contains the next version in `Cargo.toml` and `Cargo.lock` as well as the `CHANGELOG.md` entry from the Conventional Commits since the last release. Before 1.0, `feat` bumps the second digit, `fix` the third; `docs`, `ci`, `chore` etc. do not trigger a release.
   2. When the release PR is merged, release-please sets the tag `v<version>` and creates the release as a draft with the changelog.
