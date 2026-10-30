@@ -3,9 +3,10 @@
 //! policy "accessory"), and a login item, a LaunchAgent that starts the
 //! bundle's program with `--resident` at sign-in.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
+use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::MainThreadOnly;
 use objc2::rc::Retained;
 use objc2_app_kit::{
@@ -22,6 +23,8 @@ const AGENT: &str = "io.github.amigo-labs.blinzel";
 thread_local! {
     static ITEM: RefCell<Option<Retained<NSStatusItem>>> = const { RefCell::new(None) };
     static MENU: RefCell<Option<Retained<NSMenu>>> = const { RefCell::new(None) };
+    /// Counts [`flash`] messages.
+    static FLASH: Cell<u32> = const { Cell::new(0) };
 }
 
 /// Shows or removes the menu bar icon. Its menu is filled each time it
@@ -60,6 +63,33 @@ pub fn set_tray(mtm: MainThreadMarker, on: bool, delegate: Option<&super::shell:
     item.setMenu(Some(&menu));
     ITEM.with(|i| *i.borrow_mut() = Some(item));
     MENU.with(|m| *m.borrow_mut() = Some(menu));
+}
+
+/// A short message next to the menu bar icon (the window is hidden).
+pub fn flash(text: &str) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(button) = ITEM.with(|i| i.borrow().as_ref().and_then(|i| i.button(mtm))) else {
+        return;
+    };
+    button.setTitle(&NSString::from_str(text));
+    let generation = FLASH.with(|f| {
+        f.set(f.get() + 1);
+        f.get()
+    });
+    let ns = std::time::Duration::from_secs(4).as_nanos() as i64;
+    let _ = DispatchQueue::main().after(DispatchTime::NOW.time(ns), move || {
+        // Only the latest message clears the title.
+        if FLASH.with(|f| f.get()) != generation {
+            return;
+        }
+        if let Some(mtm) = MainThreadMarker::new()
+            && let Some(b) = ITEM.with(|i| i.borrow().as_ref().and_then(|i| i.button(mtm)))
+        {
+            b.setTitle(ns_string!(""));
+        }
+    });
 }
 
 /// Whether `menu` is the menu bar icon's menu.

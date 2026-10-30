@@ -1,6 +1,6 @@
 [package]
 name = "blinzel-app"
-description = "amigo-blinzel for Windows: Win32 window, Direct3D 11 renderer, prefetching viewer"
+description = "amigo-blinzel: the viewer for Windows (Win32, Direct3D 11), macOS (AppKit, Metal) and Linux (winit, wgpu)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -55,6 +55,7 @@ objc2-core-foundation.workspace = true
 objc2-core-graphics.workspace = true
 objc2-core-text.workspace = true
 objc2-image-io.workspace = true
+objc2-screen-capture-kit.workspace = true
 block2.workspace = true
 dispatch2.workspace = true
 notify.workspace = true

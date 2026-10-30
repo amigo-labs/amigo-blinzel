@@ -150,6 +150,11 @@ menu_screenshot_folder = "Dossier des captures d’écran…"
 screenshot_name = "Capture d'écran {date}"
 screenshot_failed = "Échec de la capture d’écran : {reason}"
 hotkey_taken = "Windows utilise la touche Impr. écran pour l’Outil Capture d’écran. Pour faire des captures avec amigo-blinzel, désactivez Paramètres › Accessibilité › Clavier › « Utiliser la touche Impr. écran pour ouvrir la capture d’écran ». En attendant, Ctrl+Maj+Impr. écran fonctionne."
+setting_screenshot_hotkey_mac = "⌘⇧1 prend des captures"
+hotkey_taken_mac = "Une autre app utilise déjà ⌘⇧1. Les captures restent possibles depuis l’icône de la barre des menus."
+screen_recording_title = "Autoriser l’enregistrement de l’écran"
+screen_recording_body = "amigo-blinzel a besoin de l’autorisation « Enregistrement de l’écran » pour les captures. Activez-la dans Réglages Système › Confidentialité et sécurité › Enregistrement de l’écran, puis quittez et rouvrez amigo-blinzel."
+open_system_settings = "Ouvrir Réglages Système"
 
 [messages.images_count]
 one = "{n} image"

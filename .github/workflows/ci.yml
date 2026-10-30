@@ -61,6 +61,14 @@ jobs:
       # The competitor benchmark finds the viewers (at least Preview); the
       # measurement itself needs a real Mac with screen recording permission.
       - run: cargo run -q -p blinzel-race -- list
+      # ScreenCaptureKit needs the Screen Recording permission, which the
+      # runner may not grant: informative only.
+      - name: Screenshot capture test
+        continue-on-error: true
+        run: |
+          cargo build --release -p blinzel-app
+          ./target/release/blinzel --capture-test capture.png
+          file capture.png
       # The app bundle starts, shows a test image and exits.
       - name: App bundle and smoke test (window, first frame)
         run: |

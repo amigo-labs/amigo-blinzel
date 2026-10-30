@@ -150,6 +150,11 @@ menu_screenshot_folder = "Cartella degli screenshot…"
 screenshot_name = "Screenshot {date}"
 screenshot_failed = "Screenshot non riuscito: {reason}"
 hotkey_taken = "Windows usa il tasto Stamp per lo Strumento di cattura. Per acquisire screenshot con amigo-blinzel, disattiva Impostazioni › Accessibilità › Tastiera › «Usa il tasto Stamp per aprire l’acquisizione dello schermo». Nel frattempo funziona Ctrl+Maiusc+Stamp."
+setting_screenshot_hotkey_mac = "⌘⇧1 acquisisce screenshot"
+hotkey_taken_mac = "Un’altra app usa già ⌘⇧1. Gli screenshot funzionano comunque dall’icona nella barra dei menu."
+screen_recording_title = "Consenti la registrazione dello schermo"
+screen_recording_body = "amigo-blinzel ha bisogno del permesso «Registrazione schermo» per gli screenshot. Attivalo in Impostazioni di Sistema › Privacy e sicurezza › Registrazione schermo, poi chiudi e riapri amigo-blinzel."
+open_system_settings = "Apri Impostazioni di Sistema"
 
 [messages.images_count]
 one = "{n} immagine"
