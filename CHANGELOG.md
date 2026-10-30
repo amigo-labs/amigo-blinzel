@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.3.0...v1.4.0) (2026-10-30)
+
+
+### Features
+
+* macOS disk image download and self-signed app signature ([e138f08](https://github.com/amigo-labs/amigo-blinzel/commit/e138f08be18a33e1455a20c618f81b029628a7ad))
+* macOS disk image download and self-signed app signature ([5f6cd2f](https://github.com/amigo-labs/amigo-blinzel/commit/5f6cd2f5bd2285485bb0b67cfeef8021a5532de2))
+* one signing certificate for amigo-labs, created by a script ([661e436](https://github.com/amigo-labs/amigo-blinzel/commit/661e4368e320006c26b8594812cac2dbf8b87018))
+* resident mode on macOS with a menu bar icon and login item ([ceaa5fe](https://github.com/amigo-labs/amigo-blinzel/commit/ceaa5fe11623d325013abdb0eb028837e6d94aee))
+* resident mode on macOS with a menu bar icon and login item ([5f3c5f6](https://github.com/amigo-labs/amigo-blinzel/commit/5f3c5f6a97bfae0a75679151da325e0c3b6ba78b))
+* screenshots always go to the clipboard, then save/open/edit as set ([57203f9](https://github.com/amigo-labs/amigo-blinzel/commit/57203f99fdf36680cf648fad718efe202a22a97c))
+* screenshots always go to the clipboard, then save/open/edit as set ([46b29f3](https://github.com/amigo-labs/amigo-blinzel/commit/46b29f3ca241bf6d33c6aab05cf087b1d3a4e437))
+* screenshots on macOS with ScreenCaptureKit and a Cmd+Shift+1 hot key ([3b023f0](https://github.com/amigo-labs/amigo-blinzel/commit/3b023f09b08c0655232751ad613a5e761480e036))
+* screenshots on macOS with ScreenCaptureKit and a Cmd+Shift+1 hot key ([dedfd7c](https://github.com/amigo-labs/amigo-blinzel/commit/dedfd7c632b22e7e3ca9b0c711fe7ad6e7d69d2a))
+
+
+### Bug Fixes
+
+* benchmark gate ignores a noisy median when the minimum disagrees ([258b798](https://github.com/amigo-labs/amigo-blinzel/commit/258b798cdba7b73e3f694d335f202ff0ae7111b7))
+* benchmark gate ignores a noisy median when the minimum disagrees ([fbadcec](https://github.com/amigo-labs/amigo-blinzel/commit/fbadcec399092795e62a471a38b1ab789e14692f))
+
 ## [1.3.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.2.1...v1.3.0) (2026-10-29)
 
 
