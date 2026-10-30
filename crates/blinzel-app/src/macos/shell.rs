@@ -65,6 +65,8 @@ pub enum UserEvent {
     Render,
     /// A timer may be due.
     Tick,
+    /// A woken window shows even if its file never gets a first frame.
+    UncloakDue,
 }
 
 /// The macOS shell's backend types.
@@ -287,6 +289,8 @@ pub struct Args {
     pub file: Option<PathBuf>,
     pub json: Option<PathBuf>,
     pub exit_after_first_frame: bool,
+    /// Started at sign-in (the login item): stay hidden in the menu bar.
+    pub resident: bool,
 }
 
 pub fn parse_args() -> Args {
@@ -296,6 +300,7 @@ pub fn parse_args() -> Args {
         match arg.to_str() {
             Some("--json") => a.json = it.next().map(PathBuf::from),
             Some("--exit-after-first-frame") => a.exit_after_first_frame = true,
+            Some("--resident") => a.resident = true,
             // Process serial number from old Finder launches.
             Some(s) if s.starts_with("-psn_") => {}
             _ => a.file = Some(PathBuf::from(arg)),
@@ -337,6 +342,8 @@ struct Shell {
     /// A file was opened before the window was shown (it stays cloaked
     /// until that file's first frame).
     opened: bool,
+    /// Started with `--resident`: hidden in the menu bar from the start.
+    start_hidden: bool,
 }
 
 impl Shell {
@@ -462,11 +469,17 @@ impl Shell {
                 {
                     panel.setDirectoryURL(Some(&file_url(&dir)));
                 }
+                if self.app.hidden {
+                    // From the menu bar icon: the panel comes to the front.
+                    #[allow(deprecated)]
+                    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+                }
                 if panel.runModal() == NSModalResponseOK
                     && let Some(path) = panel.URL().and_then(|u| url_path(&u))
                 {
-                    self.show();
-                    self.app.open(path)
+                    let mut a = self.app.open(path);
+                    a.push(Action::Wake { opened: true });
+                    a
                 } else {
                     vec![]
                 }
@@ -523,14 +536,24 @@ impl Shell {
                 open_path(&dir);
                 vec![]
             }
-            Action::SetResident(_) | Action::TrayMenu { .. } => vec![],
-            Action::Wake { .. } | Action::Activate => {
+            Action::SetResident(on) => {
+                set_resident(mtm, on);
+                vec![]
+            }
+            // The menu bar icon opens its menu itself.
+            Action::TrayMenu { .. } => vec![],
+            Action::Wake { opened } => self.wake(opened),
+            Action::Activate => {
                 self.show();
                 vec![]
             }
             Action::Uncloak => {
                 self.app.cloaked = false;
                 self.show();
+                vec![]
+            }
+            Action::Close if self.app.settings.resident && !self.app.hidden => {
+                self.hide();
                 vec![]
             }
             Action::Close | Action::Exit | Action::Quit => {
@@ -558,6 +581,58 @@ impl Shell {
             Action::Capture { .. }
             | Action::SetScreenshotHotkey(_)
             | Action::PickScreenshotFolder => vec![],
+        }
+    }
+
+    /// Resident mode: the window goes, the app stays in the menu bar with
+    /// its GPU warm. An update installed meanwhile takes over instead.
+    fn hide(&mut self) {
+        let mtm = MainThreadMarker::from(&*self.window);
+        if !self.app.hidden {
+            settings_store::save(&self.app.settings);
+        }
+        if self.app.fullscreen {
+            self.window.toggleFullScreen(None);
+        }
+        self.window.orderOut(None);
+        self.app.hide();
+        super::resident::set_in_dock(mtm, false);
+        if super::update::restart_pending() {
+            super::update::start_installed_resident();
+            NSApplication::sharedApplication(mtm).terminate(None);
+        }
+    }
+
+    /// Brings a hidden window back: shown transparent, visible with the
+    /// first frame of the file just `opened` (or at once without one). A
+    /// visible window is activated.
+    fn wake(&mut self, opened: bool) -> Vec<Action> {
+        if !self.app.hidden {
+            self.show();
+            return vec![];
+        }
+        if !opened {
+            self.app.reload_settings();
+        }
+        self.app.hidden = false;
+        self.app.cloaked = true;
+        self.app.activate_on_uncloak = true;
+        timing::mark("wake");
+        blinzel_core::bufpool::global()
+            .set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
+        super::resident::set_in_dock(MainThreadMarker::from(&*self.window), true);
+        self.window.setAlphaValue(0.0);
+        self.window.orderFront(None);
+        if opened {
+            let ns = Duration::from_millis(400).as_nanos() as i64;
+            let _ = DispatchQueue::main().after(DispatchTime::NOW.time(ns), || {
+                deliver(UserEvent::UncloakDue)
+            });
+            vec![]
+        } else {
+            let mut more = self.app.render();
+            more.push(Action::Uncloak);
+            more
         }
     }
 
@@ -703,11 +778,21 @@ impl Shell {
             }
             UserEvent::Open(file) => {
                 self.opened = true;
+                let hidden = app.hidden;
                 let mut a = app.open(file);
-                if !app.cloaked {
+                if hidden {
+                    a.push(Action::Wake { opened: true });
+                } else if !app.cloaked {
                     a.push(Action::Activate);
                 }
                 a
+            }
+            UserEvent::UncloakDue => {
+                if app.cloaked && !app.hidden {
+                    vec![Action::Uncloak]
+                } else {
+                    vec![]
+                }
             }
             UserEvent::Notice(text) => {
                 app.show_notice(text);
@@ -1077,6 +1162,15 @@ fn menu_bar_trees(state: &MenuState) -> (Vec<MenuItem>, Vec<MenuItem>) {
     (tidy(app_menu), tidy(rest))
 }
 
+/// Resident mode on or off: the menu bar icon and the login item.
+fn set_resident(mtm: MainThreadMarker, on: bool) {
+    let delegate = DELEGATE.with(|d| d.get().cloned());
+    super::resident::set_tray(mtm, on, delegate.as_deref());
+    if let Err(e) = super::resident::set_autostart(on) {
+        log(&format!("login item: {e}"));
+    }
+}
+
 /// Drops leading, trailing and doubled separators.
 fn tidy(items: Vec<MenuItem>) -> Vec<MenuItem> {
     let mut out: Vec<MenuItem> = Vec::with_capacity(items.len());
@@ -1130,13 +1224,26 @@ define_class!(
 
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _n: &NSNotification) {
+            let mtm = self.mtm();
             with_shell(|s| {
-                if !s.opened {
+                if s.app.settings.resident {
+                    set_resident(mtm, true);
+                }
+                if s.start_hidden {
+                    s.hide();
+                } else if !s.opened {
                     s.app.cloaked = false;
                     s.show();
                 }
                 s.app.invalidate();
             });
+        }
+
+        /// The Dock icon or Finder opened the running app again.
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
+            with_shell(|s| s.run(vec![Action::Wake { opened: false }]));
+            false
         }
 
         #[unsafe(method(application:openURLs:))]
@@ -1148,7 +1255,7 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
         fn terminate_after_last_window(&self, _app: &NSApplication) -> bool {
-            true
+            with_shell(|s| !s.app.settings.resident).unwrap_or(true)
         }
 
         #[unsafe(method(applicationShouldTerminate:))]
@@ -1160,6 +1267,19 @@ define_class!(
 
     // SAFETY: the signatures match AppKit's.
     unsafe impl NSWindowDelegate for Delegate {
+        /// In resident mode the close button hides the window.
+        #[unsafe(method(windowShouldClose:))]
+        fn window_should_close(&self, _sender: &NSWindow) -> bool {
+            let hide = with_shell(|s| {
+                let hide = s.app.settings.resident && !s.app.hidden;
+                if hide {
+                    s.run(vec![Action::Close]);
+                }
+                hide
+            });
+            hide != Some(true)
+        }
+
         #[unsafe(method(windowDidResize:))]
         fn window_did_resize(&self, _n: &NSNotification) {
             with_shell(Shell::resized);
@@ -1202,6 +1322,10 @@ define_class!(
     unsafe impl NSMenuDelegate for Delegate {
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
+            if super::resident::is_tray_menu(menu) {
+                fill_menu(menu, &blinzel_ui::menu::tray_items(), self.mtm());
+                return;
+            }
             let Some(state) = with_shell(|s| s.app.menu_state()) else {
                 return;
             };
@@ -1507,6 +1631,7 @@ fn create_shell(mtm: MainThreadMarker) -> Result<(), String> {
         tick_at: None,
         wheel_rest: 0.0,
         opened: false,
+        start_hidden: args.resident,
     };
     SHELL.with(|s| *s.borrow_mut() = Some(shell));
     with_shell(|s| {
@@ -1530,6 +1655,11 @@ pub fn run() -> i32 {
     };
     let args = parse_args();
     let settings = settings_store::load();
+    // The login item of a copy whose resident mode was turned off since.
+    if args.resident && !settings.resident {
+        return 0;
+    }
+    let resident_start = args.resident;
     let lang = settings
         .language
         .as_deref()
@@ -1575,7 +1705,12 @@ pub fn run() -> i32 {
     });
 
     let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    // Started at sign-in: no Dock icon until the window is woken.
+    app.setActivationPolicy(if resident_start {
+        NSApplicationActivationPolicy::Accessory
+    } else {
+        NSApplicationActivationPolicy::Regular
+    });
     let delegate = Delegate::new(mtm);
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     DELEGATE.with(|d| {

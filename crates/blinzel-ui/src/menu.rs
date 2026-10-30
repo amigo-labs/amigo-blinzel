@@ -65,6 +65,10 @@ pub enum Cmd {
 /// follow).
 pub const SCREENSHOTS: bool = cfg!(windows);
 
+/// Whether this platform has resident mode (tray icon, start at sign-in;
+/// not on Linux).
+pub const RESIDENT: bool = cfg!(any(windows, target_os = "macos"));
+
 const LANG_BASE: u32 = 1000;
 
 impl Cmd {
@@ -469,14 +473,17 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
         ));
     }
     m.push(MenuItem::Sub(tr(Msg::MenuLanguage).into(), lang));
-    let mut settings = vec![
-        MenuItem::item(
+    let mut settings = Vec::new();
+    if RESIDENT {
+        settings.push(MenuItem::item(
             Cmd::ToggleResident,
             tr(Msg::SettingResident),
             None,
             s.resident,
             true,
-        ),
+        ));
+    }
+    settings.extend([
         MenuItem::item(
             Cmd::ToggleSingleInstance,
             tr(Msg::SettingSingleInstance),
@@ -505,7 +512,7 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
             false,
             true,
         ),
-    ];
+    ]);
     if SCREENSHOTS {
         settings.extend([
             MenuItem::Separator,
@@ -582,21 +589,26 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
 
 /// The tray icon's menu (resident mode).
 pub fn tray_items() -> Vec<MenuItem> {
-    vec![
+    let mut m = vec![
         MenuItem::item(Cmd::ShowWindow, tr(Msg::TrayShow), None, false, true),
         MenuItem::item(Cmd::Open, tr(Msg::MenuOpen), None, false, true),
-        MenuItem::Separator,
-        MenuItem::item(Cmd::Capture, tr(Msg::TrayCapture), None, false, true),
-        MenuItem::item(
-            Cmd::CaptureScreen,
-            tr(Msg::TrayCaptureScreen),
-            None,
-            false,
-            true,
-        ),
-        MenuItem::Separator,
-        MenuItem::item(Cmd::Quit, tr(Msg::Exit), None, false, true),
-    ]
+    ];
+    if SCREENSHOTS {
+        m.extend([
+            MenuItem::Separator,
+            MenuItem::item(Cmd::Capture, tr(Msg::TrayCapture), None, false, true),
+            MenuItem::item(
+                Cmd::CaptureScreen,
+                tr(Msg::TrayCaptureScreen),
+                None,
+                false,
+                true,
+            ),
+        ]);
+    }
+    m.push(MenuItem::Separator);
+    m.push(MenuItem::item(Cmd::Quit, tr(Msg::Exit), None, false, true));
+    m
 }
 
 #[cfg(test)]

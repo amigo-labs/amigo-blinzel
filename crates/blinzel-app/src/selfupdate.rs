@@ -99,6 +99,16 @@ pub fn on_start(i: Option<impl Installation>) -> bool {
     false
 }
 
+/// An update was installed while this process kept running the previous
+/// version (resident mode): it should hand over to the new program.
+pub fn restart_pending(i: Option<impl Installation>) -> bool {
+    i.is_some_and(|i| {
+        load_state(&i)
+            .pending
+            .is_some_and(|p| p != running_version())
+    })
+}
+
 /// Called once after the first frame: the running version works.
 pub fn on_first_frame(i: Option<impl Installation + Send + 'static>) {
     let Some(i) = i else {
