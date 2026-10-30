@@ -150,6 +150,11 @@ menu_screenshot_folder = "Ordner für Bildschirmfotos…"
 screenshot_name = "Bildschirmfoto {date}"
 screenshot_failed = "Bildschirmfoto fehlgeschlagen: {reason}"
 hotkey_taken = "Windows belegt die Druck-Taste mit dem Snipping Tool. Für Bildschirmfotos mit amigo-blinzel unter Einstellungen › Barrierefreiheit › Tastatur „Druck-Taste zum Öffnen der Bildschirmaufnahme verwenden“ ausschalten. Bis dahin geht Strg+Umschalt+Druck."
+setting_screenshot_hotkey_mac = "⌘⇧1 macht Bildschirmfotos"
+hotkey_taken_mac = "Eine andere App belegt bereits ⌘⇧1. Bildschirmfotos gehen weiterhin über das Symbol in der Menüleiste."
+screen_recording_title = "Bildschirmaufnahme erlauben"
+screen_recording_body = "Für Bildschirmfotos braucht amigo-blinzel die Berechtigung „Bildschirmaufnahme“. Unter Systemeinstellungen › Datenschutz & Sicherheit › Bildschirmaufnahme einschalten, dann amigo-blinzel beenden und neu öffnen."
+open_system_settings = "Systemeinstellungen öffnen"
 
 [messages.images_count]
 one = "{n} Bild"

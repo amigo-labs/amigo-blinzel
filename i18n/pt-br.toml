@@ -150,6 +150,11 @@ menu_screenshot_folder = "Pasta de capturas de tela…"
 screenshot_name = "Captura de tela {date}"
 screenshot_failed = "Falha na captura de tela: {reason}"
 hotkey_taken = "O Windows usa a tecla Print Screen para a Ferramenta de Captura. Para capturar a tela com o amigo-blinzel, desative Configurações › Acessibilidade › Teclado › “Usar a tecla Print Screen para abrir a captura de tela”. Enquanto isso, Ctrl+Shift+Print Screen funciona."
+setting_screenshot_hotkey_mac = "⌘⇧1 captura a tela"
+hotkey_taken_mac = "Outro app já usa ⌘⇧1. As capturas continuam funcionando pelo ícone na barra de menus."
+screen_recording_title = "Permitir gravação de tela"
+screen_recording_body = "O amigo-blinzel precisa da permissão “Gravação de Tela” para capturar a tela. Ative-a em Ajustes do Sistema › Privacidade e Segurança › Gravação de Tela e depois feche e abra o amigo-blinzel de novo."
+open_system_settings = "Abrir Ajustes do Sistema"
 
 [messages.images_count]
 one = "{n} imagem"

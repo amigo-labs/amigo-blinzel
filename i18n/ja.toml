@@ -150,6 +150,11 @@ menu_screenshot_folder = "スクリーンショットのフォルダー…"
 screenshot_name = "スクリーンショット {date}"
 screenshot_failed = "スクリーンショットに失敗しました：{reason}"
 hotkey_taken = "Windows では Print Screen キーが Snipping Tool に割り当てられています。amigo-blinzel でスクリーンショットを撮るには、設定 › アクセシビリティ › キーボード の「Print Screen キーを使用して画面キャプチャを開く」をオフにしてください。それまでは Ctrl+Shift+Print Screen を使用できます。"
+setting_screenshot_hotkey_mac = "⌘⇧1 でスクリーンショットを撮る"
+hotkey_taken_mac = "⌘⇧1 は別のアプリで使用されています。メニューバーのアイコンからは引き続きスクリーンショットを撮れます。"
+screen_recording_title = "画面収録を許可"
+screen_recording_body = "スクリーンショットを撮るには、amigo-blinzel に「画面収録」の許可が必要です。システム設定 › プライバシーとセキュリティ › 画面収録 でオンにしてから、amigo-blinzel を終了して開き直してください。"
+open_system_settings = "システム設定を開く"
 
 [messages.images_count]
 other = "{n} 枚の画像"

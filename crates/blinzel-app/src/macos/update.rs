@@ -124,6 +124,29 @@ pub fn schedule() {
     selfupdate::schedule(installed());
 }
 
+/// The program inside the app bundle this process runs from, if any (for
+/// the login item).
+pub fn bundle_program() -> Option<PathBuf> {
+    installed().map(|i| i.program())
+}
+
+/// An update waits in the bundle while a resident instance keeps running
+/// the previous version.
+pub fn restart_pending() -> bool {
+    selfupdate::restart_pending(installed())
+}
+
+/// Starts the installed (updated) bundle as the new resident instance.
+pub fn start_installed_resident() {
+    if let Some(i) = installed() {
+        let _ = Command::new("/usr/bin/open")
+            .args(["-n", "-g"])
+            .arg(&i.bundle)
+            .args(["--args", "--resident"])
+            .spawn();
+    }
+}
+
 /// "Check for updates" from the menu; the result goes to `notice`.
 pub fn check_now(notice: impl FnOnce(String) + Send + 'static) {
     let i = installed().ok_or_else(|| "not running from an app bundle".to_string());

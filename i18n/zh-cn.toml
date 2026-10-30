@@ -150,6 +150,11 @@ menu_screenshot_folder = "屏幕截图文件夹…"
 screenshot_name = "屏幕截图 {date}"
 screenshot_failed = "屏幕截图失败：{reason}"
 hotkey_taken = "Windows 已将 Print Screen 键分配给截图工具。要使用 amigo-blinzel 截图，请在设置 › 辅助功能 › 键盘中关闭“使用 Print Screen 键打开屏幕截图”。在此之前，可使用 Ctrl+Shift+Print Screen。"
+setting_screenshot_hotkey_mac = "使用 ⌘⇧1 截图"
+hotkey_taken_mac = "⌘⇧1 已被其他应用占用。仍可通过菜单栏图标截图。"
+screen_recording_title = "允许录屏"
+screen_recording_body = "amigo-blinzel 截图需要“录屏”权限。请在系统设置 › 隐私与安全性 › 录屏与系统录音中开启，然后退出并重新打开 amigo-blinzel。"
+open_system_settings = "打开系统设置"
 
 [messages.images_count]
 other = "{n} 张图片"
