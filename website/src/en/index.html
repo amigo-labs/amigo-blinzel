@@ -236,7 +236,7 @@
 <div class="cta">
 <a class="button" href="{{download:macos}}">Universal</a>
 </div>
-<p>The ZIP holds <code>amigo-blinzel.app</code>; drag the app into the Applications folder.</p>
+<p>Open the DMG and drag <code>amigo-blinzel.app</code> onto the Applications folder.</p>
 </div>
 <div class="platform" id="linux">
 <h3>Linux</h3>
@@ -254,7 +254,7 @@
 <h3>Windows</h3>
 <p>The file is not signed with a code signing certificate, so Windows SmartScreen shows “Windows protected your PC” at the first start: click <em>More info</em>, then <em>Run anyway</em>. To make amigo-blinzel the default for images, use Windows Settings; the setup opens the page if you like. Uninstall: Settings → Apps → Installed apps.</p>
 <h3>macOS</h3>
-<p>The app is not notarized by Apple, so macOS reports at the first start that it cannot check it. On macOS 14: Control-click the app in Finder, choose <em>Open</em> and confirm. From macOS 15: open it once, then System Settings → Privacy &amp; Security → <em>Open Anyway</em>. Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app</code>. Make it the default through “Get Info” → “Open with” → “Change All”.</p>
+<p>The app is not notarized by Apple, so macOS reports at the first start that it cannot check it. On macOS 14: Control-click the app in Finder, choose <em>Open</em> and confirm. From macOS 15: open the app once and close the message with <em>Done</em>, then in System Settings → Privacy &amp; Security, at the bottom next to “amigo-blinzel”, click <em>Open Anyway</em> and confirm with your password. This is needed for the first start only; the app downloads updates itself, without this prompt. Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app</code>. Make it the default through “Get Info” → “Open with” → “Change All”.</p>
 <h3>Linux</h3>
 <pre><code>tar xzf amigo-blinzel-linux-x64.tar.gz
 ./amigo-blinzel/blinzel --install</code></pre>

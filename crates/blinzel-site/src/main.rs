@@ -204,7 +204,7 @@ fn placeholder(key: &str, lang: Lang, races: &[Race]) -> Result<String, String> 
         "version" => env!("CARGO_PKG_VERSION").to_string(),
         "download:x64" => format!("{RELEASES}/amigo-blinzel-setup-x64.exe"),
         "download:arm64" => format!("{RELEASES}/amigo-blinzel-setup-arm64.exe"),
-        "download:macos" => format!("{RELEASES}/amigo-blinzel-macos.zip"),
+        "download:macos" => format!("{RELEASES}/amigo-blinzel-macos.dmg"),
         "download:linux-x64" => format!("{RELEASES}/amigo-blinzel-linux-x64.tar.gz"),
         "download:linux-arm64" => format!("{RELEASES}/amigo-blinzel-linux-arm64.tar.gz"),
         "download:sums" => format!("{RELEASES}/SHA256SUMS"),

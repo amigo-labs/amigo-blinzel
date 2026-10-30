@@ -8,6 +8,7 @@
 //! blinzel-release macos-bundle <out.app> <blinzel>...
 //!                                            the macOS app bundle (universal with
 //!                                            one executable per architecture)
+//! blinzel-release macos-dmg <app> <out.dmg>  the disk image for downloads
 //! ```
 //!
 //! The secret key is the 32-byte Ed25519 seed as hex. It belongs in the
@@ -41,6 +42,7 @@ fn main() {
             let exes: Vec<&Path> = exes.iter().map(Path::new).collect();
             macos::bundle(Path::new(out), &exes, env!("CARGO_PKG_VERSION"))
         }
+        ["macos-dmg", app, out] => macos::dmg(Path::new(app), Path::new(out)),
         _ => Err(usage()),
     };
     if let Err(e) = result {
@@ -53,7 +55,8 @@ fn usage() -> String {
     "usage:\n  blinzel-release keygen <secret-key-file>\n  blinzel-release sign <file> <out.sig>   \
      (secret from $RELEASE_SIGNING_KEY)\n  blinzel-release verify <file> <sig> <public-key-hex>\n  \
      blinzel-release notices [--check]\n  \
-     blinzel-release macos-bundle <out.app> <blinzel>..."
+     blinzel-release macos-bundle <out.app> <blinzel>...\n  \
+     blinzel-release macos-dmg <app> <out.dmg>"
         .into()
 }
 
