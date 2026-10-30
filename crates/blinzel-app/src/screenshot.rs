@@ -1,8 +1,9 @@
 //! Screenshots: the Print key (in resident mode) or the tray menu freezes
 //! the desktop with GDI, shows the picture in a topmost overlay where
-//! [`blinzel_ui::snip`] picks a region, a window or a monitor, saves that
-//! part as PNG in the screenshot folder and opens it in the viewer. There
-//! is no editor: "Edit with…" hands the file on.
+//! [`blinzel_ui::snip`] picks a region, a window or a monitor. That part
+//! goes to the clipboard, and as the settings say into the screenshot
+//! folder, the viewer and the editor ([`blinzel_core::screenshot`]). There
+//! is no editor of our own: "Edit with…" hands the file on.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use blinzel_core::geom::{Orientation, Rect};
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
+use blinzel_core::screenshot as core_shot;
+use blinzel_core::settings::Settings;
 use blinzel_i18n::{Msg, tr, trf};
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
@@ -45,8 +48,18 @@ use crate::platform::{debug_log, wide};
 use crate::window::{WM_NOTICE, set_cloak, with_app};
 
 /// A finished screenshot for the main window; LPARAM is a
-/// `Box<Result<PathBuf, String>>`.
+/// `Box<Result<Taken, String>>`.
 pub const WM_SCREENSHOT: u32 = WM_APP + 11;
+
+/// The picked part of a screenshot, for the clipboard, and the file it
+/// went into (none when the settings ask for none).
+pub struct Taken {
+    pub bgra: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub png: Vec<u8>,
+    pub file: Result<Option<PathBuf>, String>,
+}
 
 const HOTKEY_PRINT: i32 = 1;
 const HOTKEY_CTRL_SHIFT_PRINT: i32 = 2;
@@ -335,11 +348,11 @@ pub fn capture_test(out: &Path) -> Result<(u32, u32), String> {
 }
 
 /// Hands the result to the main window (or a message for a failure).
-fn post(main: HWND, result: Result<PathBuf, String>) {
+fn post(main: HWND, result: Result<Taken, String>) {
     let ptr = Box::into_raw(Box::new(result)) as isize;
     unsafe {
         if PostMessageW(Some(main), WM_SCREENSHOT, WPARAM(0), LPARAM(ptr)).is_err() {
-            drop(Box::from_raw(ptr as *mut Result<PathBuf, String>));
+            drop(Box::from_raw(ptr as *mut Result<Taken, String>));
         }
     }
 }
@@ -349,36 +362,46 @@ pub fn failure(reason: &str) -> String {
     trf(Msg::ScreenshotFailed, &[("reason", &reason)])
 }
 
-/// Saves part `r` of the picture in the background, then tells `main`.
+/// Text for a screenshot that only went to the clipboard.
+pub fn copied() -> String {
+    tr(Msg::ScreenshotCopied).to_string()
+}
+
+/// Encodes part `r` of the picture and writes the file the settings ask
+/// for in the background, then tells `main`.
 fn save(main: HWND, shot: &Shot, r: Rect) {
     let (bgra, w, h) = shot.crop(r);
-    let folder = folder();
+    let settings = with_app(|a| a.settings.clone()).unwrap_or_default();
+    let cache =
+        core_shot::cache_folder(&blinzel_ui::dirs::cache().unwrap_or_else(std::env::temp_dir));
+    let dest = core_shot::destination(&settings, &folder(&settings), &cache);
     let raw = main.0 as isize;
     let _ = std::thread::Builder::new()
         .name("blinzel-screenshot".into())
         .spawn(move || {
-            let result = (|| {
-                std::fs::create_dir_all(&folder)
-                    .map_err(|e| format!("{}: {e}", folder.display()))?;
-                let png = blinzel_core::export::encode_png_bgra(&bgra, w, h)?;
-                let path = free_name(&folder, &file_stem());
-                let tmp = path.with_extension("blinzel-tmp");
-                std::fs::write(&tmp, &png)
-                    .and_then(|()| std::fs::rename(&tmp, &path))
-                    .map_err(|e| {
-                        let _ = std::fs::remove_file(&tmp);
-                        format!("{}: {e}", path.display())
-                    })?;
-                Ok(path)
-            })();
+            let result = blinzel_core::export::encode_png_bgra(&bgra, w, h).map(|png| {
+                if dest.as_ref() == Some(&cache) {
+                    core_shot::sweep(&cache, core_shot::CACHE_MAX_AGE);
+                }
+                let file = dest
+                    .map(|d| core_shot::write(&d, &file_stem(), &png))
+                    .transpose();
+                Taken {
+                    bgra,
+                    width: w,
+                    height: h,
+                    png,
+                    file,
+                }
+            });
             post(HWND(raw as *mut _), result);
         });
 }
 
 /// The folder from the settings, else Windows' screenshot folder
 /// (Pictures\Screenshots).
-fn folder() -> PathBuf {
-    if let Some(d) = with_app(|a| a.settings.screenshot_dir.clone()).flatten() {
+fn folder(settings: &Settings) -> PathBuf {
+    if let Some(d) = &settings.screenshot_dir {
         return PathBuf::from(d);
     }
     let known = |id| unsafe {
@@ -400,17 +423,6 @@ fn file_stem() -> String {
         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
     );
     trf(Msg::ScreenshotName, &[("date", &date)])
-}
-
-/// `stem.png`, or `stem (2).png` … if that exists.
-fn free_name(folder: &Path, stem: &str) -> PathBuf {
-    (1..)
-        .map(|n| match n {
-            1 => folder.join(format!("{stem}.png")),
-            n => folder.join(format!("{stem} ({n}).png")),
-        })
-        .find(|p| !p.exists())
-        .expect("a free name")
 }
 
 // ------------------------------------------------------------------ overlay

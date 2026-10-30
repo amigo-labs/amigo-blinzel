@@ -54,7 +54,10 @@ pub enum Cmd {
     /// Screenshot of the monitor under the pointer, at once.
     CaptureScreen,
     ToggleScreenshotHotkey,
-    ToggleScreenshotClipboard,
+    /// What happens to a screenshot besides the clipboard.
+    ToggleScreenshotSave,
+    ToggleScreenshotOpen,
+    ToggleScreenshotEdit,
     ScreenshotFolder,
 }
 
@@ -108,8 +111,10 @@ impl Cmd {
             Cmd::Capture => 38,
             Cmd::CaptureScreen => 39,
             Cmd::ToggleScreenshotHotkey => 40,
-            Cmd::ToggleScreenshotClipboard => 41,
+            Cmd::ToggleScreenshotSave => 41,
             Cmd::ScreenshotFolder => 42,
+            Cmd::ToggleScreenshotOpen => 43,
+            Cmd::ToggleScreenshotEdit => 44,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -130,7 +135,7 @@ impl Cmd {
     }
 }
 
-pub const ALL: [Cmd; 42] = [
+pub const ALL: [Cmd; 44] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -171,7 +176,9 @@ pub const ALL: [Cmd; 42] = [
     Cmd::Capture,
     Cmd::CaptureScreen,
     Cmd::ToggleScreenshotHotkey,
-    Cmd::ToggleScreenshotClipboard,
+    Cmd::ToggleScreenshotSave,
+    Cmd::ToggleScreenshotOpen,
+    Cmd::ToggleScreenshotEdit,
     Cmd::ScreenshotFolder,
 ];
 
@@ -195,7 +202,9 @@ pub struct MenuState {
     pub filmstrip: bool,
     pub grid: bool,
     pub screenshot_hotkey: bool,
-    pub screenshot_clipboard: bool,
+    pub screenshot_save: bool,
+    pub screenshot_open: bool,
+    pub screenshot_edit: bool,
 }
 
 /// One entry of a menu.
@@ -508,10 +517,24 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
                 true,
             ),
             MenuItem::item(
-                Cmd::ToggleScreenshotClipboard,
-                tr(Msg::SettingScreenshotClipboard),
+                Cmd::ToggleScreenshotSave,
+                tr(Msg::SettingScreenshotSave),
                 None,
-                s.screenshot_clipboard,
+                s.screenshot_save,
+                true,
+            ),
+            MenuItem::item(
+                Cmd::ToggleScreenshotOpen,
+                tr(Msg::SettingScreenshotOpen),
+                None,
+                s.screenshot_open,
+                true,
+            ),
+            MenuItem::item(
+                Cmd::ToggleScreenshotEdit,
+                tr(Msg::SettingScreenshotEdit),
+                None,
+                s.screenshot_edit,
                 true,
             ),
             MenuItem::item(

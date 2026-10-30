@@ -25,6 +25,7 @@ pub mod pixel;
 pub mod preview;
 pub mod raw;
 pub mod sched;
+pub mod screenshot;
 pub mod selection;
 pub mod settings;
 pub mod testimg;
