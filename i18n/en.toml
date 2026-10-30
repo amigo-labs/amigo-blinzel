@@ -154,6 +154,11 @@ menu_screenshot_folder = "Screenshot folder…"
 screenshot_name = "Screenshot {date}"
 screenshot_failed = "Screenshot failed: {reason}"
 hotkey_taken = "Windows uses the Print key for the Snipping Tool. To take screenshots with amigo-blinzel, turn off Settings › Accessibility › Keyboard › “Use the Print screen key to open screen capture”. Ctrl+Shift+Print works in the meantime."
+setting_screenshot_hotkey_mac = "⌘⇧1 takes screenshots"
+hotkey_taken_mac = "Another app already uses ⌘⇧1. Screenshots still work from the menu bar icon."
+screen_recording_title = "Allow screen recording"
+screen_recording_body = "amigo-blinzel needs the “Screen Recording” permission for screenshots. Turn it on in System Settings › Privacy & Security › Screen Recording, then quit and reopen amigo-blinzel."
+open_system_settings = "Open System Settings"
 
 [messages.images_count]
 one = "{n} image"

@@ -48,6 +48,7 @@ use objc2_foundation::{
 use objc2_quartz_core::CAMetalLayer;
 
 use super::gpu::{Gpu, MetalCanvas, MetalDevice, Target};
+use super::{hotkey, screenshot};
 
 /// Events that reach the shell from outside AppKit's event handlers.
 #[derive(Debug)]
@@ -67,6 +68,15 @@ pub enum UserEvent {
     Tick,
     /// A woken window shows even if its file never gets a first frame.
     UncloakDue,
+    /// The screenshot key was pressed.
+    Hotkey,
+    /// Every display frozen (for the overlay, or the whole display under
+    /// the pointer at once).
+    Frozen(Result<Vec<screenshot::Frozen>, String>, bool),
+    /// The overlay picked a part (BGRA, width, height).
+    Picked(Vec<u8>, u32, u32),
+    /// A screenshot encoded and written as set.
+    Shot(Result<screenshot::Taken, String>),
 }
 
 /// The macOS shell's backend types.
@@ -275,7 +285,7 @@ impl Host for MacHost {
 }
 
 /// The display id (`CGDirectDisplayID`) of a screen.
-fn screen_id(screen: &NSScreen) -> Option<isize> {
+pub(super) fn screen_id(screen: &NSScreen) -> Option<isize> {
     let desc = screen.deviceDescription();
     let n = desc.objectForKey(ns_string!("NSScreenNumber"))?;
     let n = n.downcast::<NSNumber>().ok()?;
@@ -291,6 +301,8 @@ pub struct Args {
     pub exit_after_first_frame: bool,
     /// Started at sign-in (the login item): stay hidden in the menu bar.
     pub resident: bool,
+    /// Capture the main display into this PNG and exit (CI).
+    pub capture_test: Option<PathBuf>,
 }
 
 pub fn parse_args() -> Args {
@@ -301,6 +313,7 @@ pub fn parse_args() -> Args {
             Some("--json") => a.json = it.next().map(PathBuf::from),
             Some("--exit-after-first-frame") => a.exit_after_first_frame = true,
             Some("--resident") => a.resident = true,
+            Some("--capture-test") => a.capture_test = it.next().map(PathBuf::from),
             // Process serial number from old Finder launches.
             Some(s) if s.starts_with("-psn_") => {}
             _ => a.file = Some(PathBuf::from(arg)),
@@ -577,10 +590,34 @@ impl Shell {
                 Some(editor) => self.app.editor_chosen(editor, then),
                 None => vec![],
             },
-            // Screenshots are not on macOS yet (the menu does not offer them).
-            Action::Capture { .. }
-            | Action::SetScreenshotHotkey(_)
-            | Action::PickScreenshotFolder => vec![],
+            Action::Capture { whole_screen } => {
+                screenshot::start(mtm, whole_screen);
+                vec![]
+            }
+            Action::SetScreenshotHotkey(on) => {
+                if !hotkey::set(on) {
+                    tell(
+                        &mut self.app,
+                        &mut self.notice_until,
+                        tr(Msg::HotkeyTakenMac).into(),
+                    );
+                }
+                vec![]
+            }
+            Action::PickScreenshotFolder => {
+                let panel = NSOpenPanel::openPanel(mtm);
+                panel.setCanChooseFiles(false);
+                panel.setCanChooseDirectories(true);
+                panel.setCanCreateDirectories(true);
+                panel.setAllowsMultipleSelection(false);
+                panel.setTitle(Some(&NSString::from_str(tr(Msg::MenuScreenshotFolder))));
+                if panel.runModal() == NSModalResponseOK
+                    && let Some(dir) = panel.URL().and_then(|u| url_path(&u))
+                {
+                    self.app.screenshot_folder_picked(dir);
+                }
+                vec![]
+            }
         }
     }
 
@@ -756,6 +793,7 @@ impl Shell {
     }
 
     fn user_event(&mut self, event: UserEvent) {
+        let mtm = MainThreadMarker::from(&*self.window);
         let app = &mut self.app;
         let actions = match event {
             UserEvent::Wake(Wake::Loaded) => app.on_loaded(),
@@ -802,12 +840,7 @@ impl Shell {
             UserEvent::Clipboard(r) => {
                 match r {
                     Ok(png) => {
-                        let pb = NSPasteboard::generalPasteboard();
-                        pb.clearContents();
-                        let data = NSData::with_bytes(&png);
-                        // SAFETY: a constant type name.
-                        let ok = pb.setData_forType(Some(&data), unsafe { NSPasteboardTypePNG });
-                        if !ok {
+                        if !put_png(&png) {
                             log("clipboard: refused");
                         }
                     }
@@ -815,6 +848,56 @@ impl Shell {
                 }
                 vec![]
             }
+            UserEvent::Hotkey => vec![Action::Capture {
+                whole_screen: false,
+            }],
+            UserEvent::Frozen(r, whole_screen) => {
+                let gpu = app.device.gpu.clone();
+                let r = r.and_then(|shots| {
+                    screenshot::frozen(
+                        mtm,
+                        &gpu,
+                        &app.device,
+                        shots,
+                        whole_screen,
+                        &app.settings,
+                        app.hidden,
+                    )
+                });
+                if let Err(e) = r {
+                    tell(app, &mut self.notice_until, screenshot::failure(&e));
+                }
+                vec![]
+            }
+            UserEvent::Picked(bgra, w, h) => {
+                screenshot::save(bgra, w, h, &app.settings);
+                vec![]
+            }
+            UserEvent::Shot(r) => match r {
+                Ok(t) => {
+                    let copied = put_png(&t.png);
+                    let open = app.settings.screenshot_open;
+                    let (actions, text) = match t.file {
+                        Ok(file) => (
+                            app.on_screenshot(file),
+                            match (copied, open) {
+                                (false, _) => Some(screenshot::failure("clipboard")),
+                                (true, false) => Some(screenshot::copied()),
+                                (true, true) => None,
+                            },
+                        ),
+                        Err(e) => (vec![], Some(screenshot::failure(&e))),
+                    };
+                    if let Some(text) = text {
+                        tell(app, &mut self.notice_until, text);
+                    }
+                    actions
+                }
+                Err(e) => {
+                    tell(app, &mut self.notice_until, screenshot::failure(&e));
+                    vec![]
+                }
+            },
             UserEvent::Menu(id) => match Cmd::from_id(id) {
                 Some(cmd) => app.command(cmd),
                 None => vec![],
@@ -1044,7 +1127,7 @@ fn show_notices() -> Result<(), String> {
 }
 
 /// macOS virtual key codes (`kVK_*`) and the typed character.
-fn key_of(code: u16, chars: &str) -> Option<Key> {
+pub(super) fn key_of(code: u16, chars: &str) -> Option<Key> {
     Some(match code {
         123 => Key::Left,
         124 => Key::Right,
@@ -1162,6 +1245,26 @@ fn menu_bar_trees(state: &MenuState) -> (Vec<MenuItem>, Vec<MenuItem>) {
     (tidy(app_menu), tidy(rest))
 }
 
+/// Puts PNG data on the general pasteboard.
+fn put_png(png: &[u8]) -> bool {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    let data = NSData::with_bytes(png);
+    // SAFETY: a constant type name.
+    pb.setData_forType(Some(&data), unsafe { NSPasteboardTypePNG })
+}
+
+/// A message: the notice on the window, or next to the menu bar icon while
+/// the window is hidden.
+fn tell(app: &mut App<Mac>, notice_until: &mut Option<Instant>, text: String) {
+    if app.hidden {
+        super::resident::flash(&text);
+    } else {
+        app.show_notice(text);
+        *notice_until = Some(Instant::now() + NOTICE);
+    }
+}
+
 /// Resident mode on or off: the menu bar icon and the login item.
 fn set_resident(mtm: MainThreadMarker, on: bool) {
     let delegate = DELEGATE.with(|d| d.get().cloned());
@@ -1228,6 +1331,9 @@ define_class!(
             with_shell(|s| {
                 if s.app.settings.resident {
                     set_resident(mtm, true);
+                    if s.app.settings.screenshot_hotkey && !hotkey::set(true) {
+                        tell(&mut s.app, &mut s.notice_until, tr(Msg::HotkeyTakenMac).into());
+                    }
                 }
                 if s.start_hidden {
                     s.hide();
@@ -1237,6 +1343,12 @@ define_class!(
                 }
                 s.app.invalidate();
             });
+        }
+
+        /// Switching to another app cancels a screenshot.
+        #[unsafe(method(applicationDidResignActive:))]
+        fn did_resign_active(&self, _n: &NSNotification) {
+            screenshot::close();
         }
 
         /// The Dock icon or Finder opened the running app again.
@@ -1654,6 +1766,19 @@ pub fn run() -> i32 {
         return 1;
     };
     let args = parse_args();
+    if let Some(out) = &args.capture_test {
+        NSApplication::sharedApplication(mtm);
+        return match screenshot::capture_test(mtm, out) {
+            Ok((w, h)) => {
+                println!("{}: {w}x{h}", out.display());
+                0
+            }
+            Err(e) => {
+                eprintln!("amigo-blinzel: {e}");
+                1
+            }
+        };
+    }
     let settings = settings_store::load();
     // The login item of a copy whose resident mode was turned off since.
     if args.resident && !settings.resident {

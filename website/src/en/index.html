@@ -34,7 +34,7 @@
 <div class="grid tools">
 <div class="card"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span><h3>Viewing</h3><p>The window appears with the image already on it. Images are decoded only as large as the screen needs; the next images wait as GPU textures in the direction you page. Image files stay unchanged: cutouts are only written as new files through “Save as”, losslessly from JPEG where possible.</p></div>
 <div class="card" id="batch"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="12" height="12" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v11"/></svg></span><h3>Resize many images</h3><p>Ctrl+B opens the dialog; drag images and folders into it. Long edge, width, height, box or percent; JPEG, PNG, WebP or AVIF; EXIF and the colour profile can be kept, GPS removed. A name pattern shows every new name in advance. Source files are never overwritten.</p></div>
-<div class="card" id="screenshots"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3"/></svg></span><h3>Screenshots (Windows)</h3><p>The Print key freezes the screen: drag a region, click a window or press Enter for the whole screen. The screenshot goes to the clipboard and, as set, as PNG into “Pictures\Screenshots”, the viewer and your editor.</p></div>
+<div class="card" id="screenshots"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3"/></svg></span><h3>Screenshots (Windows and macOS)</h3><p>The Print key, on a Mac ⌘⇧1, freezes the screen: drag a region, click a window or press Enter for the whole screen. The screenshot goes to the clipboard and, as set, as PNG into “Pictures\Screenshots”, the viewer and your editor.</p></div>
 </div>
 <div class="formats">
 <div><h3>Our own decoders, on every platform</h3><ul class="badges"><li>JPEG</li><li>PNG</li><li>GIF</li><li>BMP</li><li>TIFF</li><li>WebP</li><li>AVIF</li><li>JPEG XL</li></ul></div>
@@ -60,7 +60,7 @@
 <tr><td><kbd>R</kbd> / <kbd>L</kbd></td><td>rotate (view only)</td></tr>
 <tr><td><kbd>F11</kbd>, double-click</td><td>full screen</td></tr>
 <tr><td><kbd>Del</kbd></td><td>move to the Recycle Bin</td></tr>
-<tr><td><kbd>Print</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Print</kbd></td><td>screenshot (Windows, background mode)</td></tr>
+<tr><td><kbd>Print</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Print</kbd>; Mac: <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>1</kbd></td><td>screenshot (background mode)</td></tr>
 </tbody>
 </table></div>
 </details>
@@ -68,12 +68,13 @@
 <details>
 <summary>Screenshots in detail</summary>
 <ul>
-<li>Taking one: with the Print key while amigo-blinzel stays ready in the background (Settings → “Keep ready in the background”), or through the icon in the notification area: “Take screenshot…” or “Screenshot of the whole screen” for the monitor under the pointer.</li>
+<li>Taking one: with the Print key, on a Mac with ⌘⇧1, while amigo-blinzel stays ready in the background (Settings → “Keep ready in the background”), or through the icon in the notification area or the Mac’s menu bar: “Take screenshot…” or “Screenshot of the whole screen” for the monitor under the pointer.</li>
 <li>The picture freezes at once, across all monitors. Dragging picks a region, a click the window under the pointer, Enter the whole screen; Esc cancels.</li>
-<li>The screenshot always goes to the clipboard. Three switches under Settings decide what else happens: save it as PNG with the date in its name (by default in “Pictures\Screenshots”; the folder can be changed in the menu), open it in the viewer, open it in the editor. By default it is saved and opened in the viewer.</li>
+<li>The screenshot always goes to the clipboard. Three switches under Settings decide what else happens: save it as PNG with the date in its name (by default in “Pictures\Screenshots”, on a Mac in “Pictures/Screenshots” in the home folder; the folder can be changed in the menu), open it in the viewer, open it in the editor. By default it is saved and opened in the viewer.</li>
 <li>There is no editor of its own: the switch, E or “Edit with…” hand the image to the program of your choice; amigo-blinzel asks for it the first time.</li>
 <li>Windows 11 gives the Print key to the Snipping Tool by default. Then Ctrl+Shift+Print works, or turn off Settings › Accessibility › Keyboard › “Use the Print screen key to open screen capture”.</li>
-<li>macOS and Linux follow.</li>
+<li>On a Mac, macOS asks for the “Screen Recording” permission at the first screenshot. After turning it on in System Settings › Privacy &amp; Security › Screen Recording, quit and reopen amigo-blinzel once. A region stays on one display there.</li>
+<li>Linux follows.</li>
 </ul>
 </details>
 

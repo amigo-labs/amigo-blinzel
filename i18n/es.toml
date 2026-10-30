@@ -150,6 +150,11 @@ menu_screenshot_folder = "Carpeta de capturas…"
 screenshot_name = "Captura de pantalla {date}"
 screenshot_failed = "Error en la captura de pantalla: {reason}"
 hotkey_taken = "Windows usa la tecla Impr Pant para Recortes. Para hacer capturas con amigo-blinzel, desactiva Configuración › Accesibilidad › Teclado › «Usar la tecla Imprimir pantalla para abrir la captura de pantalla». Mientras tanto, funciona Ctrl+Mayús+Impr Pant."
+setting_screenshot_hotkey_mac = "⌘⇧1 hace capturas"
+hotkey_taken_mac = "Otra app ya usa ⌘⇧1. Las capturas siguen funcionando desde el icono de la barra de menús."
+screen_recording_title = "Permitir la grabación de pantalla"
+screen_recording_body = "amigo-blinzel necesita el permiso «Grabación de pantalla» para hacer capturas. Actívalo en Ajustes del Sistema › Privacidad y seguridad › Grabación de pantalla y luego cierra y vuelve a abrir amigo-blinzel."
+open_system_settings = "Abrir Ajustes del Sistema"
 
 [messages.images_count]
 one = "{n} imagen"

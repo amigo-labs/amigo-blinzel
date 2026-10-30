@@ -61,9 +61,9 @@ pub enum Cmd {
     ScreenshotFolder,
 }
 
-/// Whether this platform takes screenshots yet (Windows; macOS and Linux
-/// follow).
-pub const SCREENSHOTS: bool = cfg!(windows);
+/// Whether this platform takes screenshots yet (Windows and macOS; Linux
+/// follows).
+pub const SCREENSHOTS: bool = cfg!(any(windows, target_os = "macos"));
 
 /// Whether this platform has resident mode (tray icon, start at sign-in;
 /// not on Linux).
@@ -518,7 +518,11 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
             MenuItem::Separator,
             MenuItem::item(
                 Cmd::ToggleScreenshotHotkey,
-                tr(Msg::SettingScreenshotHotkey),
+                tr(if cfg!(target_os = "macos") {
+                    Msg::SettingScreenshotHotkeyMac
+                } else {
+                    Msg::SettingScreenshotHotkey
+                }),
                 None,
                 s.screenshot_hotkey && s.resident,
                 true,
