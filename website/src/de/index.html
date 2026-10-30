@@ -236,7 +236,7 @@
 <div class="cta">
 <a class="button" href="{{download:macos}}">Universal</a>
 </div>
-<p>Das ZIP enthält <code>amigo-blinzel.app</code>; zieh die App in den Ordner „Programme“.</p>
+<p>Die DMG öffnen und <code>amigo-blinzel.app</code> auf den Ordner „Programme“ ziehen.</p>
 </div>
 <div class="platform" id="linux">
 <h3>Linux</h3>
@@ -254,7 +254,7 @@
 <h3>Windows</h3>
 <p>Die Datei ist nicht mit einem Code-Signing-Zertifikat signiert. Windows SmartScreen zeigt deshalb beim ersten Start „Der Computer wurde durch Windows geschützt“: auf <em>Weitere Informationen</em> und dann <em>Trotzdem ausführen</em> klicken. Als Standard-App für Bilder legst du amigo-blinzel danach in den Windows-Einstellungen fest; das Setup öffnet die Seite auf Wunsch. Deinstallieren: Einstellungen → Apps → Installierte Apps.</p>
 <h3>macOS</h3>
-<p>Die App ist nicht von Apple notarisiert. macOS meldet deshalb beim ersten Öffnen, dass die App nicht geprüft werden kann. Unter macOS 14: im Finder mit gedrückter Ctrl-Taste auf die App klicken, <em>Öffnen</em> wählen und bestätigen. Ab macOS 15: einmal öffnen, dann Systemeinstellungen → Datenschutz &amp; Sicherheit → <em>Trotzdem öffnen</em>. Alternativ im Terminal: <code>xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app</code>. Zur Standard-App wird sie über „Informationen“ → „Öffnen mit“ → „Alle ändern“.</p>
+<p>Die App ist nicht von Apple notarisiert. macOS meldet deshalb beim ersten Öffnen, dass die App nicht geprüft werden kann. Unter macOS 14: im Finder mit gedrückter Ctrl-Taste auf die App klicken, <em>Öffnen</em> wählen und bestätigen. Ab macOS 15: die App einmal öffnen und die Meldung mit <em>Fertig</em> schließen, dann in Systemeinstellungen → Datenschutz &amp; Sicherheit ganz unten bei „amigo-blinzel“ auf <em>Trotzdem öffnen</em> klicken und mit dem Passwort bestätigen. Das ist nur beim ersten Start nötig; Updates lädt die App selbst und ohne diese Abfrage. Alternativ im Terminal: <code>xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app</code>. Zur Standard-App wird sie über „Informationen“ → „Öffnen mit“ → „Alle ändern“.</p>
 <h3>Linux</h3>
 <pre><code>tar xzf amigo-blinzel-linux-x64.tar.gz
 ./amigo-blinzel/blinzel --install</code></pre>

@@ -70,6 +70,17 @@ jobs:
           perl -e 'alarm 120; exec @ARGV' target/amigo-blinzel.app/Contents/MacOS/blinzel \
             crates/blinzel-core/testdata/rgb420-64x48.avif --exit-after-first-frame --json startup.json
           cat startup.json
+      # The download: the bundle and a link to /Applications in a disk image.
+      - name: Disk image
+        run: |
+          cargo run --release -p blinzel-release -- macos-dmg target/amigo-blinzel.app target/amigo-blinzel-macos.dmg
+          hdiutil verify target/amigo-blinzel-macos.dmg
+          mnt=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -mountpoint "$mnt" target/amigo-blinzel-macos.dmg
+          ls -la "$mnt"
+          test -L "$mnt/Applications"
+          codesign --verify --verbose "$mnt/amigo-blinzel.app"
+          hdiutil detach "$mnt"
 
   windows:
     name: Windows (build, tests, WARP, bench)

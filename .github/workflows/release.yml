@@ -6,11 +6,15 @@ name: Release
 # tag's GitHub release, which is then published. release-please.yml calls
 # this after a release PR is merged (it creates the tag and the draft
 # release); by hand, run it for an existing tag.
-# Nothing carries a code signing certificate (docs/PLAN.md, section 10):
-# no Authenticode, the Mac app is signed ad hoc and not notarized.
+# Nothing carries a code signing certificate from a CA (docs/PLAN.md,
+# section 10): no Authenticode; the Mac app is signed with our own
+# self-signed certificate (ad hoc without it) and not notarized.
 #
 # Needed (docs/PLAN.md, section 14):
-#   secret   RELEASE_SIGNING_KEY       Ed25519 seed (blinzel-release keygen)
+#   secret   RELEASE_SIGNING_KEY          Ed25519 seed (blinzel-release keygen)
+# Optional:
+#   secret   MACOS_SIGNING_CERT           self-signed code signing .p12, base64
+#   secret   MACOS_SIGNING_CERT_PASSWORD  its password
 
 on:
   workflow_call:
@@ -127,18 +131,51 @@ jobs:
       - run: |
           cargo build --release --locked -p blinzel-app --target aarch64-apple-darwin
           cargo build --release --locked -p blinzel-app --target x86_64-apple-darwin
-      - name: App bundle
+      # Our own self-signed certificate: a stable identity, so macOS keeps
+      # the screen recording permission across updates (an ad hoc signature
+      # changes with every build). Without the secret: ad hoc.
+      - name: Signing identity
+        env:
+          CERT: ${{ secrets.MACOS_SIGNING_CERT }}
+          CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT" ]; then echo "MACOS_SIGNING_CERT is not set: signing ad hoc"; exit 0; fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 16)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          # Self-signed: trusted for code signing on this runner only.
+          security find-certificate -c amigo-blinzel -p "$keychain" > "$RUNNER_TEMP/signing.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/signing.pem"
+          hash=$(security find-certificate -c amigo-blinzel -Z "$keychain" | awk '/SHA-1/ {print $NF}')
+          test -n "$hash" || { echo "no certificate named amigo-blinzel in the .p12"; exit 1; }
+          echo "BLINZEL_MACOS_SIGN_IDENTITY=$hash" >> "$GITHUB_ENV"
+      # The zip is what the updater fetches (core::update::macos_asset_name),
+      # the disk image is what people download.
+      - name: App bundle and disk image
         run: |
           mkdir dist
           cargo run --release --locked -p blinzel-release -- macos-bundle dist/amigo-blinzel.app \
             target/aarch64-apple-darwin/release/blinzel target/x86_64-apple-darwin/release/blinzel
           lipo -info dist/amigo-blinzel.app/Contents/MacOS/blinzel
           codesign --verify --verbose dist/amigo-blinzel.app
+          codesign --display --verbose=2 dist/amigo-blinzel.app 2>&1 | grep -E '^(Authority|Signature)='
           ditto -c -k --keepParent dist/amigo-blinzel.app dist/amigo-blinzel-macos.zip
+          cargo run --release --locked -p blinzel-release -- macos-dmg dist/amigo-blinzel.app dist/amigo-blinzel-macos.dmg
+          hdiutil verify dist/amigo-blinzel-macos.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: dist/amigo-blinzel-macos.zip
+          path: |
+            dist/amigo-blinzel-macos.zip
+            dist/amigo-blinzel-macos.dmg
 
   publish:
     name: Checksums and release

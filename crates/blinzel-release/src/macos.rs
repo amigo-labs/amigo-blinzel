@@ -1,10 +1,16 @@
 //! `blinzel-release macos-bundle <out.app> <blinzel>...`: the macOS app
 //! bundle around one executable, or several (one per architecture) joined
 //! with `lipo` into a universal binary: `Info.plist` (document types for
-//! Finder's "Open With"), the icon, and an ad-hoc signature (`codesign -s
-//! -`; releases are not notarized, docs/PLAN.md section 10). `lipo` and
-//! `codesign` run on macOS only; elsewhere the bundle is written without
-//! them (tests).
+//! Finder's "Open With"), the icon, and a signature: with the identity in
+//! `$BLINZEL_MACOS_SIGN_IDENTITY` (our own self-signed certificate, so
+//! macOS keeps the screen recording permission across updates), otherwise
+//! ad hoc (`codesign -s -`). Releases are not notarized (docs/PLAN.md
+//! section 10). `lipo` and `codesign` run on macOS only; elsewhere the
+//! bundle is written without them (tests).
+//!
+//! `blinzel-release macos-dmg <app> <out.dmg>`: the disk image people
+//! download, the bundle next to a link to /Applications (`hdiutil`, macOS
+//! only).
 
 use std::fs;
 use std::path::Path;
@@ -19,6 +25,8 @@ const EXECUTABLE: &str = "blinzel";
 const ICON: &str = "amigo-blinzel";
 /// The oldest macOS the viewer supports.
 const MIN_MACOS: &str = "14.0";
+/// The signing identity (certificate name or SHA-1 hash); ad hoc without.
+pub const SIGN_IDENTITY_ENV: &str = "BLINZEL_MACOS_SIGN_IDENTITY";
 
 /// Uniform type identifiers the viewer opens: everything natively decoded
 /// plus what ImageIO adds.
@@ -83,6 +91,8 @@ pub fn info_plist(version: &str) -> String {
 	<true/>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>amigo-blinzel captures the part of the screen you pick for a screenshot.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -144,9 +154,10 @@ pub fn bundle(out: &Path, executables: &[&Path], version: &str) -> Result<(), St
     let icns = resources.join(format!("{ICON}.icns"));
     fs::write(&icns, icon::icns()).map_err(io(&icns))?;
     if cfg!(target_os = "macos") {
-        // Ad hoc: no identity, but Apple silicon runs only signed code.
+        // Apple silicon runs only signed code; ad hoc needs no identity.
+        let identity = sign_identity(std::env::var(SIGN_IDENTITY_ENV).ok());
         let ok = Command::new("codesign")
-            .args(["--force", "--deep", "--sign", "-"])
+            .args(["--force", "--deep", "--sign", &identity])
             .arg(out)
             .status()
             .map_err(|e| format!("codesign: {e}"))?
@@ -156,6 +167,58 @@ pub fn bundle(out: &Path, executables: &[&Path], version: &str) -> Result<(), St
         }
     }
     Ok(())
+}
+
+/// The identity for `codesign --sign`: the configured one, or `-` (ad hoc).
+pub fn sign_identity(configured: Option<String>) -> String {
+    configured
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "-".into())
+}
+
+/// Writes `out`, a compressed disk image holding `app` and a link to
+/// /Applications to drag it onto.
+#[cfg(target_os = "macos")]
+pub fn dmg(app: &Path, out: &Path) -> Result<(), String> {
+    let name = app.file_name().ok_or("no app bundle name")?;
+    let staging = out.with_file_name(".dmg-staging");
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
+    let result = (|| {
+        // ditto keeps the signature's extended attributes.
+        let ok = Command::new("ditto")
+            .arg(app)
+            .arg(staging.join(name))
+            .status()
+            .map_err(|e| format!("ditto: {e}"))?
+            .success();
+        if !ok {
+            return Err("ditto failed".to_string());
+        }
+        std::os::unix::fs::symlink("/Applications", staging.join("Applications"))
+            .map_err(|e| format!("Applications link: {e}"))?;
+        let ok = Command::new("hdiutil")
+            .args(["create", "-volname", "amigo-blinzel", "-fs", "HFS+"])
+            .args(["-format", "UDZO", "-ov", "-srcfolder"])
+            .arg(&staging)
+            .arg(out)
+            .status()
+            .map_err(|e| format!("hdiutil: {e}"))?
+            .success();
+        if ok {
+            Ok(())
+        } else {
+            Err("hdiutil failed".to_string())
+        }
+    })();
+    let _ = fs::remove_dir_all(&staging);
+    result
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn dmg(_app: &Path, _out: &Path) -> Result<(), String> {
+    Err("macos-dmg needs hdiutil (macOS)".into())
 }
 
 #[cfg(test)]
@@ -175,6 +238,7 @@ mod tests {
         assert!(plist.contains("<string>1.2.3</string>"));
         assert!(plist.contains("<string>public.heic</string>"));
         assert!(plist.contains(BUNDLE_ID));
+        assert!(plist.contains("<key>NSScreenCaptureUsageDescription</key>"));
         let icns = fs::read(app.join("Contents/Resources/amigo-blinzel.icns")).unwrap();
         assert_eq!(&icns[..4], b"icns");
         assert_eq!(
@@ -183,6 +247,14 @@ mod tests {
         );
         assert!(app.join("Contents/MacOS/blinzel").exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn signs_ad_hoc_without_an_identity() {
+        assert_eq!(sign_identity(None), "-");
+        assert_eq!(sign_identity(Some(String::new())), "-");
+        assert_eq!(sign_identity(Some("  ".into())), "-");
+        assert_eq!(sign_identity(Some(" 0123ABCD\n".into())), "0123ABCD");
     }
 
     #[test]
