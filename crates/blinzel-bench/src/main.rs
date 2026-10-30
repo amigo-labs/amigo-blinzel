@@ -566,6 +566,13 @@ fn verify_own_jpeg(data: &[u8], threads: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether zune-jpeg beats libjpeg-turbo: in the median and in the best
+/// run. An unoptimized build is slower in every run; a noisy neighbour on
+/// the CI runner raises the median of one file but not its minimum.
+fn zune_wins(turbo: &Stats, zune: &Stats) -> bool {
+    turbo.median >= zune.median && turbo.min >= zune.min
+}
+
 /// The shipped JPEG path (libjpeg-turbo to YCbCr planes) must beat
 /// zune-jpeg on every file. It does by 1.4–2× when libjpeg-turbo is built
 /// properly; an unoptimized C build (MSVC /Od) is 1.4× slower than zune.
@@ -574,24 +581,24 @@ fn check(results: &[Result_], mismatches: &[String]) -> Result<(), String> {
     if !mismatches.is_empty() {
         return Err(format!("check failed:\n{}", mismatches.join("\n")));
     }
-    let median = |file: &str, candidate: &str| {
+    let stats = |file: &str, candidate: &str| {
         results
             .iter()
             .find(|r| r.group == "jpeg-full" && r.file == file && r.candidate == candidate)
-            .map(|r| r.stats.median)
+            .map(|r| r.stats)
     };
     let mut failures = Vec::new();
     for r in results
         .iter()
         .filter(|r| r.candidate == "turbojpeg YCbCr planes")
     {
-        let Some(zune) = median(&r.file, "zune-jpeg RGBA") else {
+        let Some(zune) = stats(&r.file, "zune-jpeg RGBA") else {
             continue;
         };
-        if r.stats.median >= zune {
+        if zune_wins(&r.stats, &zune) {
             failures.push(format!(
-                "  {}: turbojpeg {:.1} ms, zune-jpeg {:.1} ms",
-                r.file, r.stats.median, zune
+                "  {}: turbojpeg {:.1} ms (min {:.1}), zune-jpeg {:.1} ms (min {:.1})",
+                r.file, r.stats.median, r.stats.min, zune.median, zune.min
             ));
         }
     }
@@ -740,4 +747,29 @@ fn write_json(path: &Path, results: &[Result_]) -> Result<(), String> {
         items.join(",\n")
     );
     fs::write(path, json).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stats(min: f64, median: f64) -> Stats {
+        Stats {
+            min,
+            median,
+            p99: median,
+            mean: median,
+            n: 10,
+        }
+    }
+
+    #[test]
+    fn a_noisy_median_alone_is_no_win() {
+        // CI run 41056426295, jpeg-24mp-444.jpg: one disturbed file.
+        assert!(!zune_wins(&stats(121.0, 165.8), &stats(158.7, 163.4)));
+        // A properly built libjpeg-turbo.
+        assert!(!zune_wins(&stats(118.5, 120.1), &stats(169.3, 170.7)));
+        // Unoptimized C: slower in every run.
+        assert!(zune_wins(&stats(230.0, 236.0), &stats(158.7, 163.4)));
+    }
 }
