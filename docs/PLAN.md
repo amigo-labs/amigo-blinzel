@@ -302,21 +302,9 @@ The shells implement the same traits as Windows (`Device`, `Canvas`, `Host`, `Se
 ### No code signature
 
 - ✅ **Decided:** Releases are not signed with a code signing certificate (no SignPath, no Authenticode, no notarization on the Mac). Consequence: Windows SmartScreen warns on the first start ("More info" → "Run anyway"), and macOS Gatekeeper refuses the first start until it is allowed in System Settings → Privacy & Security; the download page explains both.
-- 🟡 **Mac: our own self-signed certificate** instead of an ad hoc signature. It is not trusted by Gatekeeper (the first start warning stays), but it gives the app a stable identity: macOS keeps permissions such as "Screen Recording" across updates, while an ad hoc signature changes with every build and loses them. `release.yml` imports it from the secrets `MACOS_SIGNING_CERT` (the .p12 as base64) and `MACOS_SIGNING_CERT_PASSWORD` into a temporary keychain and passes its SHA-1 hash to `blinzel-release macos-bundle` as `BLINZEL_MACOS_SIGN_IDENTITY`; without the secrets it signs ad hoc. The certificate must keep its name `amigo-blinzel` and must not be replaced, or installed copies lose their permissions once more. Creating it (once, valid for ten years; outside the repository, so the key never gets committed):
-  ```
-  mkdir -p ~/blinzel-signing && cd ~/blinzel-signing
-  MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=amigo-blinzel" \
-    -addext "keyUsage=critical,digitalSignature" -addext "extendedKeyUsage=critical,codeSigning" \
-    -keyout key.pem -out cert.pem
-  read -rs -p "p12 password: " P12_PASS; echo; export P12_PASS
-  openssl pkcs12 -export -inkey key.pem -in cert.pem -name amigo-blinzel \
-    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
-    -passout env:P12_PASS -out blinzel.p12
-  base64 -w0 blinzel.p12 | gh secret set MACOS_SIGNING_CERT -R amigo-labs/amigo-blinzel
-  printf %s "$P12_PASS" | gh secret set MACOS_SIGNING_CERT_PASSWORD -R amigo-labs/amigo-blinzel
-  rm key.pem; unset P12_PASS
-  ```
-  The explicit 3DES/SHA-1 encryption is what macOS' `security import` reads everywhere, and unlike `-legacy` it needs no OpenSSL legacy provider (Git Bash on Windows has none). `MSYS_NO_PATHCONV=1` keeps Git Bash from turning `/CN=…` into a Windows path; elsewhere it does nothing. Keep `blinzel.p12` safe: a new certificate resets the Screen Recording permission on every Mac once more.
+- 🟡 **Mac: our own self-signed certificate** instead of an ad hoc signature. It is not trusted by Gatekeeper (the first start warning stays), but it gives the app a stable identity: macOS keeps permissions such as "Screen Recording" across updates, while an ad hoc signature changes with every build and loses them. `release.yml` imports it from the secrets `MACOS_SIGNING_CERT` (the .p12 as base64) and `MACOS_SIGNING_CERT_PASSWORD` into a temporary keychain and passes its SHA-1 hash to `blinzel-release macos-bundle` as `BLINZEL_MACOS_SIGN_IDENTITY`; without the secrets it signs ad hoc. It finds the certificate in the .p12 by itself, not by name.
+  - One certificate for all of amigo-labs' Mac apps (CN `amigo-labs`), as organization secrets shared with the selected repositories. Permissions such as Screen Recording belong to an app (bundle id plus certificate), so the apps do not share them. It must not be replaced: a new certificate makes every Mac ask for those permissions once more.
+  - `packaging/macos/create-signing-cert.sh` creates it (valid for ten years) in `~/amigo-labs-signing`, outside any repository, and sets both secrets through `gh` (organization admin rights needed). `--help` lists the options; another repository gets access with `create-signing-cert.sh --repos amigo-blinzel,amigo-pincel` (the full list, it asks for the .p12's password). Its .p12 uses 3DES/SHA-1, which macOS' `security import` reads everywhere and which needs no OpenSSL legacy provider (Git Bash on Windows has none). Keep `signing.p12` and its password safe.
 - 🟡 **Releases automatically via release-please** (as in amigo-native):
   1. Every push to `main` creates or updates a release PR (`.github/workflows/release-please.yml`). It contains the next version in `Cargo.toml` and `Cargo.lock` as well as the `CHANGELOG.md` entry from the Conventional Commits since the last release. Before 1.0, `feat` bumps the second digit, `fix` the third; `docs`, `ci`, `chore` etc. do not trigger a release.
   2. When the release PR is merged, release-please sets the tag `v<version>` and creates the release as a draft with the changelog.
@@ -473,7 +461,7 @@ A dedicated measurement tool for Windows and macOS measures all viewers the same
 
 - ✅ License: MIT.
 - 🟡 Release signing key: generated, the public part is in `crates/blinzel-core/src/update.rs`. Open: store the secret part as the secret `RELEASE_SIGNING_KEY` and keep it safe (if it is lost, installed copies no longer accept updates).
-- ⬜ Mac signing certificate: create it as in section 10 ("Mac: our own self-signed certificate") and store the secrets `MACOS_SIGNING_CERT` and `MACOS_SIGNING_CERT_PASSWORD`. Until then releases are signed ad hoc.
+- ⬜ Mac signing certificate: run `packaging/macos/create-signing-cert.sh` once (section 10, "Mac: our own self-signed certificate"); it stores the organization secrets `MACOS_SIGNING_CERT` and `MACOS_SIGNING_CERT_PASSWORD`. Until then releases are signed ad hoc.
 - 🟡 Cloudflare: Workers Builds is connected; optionally a custom domain. The secrets for the GitHub workflow are therefore not needed.
 - 🟡 Windows measurement in `website/data/race.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. No other viewers are installed there. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
 - ⬜ The same on a Mac (Apple Silicon): `blinzel-race corpus testbilder`, then `blinzel-race run testbilder --cold --json website/data/race-macos.json` (asks once for the `sudo` password). Install the viewers beforehand and grant the terminal "Screen Recording" and "Accessibility".

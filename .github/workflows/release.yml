@@ -15,6 +15,8 @@ name: Release
 # Optional:
 #   secret   MACOS_SIGNING_CERT           self-signed code signing .p12, base64
 #   secret   MACOS_SIGNING_CERT_PASSWORD  its password
+#   (organization secrets shared by amigo-labs' Mac apps;
+#   packaging/macos/create-signing-cert.sh creates and stores them)
 
 on:
   workflow_call:
@@ -150,12 +152,13 @@ jobs:
           rm "$RUNNER_TEMP/signing.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          # The keychain holds only the .p12's certificate, whatever its name.
+          hash=$(security find-certificate -a -Z "$keychain" | awk '/SHA-1/ {print $NF; exit}')
+          test -n "$hash" || { echo "no certificate in MACOS_SIGNING_CERT"; exit 1; }
           # Self-signed: trusted for code signing on this runner only.
-          security find-certificate -c amigo-blinzel -p "$keychain" > "$RUNNER_TEMP/signing.pem"
+          security find-certificate -a -p "$keychain" > "$RUNNER_TEMP/signing.pem"
           sudo security add-trusted-cert -d -r trustRoot -p codeSign \
             -k /Library/Keychains/System.keychain "$RUNNER_TEMP/signing.pem"
-          hash=$(security find-certificate -c amigo-blinzel -Z "$keychain" | awk '/SHA-1/ {print $NF}')
-          test -n "$hash" || { echo "no certificate named amigo-blinzel in the .p12"; exit 1; }
           echo "BLINZEL_MACOS_SIGN_IDENTITY=$hash" >> "$GITHUB_ENV"
       # The zip is what the updater fetches (core::update::macos_asset_name),
       # the disk image is what people download.
