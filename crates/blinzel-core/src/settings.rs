@@ -36,8 +36,12 @@ pub struct Settings {
     pub screenshot_hotkey: bool,
     /// Where screenshots go; `None`: the system's screenshot folder.
     pub screenshot_dir: Option<String>,
-    /// Screenshots also go to the clipboard.
-    pub screenshot_clipboard: bool,
+    /// What happens to a screenshot besides the clipboard, which always
+    /// gets it: saved into `screenshot_dir`, opened in the viewer, opened
+    /// in the editor.
+    pub screenshot_save: bool,
+    pub screenshot_open: bool,
+    pub screenshot_edit: bool,
     /// The program "Edit with…" starts with the image.
     pub editor: Option<String>,
 }
@@ -60,7 +64,9 @@ impl Default for Settings {
             maximized: false,
             screenshot_hotkey: true,
             screenshot_dir: None,
-            screenshot_clipboard: false,
+            screenshot_save: true,
+            screenshot_open: true,
+            screenshot_edit: false,
             editor: None,
         }
     }
@@ -138,9 +144,9 @@ impl Settings {
                 "screenshot_hotkey" => {
                     s.screenshot_hotkey = value.parse().unwrap_or(s.screenshot_hotkey)
                 }
-                "screenshot_clipboard" => {
-                    s.screenshot_clipboard = value.parse().unwrap_or(s.screenshot_clipboard)
-                }
+                "screenshot_save" => s.screenshot_save = value.parse().unwrap_or(s.screenshot_save),
+                "screenshot_open" => s.screenshot_open = value.parse().unwrap_or(s.screenshot_open),
+                "screenshot_edit" => s.screenshot_edit = value.parse().unwrap_or(s.screenshot_edit),
                 _ => {}
             }
         }
@@ -192,7 +198,9 @@ impl Settings {
              filmstrip = {}\n\
              maximized = {}\n\
              screenshot_hotkey = {}\n\
-             screenshot_clipboard = {}\n\
+             screenshot_save = {}\n\
+             screenshot_open = {}\n\
+             screenshot_edit = {}\n\
              {optional}",
             self.view.mode.key(),
             self.view.no_upscale,
@@ -207,7 +215,9 @@ impl Settings {
             self.filmstrip,
             self.maximized,
             self.screenshot_hotkey,
-            self.screenshot_clipboard,
+            self.screenshot_save,
+            self.screenshot_open,
+            self.screenshot_edit,
         )
     }
 }
@@ -237,7 +247,9 @@ mod tests {
             maximized: true,
             screenshot_hotkey: false,
             screenshot_dir: Some(r"D:\Bilder #2\Screens".into()),
-            screenshot_clipboard: true,
+            screenshot_save: false,
+            screenshot_open: false,
+            screenshot_edit: true,
             editor: Some(r"C:\Program Files\paint.net\paintdotnet.exe".into()),
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
@@ -259,5 +271,12 @@ mod tests {
         assert_eq!(s.view, ViewOptions::default());
         assert_eq!(s.prefetch_ahead, 32);
         assert_eq!(Settings::parse("language = \"auto\"").language, None);
+    }
+
+    #[test]
+    fn old_screenshot_clipboard_key_is_ignored() {
+        // The clipboard used to be optional; now it always gets the shot.
+        let s = Settings::parse("screenshot_clipboard = true\nscreenshot_open = false\n");
+        assert!(s.screenshot_save && !s.screenshot_open && !s.screenshot_edit);
     }
 }

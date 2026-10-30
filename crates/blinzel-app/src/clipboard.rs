@@ -1,6 +1,7 @@
 //! Copy with delayed rendering: Ctrl+C only announces the formats, which is
 //! instant even for 100 MP. The pixels are decoded (only the selected
 //! region, at full resolution) when an application actually pastes.
+//! Screenshots go on at once ([`put_shot`]).
 
 use blinzel_core::decode::Request;
 use blinzel_core::selection::orient_bgra;
@@ -61,25 +62,56 @@ pub fn render(src: &Source, format: u32) {
     } else {
         return;
     };
+    if set(format, &bytes) {
+        debug_log(&format!(
+            "clipboard format {format} rendered in {:.1} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        ));
+    }
+}
+
+/// Places `bytes` as `format` on the opened clipboard.
+fn set(format: u32, bytes: &[u8]) -> bool {
     unsafe {
         let Ok(mem) = GlobalAlloc(GMEM_MOVEABLE, bytes.len()) else {
-            return;
+            return false;
         };
         let p = GlobalLock(mem);
         if p.is_null() {
             let _ = GlobalFree(Some(mem));
-            return;
+            return false;
         }
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), p.cast::<u8>(), bytes.len());
         let _ = GlobalUnlock(mem);
         if SetClipboardData(format, Some(HANDLE(mem.0))).is_err() {
             let _ = GlobalFree(Some(HGLOBAL(mem.0)));
+            return false;
         }
+        true
     }
-    debug_log(&format!(
-        "clipboard format {format} rendered in {:.1} ms",
-        t.elapsed().as_secs_f64() * 1e3
-    ));
+}
+
+/// Puts a screenshot on the clipboard at once (DIBV5 and the `png`
+/// already encoded): it is small, and nothing could render it later.
+/// Another program may hold the clipboard for a moment, so this retries
+/// briefly.
+pub fn put_shot(hwnd: HWND, bgra: &[u8], w: u32, h: u32, png: &[u8]) -> bool {
+    let opened = (0..10).any(|i| {
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        unsafe { OpenClipboard(Some(hwnd)).is_ok() }
+    });
+    if !opened {
+        return false;
+    }
+    unsafe {
+        let ok = EmptyClipboard().is_ok()
+            && set(CF_DIBV5.0 as u32, &dibv5(bgra, w, h))
+            && set(png_format(), png);
+        let _ = CloseClipboard();
+        ok
+    }
 }
 
 /// Renders all formats before we lose the data (window closing).

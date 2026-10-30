@@ -548,17 +548,33 @@ fn handle(
             done
         }
         screenshot::WM_SCREENSHOT => {
-            let result = unsafe { Box::from_raw(lp.0 as *mut Result<PathBuf, String>) };
-            match *result {
-                Ok(path) => {
-                    actions.extend(app.open(path));
-                    if app.settings.screenshot_clipboard {
-                        actions.extend(app.command(blinzel_ui::menu::Cmd::Copy));
+            let result = unsafe { Box::from_raw(lp.0 as *mut Result<screenshot::Taken, String>) };
+            let text = match *result {
+                Ok(t) => {
+                    // Emptying the clipboard drops an earlier copy's
+                    // delayed formats; WM_DESTROYCLIPBOARD cannot reach the
+                    // borrowed app here.
+                    app.clip = None;
+                    let copied = clipboard::put_shot(hwnd, &t.bgra, t.width, t.height, &t.png);
+                    match t.file {
+                        Ok(file) => {
+                            actions.extend(app.on_screenshot(file));
+                            match (copied, app.settings.screenshot_open) {
+                                (false, _) => Some(screenshot::failure("clipboard")),
+                                (true, false) => Some(screenshot::copied()),
+                                (true, true) => None,
+                            }
+                        }
+                        Err(e) => Some(screenshot::failure(&e)),
                     }
-                    actions.push(Action::Wake { opened: true });
                 }
-                Err(e) => {
-                    app.show_notice(screenshot::failure(&e));
+                Err(e) => Some(screenshot::failure(&e)),
+            };
+            if let Some(text) = text {
+                if app.hidden {
+                    resident::balloon(hwnd, &text);
+                } else {
+                    app.show_notice(text);
                     unsafe {
                         SetTimer(Some(hwnd), TIMER_NOTICE, 3500, None);
                     }

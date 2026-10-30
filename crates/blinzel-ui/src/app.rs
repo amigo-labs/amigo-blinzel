@@ -114,6 +114,17 @@ pub enum Action {
     PickScreenshotFolder,
 }
 
+/// `file` in the configured editor, or the question for one first.
+fn edit_action(editor: Option<&str>, file: PathBuf) -> Action {
+    match editor {
+        Some(e) => Action::EditWith {
+            editor: PathBuf::from(e),
+            file,
+        },
+        None => Action::ChooseEditor { then: Some(file) },
+    }
+}
+
 /// A cutout to save (selection, otherwise the view crop).
 #[derive(Debug, Clone)]
 pub struct SaveJob {
@@ -1697,7 +1708,9 @@ impl<B: Backend> App<B> {
             filmstrip: self.settings.filmstrip,
             grid: self.browse.grid.is_some(),
             screenshot_hotkey: self.settings.screenshot_hotkey,
-            screenshot_clipboard: self.settings.screenshot_clipboard,
+            screenshot_save: self.settings.screenshot_save,
+            screenshot_open: self.settings.screenshot_open,
+            screenshot_edit: self.settings.screenshot_edit,
         }
     }
 
@@ -1836,8 +1849,18 @@ impl<B: Backend> App<B> {
                 actions.push(Action::SetScreenshotHotkey(on));
                 actions
             }
-            Cmd::ToggleScreenshotClipboard => {
-                self.settings.screenshot_clipboard = !self.settings.screenshot_clipboard;
+            Cmd::ToggleScreenshotSave => {
+                self.settings.screenshot_save = !self.settings.screenshot_save;
+                settings_store::save(&self.settings);
+                vec![]
+            }
+            Cmd::ToggleScreenshotOpen => {
+                self.settings.screenshot_open = !self.settings.screenshot_open;
+                settings_store::save(&self.settings);
+                vec![]
+            }
+            Cmd::ToggleScreenshotEdit => {
+                self.settings.screenshot_edit = !self.settings.screenshot_edit;
                 settings_store::save(&self.settings);
                 vec![]
             }
@@ -1854,13 +1877,7 @@ impl<B: Backend> App<B> {
                 let Some(file) = self.current.as_ref().map(|c| c.path.clone()) else {
                     return vec![];
                 };
-                match &self.settings.editor {
-                    Some(e) => vec![Action::EditWith {
-                        editor: PathBuf::from(e),
-                        file,
-                    }],
-                    None => vec![Action::ChooseEditor { then: Some(file) }],
-                }
+                vec![edit_action(self.settings.editor.as_deref(), file)]
             }
             Cmd::ChooseEditor => vec![Action::ChooseEditor { then: None }],
             Cmd::ToggleAutoUpdate => {
@@ -2103,6 +2120,24 @@ impl<B: Backend> App<B> {
             .collect()
     }
 
+    /// A screenshot is on the clipboard and, when the settings asked for
+    /// a file, in `file`: shows it in the viewer, then hands it to the
+    /// editor (which then lies on top), as configured.
+    pub fn on_screenshot(&mut self, file: Option<PathBuf>) -> Vec<Action> {
+        let Some(file) = file else {
+            return vec![];
+        };
+        let mut actions = Vec::new();
+        if self.settings.screenshot_open {
+            actions.extend(self.open(file.clone()));
+            actions.push(Action::Wake { opened: true });
+        }
+        if self.settings.screenshot_edit {
+            actions.push(edit_action(self.settings.editor.as_deref(), file));
+        }
+        actions
+    }
+
     pub fn screenshot_folder_picked(&mut self, folder: PathBuf) {
         if let Some(d) = folder.to_str().filter(|d| !d.contains(['"', '\n', '\r'])) {
             self.settings.screenshot_dir = Some(d.to_string());
@@ -2238,5 +2273,26 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
         Ok(true) => trf(Msg::SavedLossless, &[("name", &name)]),
         Ok(false) => trf(Msg::Saved, &[("name", &name)]),
         Err(e) => trf(Msg::ErrorSave, &[("name", &name), ("reason", &e)]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_asks_for_an_editor_first() {
+        let file = PathBuf::from("shot.png");
+        match edit_action(None, file.clone()) {
+            Action::ChooseEditor { then } => assert_eq!(then, Some(file.clone())),
+            a => panic!("{a:?}"),
+        }
+        match edit_action(Some("paint.exe"), file.clone()) {
+            Action::EditWith { editor, file: f } => {
+                assert_eq!(editor, PathBuf::from("paint.exe"));
+                assert_eq!(f, file);
+            }
+            a => panic!("{a:?}"),
+        }
     }
 }
