@@ -461,8 +461,8 @@ A dedicated measurement tool for Windows and macOS measures all viewers the same
 ## 14. Open items on your side
 
 - ✅ License: MIT.
-- 🟡 Release signing key: generated, the public part is in `crates/blinzel-core/src/update.rs`. Open: store the secret part as the secret `RELEASE_SIGNING_KEY` and keep it safe (if it is lost, installed copies no longer accept updates).
-- ⬜ Mac signing certificate: run `packaging/macos/create-signing-cert.sh` once (section 10, "Mac: our own self-signed certificate"); it stores the organization secrets `MACOS_SIGNING_CERT` and `MACOS_SIGNING_CERT_PASSWORD`. Until then releases are signed ad hoc.
+- ✅ Release signing key: the public part is in `crates/blinzel-core/src/update.rs`, the secret part is stored as the secret `RELEASE_SIGNING_KEY` (release 1.3.0 carries `SHA256SUMS.sig`). Keep it safe: if it is lost, installed copies no longer accept updates.
+- ⬜ Mac signing certificate: run `packaging/macos/create-signing-cert.sh` once (section 10, "Mac: our own self-signed certificate"); it stores the organization secrets `MACOS_SIGNING_CERT` and `MACOS_SIGNING_CERT_PASSWORD`. Until then releases are signed ad hoc. Check after the next release: the macOS job's step "Signing identity" must not say `MACOS_SIGNING_CERT is not set`, and the signature check shows `Authority=amigo-labs`.
 - 🟡 Cloudflare: Workers Builds is connected; optionally a custom domain. The secrets for the GitHub workflow are therefore not needed.
 - 🟡 Windows measurement in `website/data/race.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. No other viewers are installed there. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
 - ⬜ The same on a Mac (Apple Silicon): `blinzel-race corpus testbilder`, then `blinzel-race run testbilder --cold --json website/data/race-macos.json` (asks once for the `sudo` password). Install the viewers beforehand and grant the terminal "Screen Recording" and "Accessibility".
