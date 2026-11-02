@@ -739,6 +739,59 @@ mod tests {
     }
 
     /// `docs/specs/batch-resize.md` AC-19.
+    /// `docs/specs/batch-resize.md` AC-05.
+    #[test]
+    fn jpeg_sources_decode_at_the_smallest_scale_that_keeps_twice_the_target() {
+        let dir = tmp("scale");
+        let jpg = dir.join("p.jpg");
+        let grey = vec![128u8; 640 * 480 * 4];
+        let jpeg = encode::encode(
+            &grey,
+            640,
+            480,
+            Codec::Jpeg,
+            &Default::default(),
+            None,
+            None,
+        );
+        std::fs::write(&jpg, jpeg.unwrap()).unwrap();
+        let png = dir.join("p.png");
+        let png_data = encode::encode(&grey, 640, 480, Codec::Png, &Default::default(), None, None);
+        std::fs::write(&png, png_data.unwrap()).unwrap();
+        // Target width → the size decoded (twice the target is 2 × width).
+        for (width, file, want) in [
+            (40, &jpg, (80, 60)),    // 1/8 leaves 80 ≥ 80
+            (60, &jpg, (160, 120)),  // 1/8 is 80 < 120: 2/8
+            (100, &jpg, (240, 180)), // 2/8 is 160 < 200: 3/8
+            (200, &jpg, (400, 300)), // 4/8 is 320 < 400: 5/8
+            (400, &jpg, (640, 480)), // 7/8 is 560 < 800: full size
+            (40, &png, (640, 480)),  // only JPEG decodes smaller
+        ] {
+            let source = Watched::new(|| {});
+            let job = Job {
+                size: Size::Width(width),
+                out_dir: format!("out-{width}").into(),
+                ..Job::default()
+            };
+            let sum = run(
+                &job,
+                &[file.clone().into()],
+                &source,
+                &Options::default(),
+                &|_| {},
+                &AtomicBool::new(false),
+            );
+            assert_eq!(sum.done, 1);
+            let file = file.display();
+            assert_eq!(
+                source.decoded.into_inner().unwrap(),
+                [want],
+                "{width} {file}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn files_run_in_parallel_within_the_memory_budget() {
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());

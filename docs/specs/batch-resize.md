@@ -38,7 +38,7 @@ Known gaps the code has today: file modification dates in names are local time o
 - [ ] AC-02 (option): Where "don't enlarge" is set (the default), no output side exceeds the source's; without it, outputs scale up to the target.
 - [ ] AC-03 (option): Where "fill box" is chosen, the output has the box's aspect ratio, cut evenly from the centre of the image as shown (a portrait-by-EXIF photo is cut along its displayed height); with "don't enlarge" and a box larger than the source, it is the largest centred region with that ratio at source resolution.
 - [ ] AC-04 (always): Scaling is done in linear light with premultiplied alpha through a Lanczos3 filter: flat colours stay exactly flat, a fine black-and-white checkerboard averages to sRGB 188 (not 128), transparent pixels do not bleed colour into their neighbours, and every output value is within one level of a double-precision reference.
-- [ ] AC-05 (event): When a source is a JPEG, it is decoded at the smallest DCT scale (1/2, 1/4 or 1/8) that still leaves at least twice the target size in each direction.
+- [ ] AC-05 (event): When a source is a JPEG, it is decoded at the smallest DCT scale n/8 (n = 1…8) that still leaves at least twice the target size in each direction; other formats are decoded at full size.
 - [ ] AC-06 (option): Where "sharpen" is set, an unsharp mask (amount 0.5, Gaussian sigma 0.8 output pixels) is applied to the colour channels after scaling: flat areas stay unchanged, both sides of an edge gain contrast, alpha is untouched.
 - [ ] AC-07 (option): Where the format is JPEG, PNG, WebP (lossy, or lossless) or AVIF, the output is a valid file of that format at the planned size; lossless WebP reproduces every visible pixel exactly, and JPEG puts transparent pixels onto white. Where the format is "as source" (the default), JPEG, PNG, WebP and AVIF sources keep their format, other sources become PNG if any pixel is transparent and JPEG otherwise.
 - [ ] AC-08 (option): Where the format is JPEG and the quality is 90 or more, the output has no chroma subsampling (4:4:4); below 90 it is 4:2:0.
@@ -96,8 +96,6 @@ Known gaps the code has today: file modification dates in names are local time o
 
 <!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
-- AC-05 does not hold as written: the batch decodes on one thread, where JPEG goes through libjpeg-turbo, which scales by any n/8 (n = 1…8), not only 1/2, 1/4 or 1/8. A 640×480 JPEG resized to a width of 100 is decoded at 3/8 (240×180, which still leaves twice the target), not at 1/2 (320×240) as the AC says (red run of `jpeg_sources_decode_at_the_smallest_scale_that_keeps_twice_the_target`, 2026-11-02; the test is not committed). `blinzel.md` §7 only says "as long as at least twice the target size remains". Either the AC becomes "the smallest DCT scale n/8 that still leaves at least twice the target size" (the code as it is, fewer pixels to resample), or the batch is limited to 1/2, 1/4 and 1/8 (the scales `blinzel-jpeg` has). Settle with `/spec batch-resize`.
-
 ## Evidence
 
 | AC    | Test | Status | Commit |
@@ -106,7 +104,7 @@ Known gaps the code has today: file modification dates in names are local time o
 | AC-02 | `sizes_in_display_orientation` (`blinzel-core/src/batch/mod.rs`), `edits_make_the_job` (`blinzel-ui/src/batch_dialog.rs`, default), Linux | built | |
 | AC-03 | `fill_crops_evenly` (`blinzel-core/src/batch/mod.rs`, Linux) | built | |
 | AC-04 | `flat_colours_stay_flat`, `checkerboard_averages_in_linear_light`, `transparent_pixels_do_not_bleed`, `matches_a_double_precision_reference` (`blinzel-core/src/batch/resample.rs`, Linux) | built | |
-| AC-05 | partial: `jpeg_sources_are_decoded_at_a_reduced_scale_and_rotated` checks the result, not the decode scale | open | |
+| AC-05 | `jpeg_sources_decode_at_the_smallest_scale_that_keeps_twice_the_target` (`crates/blinzel-core/src/batch/run.rs`), Linux | built | |
 | AC-06 | `flat_areas_are_unchanged_and_edges_gain_contrast`, `zero_amount_is_a_no_op` (`blinzel-core/src/batch/sharpen.rs`, Linux) | built | |
 | AC-07 | `every_codec_round_trips_with_metadata`, `webp_lossless_is_exact` (`blinzel-core/src/batch/encode.rs`), `same_format_where_we_can_write_it` (`blinzel-core/src/batch/mod.rs`), Linux | built | |
 | AC-08 | `jpeg_keeps_full_chroma_from_quality_90` (`blinzel-core/src/batch/encode.rs`, Linux) | built | |
@@ -133,6 +131,7 @@ Known gaps the code has today: file modification dates in names are local time o
 
 ## Decisions
 
+- 2026-11-02: revised AC-05 to the smallest n/8 scale instead of only 1/2, 1/4 and 1/8. The extraction had over-specified it: `blinzel.md` §7 only asks for "at least twice the target size", and libjpeg-turbo's finer scales meet that with fewer pixels to resample. The red run against the old wording (3/8 decoded where the AC said 1/2) is what found it.
 - 2026-11-02: revised AC-22: the dialog starts with the grid's marks when there are any (decision in `thumbnails.md`).
 - 2026-11-02: `resize_images_opens_a_modal_dialog_that_keeps_its_settings` was green at once: Ctrl+B, the menu, the defaults, the modality and the kept settings already worked; only the start with the grid's marks was new (red first in `resize_images_starts_with_the_marked_files_in_folder_order`).
 - 2026-11-02: the engine tests for AC-08, AC-12, AC-14, AC-17, AC-18 and AC-19 were green at once: the behavior existed and only the tests were missing. Each was run red against a mutation of the code instead (subsampling from quality 91, the modification time without the platform's offset, an absolute folder taken as relative, the planned name kept despite another extension, the decode without `catch_unwind`, the memory budget ignored), then the mutation was reverted.
