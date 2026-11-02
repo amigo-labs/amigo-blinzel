@@ -139,6 +139,68 @@ mod linux {
         assert!(at("first_present") > queued, "{report}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The `WM_CLASS` of every top-level window on `display`.
+    fn window_classes(display: &str) -> Vec<Vec<u8>> {
+        use x11rb::connection::Connection as _;
+        use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+        let (conn, screen) = x11rb::connect(Some(display)).expect("X server");
+        let root = conn.setup().roots[screen].root;
+        let tree = conn.query_tree(root).unwrap().reply().unwrap();
+        tree.children
+            .iter()
+            .filter_map(|&w| {
+                let p = conn
+                    .get_property(false, w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256)
+                    .ok()?
+                    .reply()
+                    .ok()?;
+                (!p.value.is_empty()).then_some(p.value)
+            })
+            .collect()
+    }
+
+    /// `docs/specs/installation.md` AC-16: the viewer window's X11
+    /// `WM_CLASS` (instance and class) is `amigo-blinzel`, the id and the
+    /// `StartupWMClass` of the desktop entry `--install` writes. Needs an X
+    /// server (Xvfb).
+    #[test]
+    fn window_class_is_the_desktop_entrys() {
+        use blinzel_app::linux::install::{APP_ID, Layout, desktop_entry};
+        let Some(display) = std::env::var_os("BLINZEL_X11_TEST") else {
+            return;
+        };
+        let display = display.to_str().unwrap();
+        let dir = folder("class");
+        let mut child = viewer(&dir, Some(display), &[&image()]);
+        let want = format!("{APP_ID}\0{APP_ID}\0").into_bytes();
+        let until = Instant::now() + Duration::from_secs(60);
+        let mut seen = vec![];
+        while Instant::now() < until && !seen.contains(&want) {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            seen = window_classes(display);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = child.kill();
+        let out = child.wait_with_output().unwrap();
+        let classes: Vec<_> = seen.iter().map(|c| String::from_utf8_lossy(c)).collect();
+        assert!(
+            seen.contains(&want),
+            "WM_CLASS {classes:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let layout = Layout::under(&dir);
+        let file = layout.desktop_file();
+        assert_eq!(file.file_name().unwrap(), "amigo-blinzel.desktop");
+        let entry = desktop_entry(&layout.exe(), "");
+        assert!(
+            entry.contains("\nStartupWMClass=amigo-blinzel\n"),
+            "{entry}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(windows)]
