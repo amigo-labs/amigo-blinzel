@@ -107,7 +107,7 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | AC-11 | `measuring_the_first_frame_writes_the_report_and_quits` (`crates/blinzel-ui/src/app_startup_tests.rs`: one object with `adapter`, `warp` from `Device::is_software`, `marks` with `first_present`); `marks_and_json` (`crates/blinzel-core/src/timing.rs`: marks count from the origin given to `timing::init`, which is `process_age_us()` on Windows and 0 at the start of `main` on Linux and macOS) | built | |
 | AC-12 | manual: measurement | open | |
 | AC-13 | CI step "App benchmark (offscreen, WARP)" (`.github/workflows/ci.yml`, Windows job: exit code 0; the report's content is not checked) | built | |
-| AC-14 | `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`, Windows CI job) | open (CI: windows) | |
+| AC-14 | `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`, `cfg(windows)`; its first Windows CI run is pending) | open | |
 
 ## Decisions
 
