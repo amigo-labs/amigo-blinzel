@@ -23,13 +23,21 @@ pub enum Format {
 }
 
 impl Format {
-    /// Decoded by `blinzel-core` itself; everything else goes to the
-    /// platform fallback (WIC on Windows).
+    /// Decoded by `blinzel-core` itself (HEIF only with the `heic`
+    /// feature); everything else goes to the platform fallback (WIC on
+    /// Windows, ImageIO on macOS).
     pub fn is_native(self) -> bool {
         matches!(
             self,
-            Format::Jpeg | Format::Png | Format::Gif | Format::Bmp | Format::WebP | Format::Jxl
-        )
+            Format::Jpeg
+                | Format::Png
+                | Format::Gif
+                | Format::Bmp
+                | Format::WebP
+                | Format::Jxl
+                | Format::Tiff
+                | Format::Avif
+        ) || (self == Format::Heif && cfg!(feature = "heic"))
     }
 }
 
@@ -134,7 +142,19 @@ mod tests {
         assert_eq!(detect(&[0xFF, 0x0A, 0, 0]), Format::Jxl);
         assert_eq!(detect(b"hello"), Format::Unknown);
         assert_eq!(detect(b""), Format::Unknown);
-        assert!(Format::Jpeg.is_native() && !Format::Tiff.is_native());
+    }
+
+    /// `is_native` names exactly the formats `decode` has a decoder for.
+    #[test]
+    fn native_formats_match_the_decoders() {
+        use Format::*;
+        for f in [Jpeg, Png, Gif, Bmp, WebP, Jxl, Tiff, Avif] {
+            assert!(f.is_native(), "{f:?}");
+        }
+        assert_eq!(Heif.is_native(), cfg!(feature = "heic"));
+        for f in [Ico, Dds, Psd, Qoi, JpegXr, Raw, Unknown] {
+            assert!(!f.is_native(), "{f:?}");
+        }
     }
 
     #[test]
