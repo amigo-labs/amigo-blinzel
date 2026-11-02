@@ -898,13 +898,18 @@ fn open_with(file: &Path) {
 
 /// Writes the licence texts next to the cache and opens them.
 fn show_notices() -> Result<(), String> {
-    let dir = dirs::cache().ok_or("no cache folder")?;
-    let path = dir.join("THIRD-PARTY-NOTICES.txt");
-    std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(&path, crate::notices_text::TEXT))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let path = write_notices(&dirs::cache().ok_or("no cache folder")?)?;
     open_url(&path.to_string_lossy());
     Ok(())
+}
+
+/// Writes the built-in licence texts to `dir`; returns the file.
+fn write_notices(dir: &Path) -> Result<PathBuf, String> {
+    let path = dir.join("THIRD-PARTY-NOTICES.txt");
+    std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(&path, crate::notices_text::TEXT))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
 }
 
 fn key_of(k: &WKey) -> Option<Key> {
@@ -1250,6 +1255,20 @@ fn takes_screenshots(a: &Action) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/release.md` AC-18: "Third-party notices" writes the
+    /// Linux notices built into the executable to the file it opens.
+    #[test]
+    fn the_notices_file_holds_the_built_in_linux_notices() {
+        let dir = std::env::temp_dir().join(format!("blinzel-notices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = write_notices(&dir.join("cache")).unwrap();
+        assert_eq!(path, dir.join("cache/THIRD-PARTY-NOTICES.txt"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text, crate::notices_text::TEXT);
+        assert!(text.contains("The Linux build\nalso contains"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// `docs/specs/screenshots.md` AC-01: Linux offers no screenshots, and
     /// the screenshot actions the App gives (the key follows resident

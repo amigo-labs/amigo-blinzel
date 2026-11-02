@@ -107,12 +107,14 @@ Releases are cut without manual steps: release-please turns the Conventional Com
 | AC-13 | `release.yml` macOS step "App bundle and disk image" (`codesign --verify`); `signs_ad_hoc_without_an_identity` (`crates/blinzel-release/src/macos.rs`) for the identity choice | built |        |
 | AC-14 |      | open   |        |
 | AC-15 |      | open   |        |
-| AC-16 | `ci.yml` Linux job step "Third-party notices up to date" (`notices --check`); a stale file is not provoked by a test | built |        |
+| AC-16 | `up_to_date_ignores_line_endings_only` (`crates/blinzel-release/src/notices.rs`); `ci.yml` Linux job step "Third-party notices up to date" (`notices --check`) | built |        |
 | AC-17 | `alternatives_prefer_mit_and_reject_unknown` (`crates/blinzel-release/src/notices.rs`), Linux CI | built |        |
-| AC-18 |      | open   |        |
+| AC-18 | `third_party_notices_menu_entry_asks_the_shell_to_show_them` (`crates/blinzel-ui/src/app_settings_tests.rs`), `the_notices_are_this_platforms_file` (`crates/blinzel-app/src/notices_text.rs`, per platform in each CI job), `the_notices_file_holds_the_built_in_linux_notices` (`crates/blinzel-app/src/linux/shell.rs`) | built |        |
 
 ## Decisions
 
 - The CLI tests (AC-09 to AC-12) run the built `blinzel-release` binary (`CARGO_BIN_EXE_blinzel-release`) with a made-up seed, because exit codes, stdout and the files written are what the workflow and the operator see. AC-09 counts as built on them: `release.yml` runs exactly that command, and a real release run adds nothing the test does not check.
 - Two defects found by AC-10's test, fixed with it: `parse_hex` took a sign (`+1+1…` passed as a 64-digit seed, and a checksum or public key with `+` passed too), and an all-zero seed panicked in `KeyPair::from_seed` (exit 101) instead of exiting with 1; `sign` now uses `try_from_seed`.
 - The check that a fresh signature verifies cannot fail with a correct Ed25519 library, so `signature_file` takes the check as a function: the unit test passes one that refuses and expects no signature.
+- AC-18 is proven in three links: the menu entry gives `Action::Notices` (`blinzel-ui`), each platform embeds its own file (`notices_text.rs`, cfg-gated, so the Windows and macOS halves run in those CI jobs), and the Linux shell writes exactly that text to the file it opens (`write_notices`, split out of `show_notices`). The Windows and macOS `show_notices` do the same in three lines each and stay without a test of their own: opening the file needs the desktop.
+- The menu test and the notices-file test were green at once: the behavior existed; breaking `Cmd::Notices`, the label, the embedded file or the written text turns them red.

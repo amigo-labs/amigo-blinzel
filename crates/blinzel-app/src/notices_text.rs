@@ -7,3 +7,20 @@ pub const TEXT: &str = include_str!("../../../THIRD-PARTY-NOTICES.txt");
 pub const TEXT: &str = include_str!("../../../THIRD-PARTY-NOTICES-linux.txt");
 #[cfg(target_os = "macos")]
 pub const TEXT: &str = include_str!("../../../THIRD-PARTY-NOTICES-macos.txt");
+
+#[cfg(test)]
+mod tests {
+    /// `docs/specs/release.md` AC-18: the viewer carries its own
+    /// platform's notices (each file names what it covers in its header).
+    #[test]
+    fn the_notices_are_this_platforms_file() {
+        #[cfg(windows)]
+        let covers = "blinzel.exe";
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let covers = "The Linux build";
+        #[cfg(target_os = "macos")]
+        let covers = "The macOS app";
+        let header = format!("(see LICENSE). {covers}\nalso contains");
+        assert!(super::TEXT.replace("\r\n", "\n").contains(&header));
+    }
+}
