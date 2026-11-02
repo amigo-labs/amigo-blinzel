@@ -103,7 +103,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | Cloud placeholder (OneDrive "online only") | Not read (no download started); tile stays a placeholder |
 | Broken file in the folder | Tile stays a placeholder; the viewer keeps running |
 | Grid on an empty folder | No tiles; Enter or Space closes the grid without opening anything, a double-click does nothing |
-| Delete, Ctrl+C, + or R while the grid is open | Not handled by the grid: they act on the image that was open before the grid (e.g. Delete recycles that image, not the selected tile) |
+| Delete, Ctrl+C, + or R while the grid is open | Delete (and "Open with", E) acts on the selected tile, not on the image that was open before the grid; Ctrl+C, Ctrl+X, Ctrl+S, zoom (+, −, 0) and rotation (R, L) do nothing while the grid covers the image |
 | T while the grid is open | Toggles and saves the setting; the strip appears once the grid closes |
 | Filmstrip with no current image (empty start) | Strip background only, no tiles |
 | Resident mode hides the window | Queue, handed-out requests and atlas are dropped; the cache on disk stays |
@@ -151,4 +151,5 @@ Partial coverage without an exact test: AC-16 persistence of the setting by `rou
 
 ## Decisions
 
+- 2026-11-02: in the grid, file commands (Delete, "Open with", "Edit with") take the selected tile and commands on the shown image (copy, cut, save cutout, select all from the menu, zoom, rotation, show original) do nothing. Because the grid covers that image, and Delete recycling a file other than the one the user sees selected was the defect found in the extraction; a copy of a tile would need its probe on the UI thread.
 - 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.

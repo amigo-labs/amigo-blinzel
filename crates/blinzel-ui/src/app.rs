@@ -1753,6 +1753,10 @@ impl<B: Backend> App<B> {
     }
 
     pub fn command(&mut self, cmd: Cmd) -> Vec<Action> {
+        if self.browse.grid.is_some() && acts_on_the_shown_image(cmd) {
+            // The grid covers the image: no zoom, rotation or copy of it.
+            return vec![];
+        }
         match cmd {
             Cmd::Open => vec![Action::OpenDialog],
             Cmd::View(mode) => {
@@ -1848,8 +1852,8 @@ impl<B: Backend> App<B> {
                 self.direction = -1;
                 self.go_to_index(self.list.len() - 1)
             }
-            Cmd::Recycle => match &self.current {
-                Some(c) => vec![Action::Recycle(c.path.clone())],
+            Cmd::Recycle => match self.target_file() {
+                Some(p) => vec![Action::Recycle(p)],
                 None => vec![],
             },
             Cmd::Language(lang) => {
@@ -1907,12 +1911,12 @@ impl<B: Backend> App<B> {
                 whole_screen: false,
             }],
             Cmd::CaptureScreen => vec![Action::Capture { whole_screen: true }],
-            Cmd::OpenWith => match &self.current {
-                Some(c) => vec![Action::OpenWith(c.path.clone())],
+            Cmd::OpenWith => match self.target_file() {
+                Some(p) => vec![Action::OpenWith(p)],
                 None => vec![],
             },
             Cmd::EditWith => {
-                let Some(file) = self.current.as_ref().map(|c| c.path.clone()) else {
+                let Some(file) = self.target_file() else {
                     return vec![];
                 };
                 vec![edit_action(self.settings.editor.as_deref(), file)]
@@ -1968,6 +1972,15 @@ impl<B: Backend> App<B> {
                 Some(job) => vec![Action::SaveCutout(job)],
                 None => vec![],
             },
+        }
+    }
+
+    /// The file a file command (recycle, open with, edit) acts on: the
+    /// selected tile while the grid is open, else the current image.
+    fn target_file(&self) -> Option<PathBuf> {
+        match &self.browse.grid {
+            Some(g) => self.list.path(g.selected),
+            None => self.current.as_ref().map(|c| c.path.clone()),
         }
     }
 
@@ -2233,12 +2246,26 @@ impl<B: Backend> App<B> {
 
     /// After the file was moved to the recycle bin.
     pub fn removed(&mut self, path: &Path) -> Vec<Action> {
+        let other = self.current.as_ref().is_none_or(|c| c.path != path);
+        if other {
+            // A grid tile other than the current image.
+            let name = path.file_name().map(|n| n.to_string_lossy());
+            if path.parent() == Some(self.list.dir())
+                && let Some(i) = name.and_then(|n| {
+                    // Exactly this name: `a.jpg` may sit next to `A.jpg`.
+                    self.list.entries().iter().position(|e| e.name == n)
+                })
+            {
+                self.forget_entry(i);
+            }
+            return vec![];
+        }
+        if let Some(i) = self.current.as_ref().and_then(|c| c.index) {
+            self.forget_entry_in_grid(i);
+        }
         let Some(cur) = &self.current else {
             return vec![];
         };
-        if cur.path != path {
-            return vec![];
-        }
         match cur.index.and_then(|i| self.list.remove(i)) {
             Some(next) => self.go_to_index(next),
             None => {
@@ -2249,6 +2276,36 @@ impl<B: Backend> App<B> {
                 vec![]
             }
         }
+    }
+
+    /// Removes list entry `i`, which is not the current image.
+    fn forget_entry(&mut self, i: usize) {
+        self.forget_entry_in_grid(i);
+        self.list.remove(i);
+        if let Some(c) = &mut self.current
+            && let Some(ci) = &mut c.index
+            && *ci > i
+        {
+            *ci -= 1;
+        }
+        self.update_wanted();
+        self.invalidate();
+    }
+
+    /// Entry `i` is about to leave the list: its mark goes, the grid's
+    /// selection stays on the same place, clamped to the images left.
+    fn forget_entry_in_grid(&mut self, i: usize) {
+        let left = self.list.len().saturating_sub(1);
+        let Some(g) = &mut self.browse.grid else {
+            return;
+        };
+        if let Some(e) = self.list.get(i) {
+            g.marked.remove(&e.name);
+        }
+        if g.selected > i || g.selected >= left {
+            g.selected = g.selected.saturating_sub(1).min(left.saturating_sub(1));
+        }
+        self.invalidate();
     }
 
     pub fn resized(&mut self, client: (u32, u32)) {
@@ -2336,6 +2393,27 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
 #[cfg(test)]
 #[path = "app_selection_tests.rs"]
 mod selection_tests;
+
+#[cfg(test)]
+#[path = "app_thumbnail_tests.rs"]
+mod thumbnail_tests;
+
+/// Commands on the image shown, which the grid covers.
+fn acts_on_the_shown_image(cmd: Cmd) -> bool {
+    matches!(
+        cmd,
+        Cmd::ZoomIn
+            | Cmd::ZoomOut
+            | Cmd::ZoomReset
+            | Cmd::RotateRight
+            | Cmd::RotateLeft
+            | Cmd::Copy
+            | Cmd::Cut
+            | Cmd::SelectAll
+            | Cmd::ShowOriginal
+            | Cmd::SaveCutout
+    )
+}
 
 /// `a` and `b` name the same existing file, whatever the spelling (`.`,
 /// `..`, symbolic links, letter case on a case-insensitive volume).

@@ -46,7 +46,6 @@ Behavior the code has today that contradicts the design or is plainly wrong. Eac
 
 | Defect | Spec |
 | ------ | ---- |
-| Del, Ctrl+C, + and R in the grid act on the image that was open before the grid, not on the selected tile: Del moves the wrong file to the Recycle Bin | [thumbnails](thumbnails.md) |
 | Animation decoding (GIF, WebP, JPEG XL) runs without `catch_unwind`: a panic ends that worker thread (AGENTS.md §9) | [animations](animations.md) |
 | A decode error in the middle of an animation drops its loop count: the frames so far loop for ever | [animations](animations.md) |
 | Linux (missing or broken first file) and macOS (broken first file) never show the window: there is no 400 ms fallback at a cold start | [startup](startup.md) |
