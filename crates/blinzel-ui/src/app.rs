@@ -2568,6 +2568,10 @@ mod startup_tests;
 #[path = "app_animation_tests.rs"]
 mod animation_tests;
 
+#[cfg(test)]
+#[path = "app_language_tests.rs"]
+mod language_tests;
+
 /// The command a navigation key gives in the single-image view;
 /// right-to-left languages page leftwards.
 fn nav_cmd(key: Key, rtl: bool) -> Option<Cmd> {

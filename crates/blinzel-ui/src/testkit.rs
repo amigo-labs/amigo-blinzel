@@ -267,7 +267,8 @@ impl Host for FakeHost {
 // ---------------------------------------------------------------- services
 
 /// The real file system and the crate's own decoders; wakes go into a
-/// channel the [`Harness`] drains. English, UTC unless a test sets an
+/// channel the [`Harness`] drains. English unless a test sets a system
+/// language ([`Harness::set_system_language`]), UTC unless a test sets an
 /// offset ([`Harness::set_utc_offset`]), sRGB monitors unless a test
 /// gives one a profile ([`FakeServices::targets`]); log lines go to the
 /// test's output.
@@ -295,6 +296,8 @@ pub(crate) struct FakeServices {
     pub target_queries: AtomicUsize,
     /// Held by a test, it keeps every colour-target answer back.
     pub target_gate: Mutex<()>,
+    /// The language the system prefers ([`Harness::set_system_language`]).
+    pub system_language: Mutex<Lang>,
 }
 
 impl FakeServices {
@@ -362,7 +365,7 @@ impl Services for FakeServices {
         Some(self.cache.clone())
     }
     fn system_language(&self) -> Lang {
-        blinzel_i18n::FALLBACK
+        *self.system_language.lock().unwrap()
     }
     fn utc_offset(&self, _t: std::time::SystemTime) -> i32 {
         self.utc_offset.load(Ordering::Relaxed)
@@ -704,6 +707,7 @@ impl Harness {
             targets: Mutex::new(HashMap::new()),
             target_queries: AtomicUsize::new(0),
             target_gate: Mutex::new(()),
+            system_language: Mutex::new(blinzel_i18n::FALLBACK),
         });
         let device = Arc::new(FakeDevice {
             budget,
@@ -1197,6 +1201,11 @@ impl Harness {
     /// Every decode fails with `e` from now on (`None`: decode again).
     pub fn set_decode_error(&self, e: Option<DecodeError>) {
         *self.app.services.decode_error.lock().unwrap() = e;
+    }
+
+    /// The system prefers `lang` from now on (English until then).
+    pub fn set_system_language(&self, lang: Lang) {
+        *self.app.services.system_language.lock().unwrap() = lang;
     }
 
     /// The platform's clock is `secs` ahead of UTC from now on.

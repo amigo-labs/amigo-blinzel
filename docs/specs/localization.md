@@ -87,15 +87,18 @@ Every user-visible string goes through `blinzel-i18n` (AGENTS.md §5.5, §9). Th
 | AC-07 | `translate_and_fill` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-08 | `rules` (`crates/blinzel-i18n/src/plural.rs`), `plural_messages`, `plural_forms_of_shipped_languages` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-09 | `shipped_languages_use_their_plural_rule_family` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-10 | — | open | |
+| AC-10 | `a_setting_without_a_shipped_language_asks_the_system` (`crates/blinzel-i18n/src/lib.rs`), `the_system_language_comes_from_the_locale_variables_in_order` (`crates/blinzel-app/src/linux/shell.rs`), `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux; `the_system_language_comes_from_the_preferred_ui_languages_in_order` (`crates/blinzel-app/src/run.rs`), CI: Windows | built | |
 | AC-11 | `negotiation`, `negotiation_of_regional_variants` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-12 | — (`ids_roundtrip` in `crates/blinzel-ui/src/menu.rs` checks only command ids) | open | |
-| AC-13 | — (`current_language_switches` in `crates/blinzel-i18n/src/lib.rs` covers the lookup switch only, not the menu command) | open | |
+| AC-12 | `the_language_menu_lists_automatic_then_every_language_in_its_own_name` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
+| AC-13 | `picking_a_language_switches_menu_title_and_drawn_text_at_once_and_saves_it` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
 | AC-14 | `right_to_left_mirrors` (`crates/blinzel-ui/src/chrome.rs`), `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), CI: Linux | built | |
-| AC-15 | — | open | |
+| AC-15 | `right_to_left_swaps_what_the_arrow_keys_show` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
 | AC-16 | — | open | |
 | AC-17 | `shipped_languages_are_left_to_right` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 
 ## Decisions
 
 - AC-01, AC-04, AC-09: the behavior already existed (this spec was extracted from the code), so their tests were green at once; each went red when broken on purpose (an extra `i18n/xx.toml`, a key removed from `es.toml`, `it.toml` switched to `zero-one-other`).
+- AC-10: the three shells and `App::reload_settings` pick the language through one function, `blinzel_i18n::choose(setting, system)` (new public API), so "the settings name no shipped language" is tested once instead of per shell. The Linux variables and the Windows `GetUserPreferredUILanguages` buffer are read by small parsers (`language_from_env`, `language_from_names`) that the tests feed directly; the Windows test runs only in the Windows CI job, whose first run is its proof. macOS hands `NSLocale.preferredLanguages` to `negotiate` unchanged, so AC-11's tests cover its mapping; reading the list itself has no test.
+- AC-12, AC-13, AC-15: green at once (existing behavior); each went red when broken on purpose (`code()` instead of `native_name()` in the menu; no title update, no save, or English instead of the system language for "Automatic (system)"; the right-to-left arm of `nav_cmd` removed). The harness's system language is settable (`Harness::set_system_language`) so "Automatic (system)" is told apart from English.
+- AC-15 is tested on `nav_cmd` with `rtl = true` directly: no shipped language is right to left (AC-17), so an App-level test cannot switch to one, the same reason AC-14's tests call `Chrome` and `Popup` with `rtl = true`.
