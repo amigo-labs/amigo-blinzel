@@ -478,13 +478,14 @@ pub fn run() -> i32 {
         // Results that arrived before the window existed.
         let _ = PostMessageW(Some(hwnd), WM_LOADED, WPARAM(0), LPARAM(0));
     }
-    if has_file {
+    match uncloak_fallback(has_file) {
         // Never stay invisible: a slow or broken file still shows the window.
-        start_uncloak_timer(hwnd, 400);
-    } else {
+        Some(ms) => start_uncloak_timer(hwnd, ms),
         // Nothing to wait for: draw the hint, then show the window.
-        actions.extend(window::with_app(|a| a.render()).unwrap_or_default());
-        actions.push(Action::Uncloak);
+        None => {
+            actions.extend(window::with_app(|a| a.render()).unwrap_or_default());
+            actions.push(Action::Uncloak);
+        }
     }
     run_actions(hwnd, actions);
 
@@ -554,6 +555,13 @@ fn message_loop() {
     }
 }
 
+/// How long after the device and swap chain a window with a file to show
+/// may stay invisible waiting for its image (`docs/specs/startup.md`
+/// AC-07); without a file it is shown with the hint at once (AC-03).
+fn uncloak_fallback(has_file: bool) -> Option<u32> {
+    has_file.then_some(window::UNCLOAK_FALLBACK_MS)
+}
+
 /// Files read in parallel: one on a drive with a seek penalty (parallel
 /// reads only add seeks), else two (`docs/specs/browsing.md` AC-18).
 fn io_threads(seek_penalty: bool) -> usize {
@@ -569,7 +577,7 @@ fn decode_workers(performance: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, decode_workers, io_threads, may_hand_off, report_path};
+    use super::{Args, decode_workers, io_threads, may_hand_off, report_path, uncloak_fallback};
     use std::path::PathBuf;
 
     /// `docs/specs/startup.md` AC-10: measuring never hands over, and its
@@ -584,6 +592,14 @@ mod tests {
         assert_eq!(report_path(&args), Some(PathBuf::from("startup.json")));
         args.json = Some(PathBuf::from("out.json"));
         assert_eq!(report_path(&args), Some(PathBuf::from("out.json")));
+    }
+
+    /// `docs/specs/startup.md` AC-07: with a file the window waits at most
+    /// 400 ms for its image; without one it is shown at once.
+    #[test]
+    fn a_window_with_a_file_waits_400_ms_for_its_image() {
+        assert_eq!(uncloak_fallback(true), Some(400));
+        assert_eq!(uncloak_fallback(false), None);
     }
 
     #[test]

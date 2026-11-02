@@ -1050,7 +1050,7 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
         let _ = ShowWindow(hwnd, SW_SHOWNA);
     }
     if opened {
-        start_uncloak_timer(hwnd, 400);
+        start_uncloak_timer(hwnd, UNCLOAK_FALLBACK_MS);
         vec![]
     } else {
         let mut more = with_app(|a| a.render()).unwrap_or_default();
@@ -1081,6 +1081,10 @@ pub(crate) fn uncloak(hwnd: HWND) {
     platform::debug_log("window visible");
     blinzel_core::timing::mark("uncloak");
 }
+
+/// How long a cloaked window with a file to show waits for its image
+/// before it becomes visible anyway (`docs/specs/startup.md` AC-07).
+pub const UNCLOAK_FALLBACK_MS: u32 = 400;
 
 pub fn start_uncloak_timer(hwnd: HWND, ms: u32) {
     unsafe {
@@ -1229,4 +1233,122 @@ pub fn register_class(
         return Err(windows::core::Error::from_thread());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::core::w;
+
+    use crate::backend::{D3dCanvas, D3dDevice, Loader, WinHost, WinServices};
+    use crate::gfx::{Gfx, Renderer, SwapChain};
+
+    fn cloaked(hwnd: HWND) -> bool {
+        let mut c = 0u32;
+        // SAFETY: `c` is a live u32, the size passed.
+        unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut c).cast(), 4) }.unwrap();
+        c != 0
+    }
+
+    /// `docs/specs/startup.md` AC-07: with a file to show and the device
+    /// and swap chain ready, a window whose image does not come stays
+    /// cloaked, and the timer makes it visible after 400 ms. The loader has
+    /// no device here, so the decoded image never reaches the screen (a
+    /// slow file).
+    #[test]
+    fn a_window_whose_image_does_not_come_becomes_visible_after_400_ms() {
+        let instance = unsafe { GetModuleHandleW(None) }.unwrap().into();
+        let class = w!("BlinzelUncloakTest");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(wndproc),
+            hInstance: instance,
+            lpszClassName: class,
+            ..Default::default()
+        };
+        let hwnd = unsafe {
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("test"),
+                WS_OVERLAPPEDWINDOW,
+                100,
+                100,
+                480,
+                360,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .unwrap();
+        set_cloak(hwnd, true);
+        let mut cr = RECT::default();
+        unsafe {
+            let _ = GetClientRect(hwnd, &mut cr);
+        }
+        let client = (
+            (cr.right - cr.left).max(1) as u32,
+            (cr.bottom - cr.top).max(1) as u32,
+        );
+        // As `run.rs` builds the App once Direct3D is up.
+        let gfx = Gfx::create(true).expect("WARP device");
+        let device = Arc::new(D3dDevice::new(&gfx));
+        let renderer = Renderer::new(&gfx.device).unwrap();
+        let swap = SwapChain::new(&gfx, hwnd, client).unwrap();
+        let services = Arc::new(WinServices::default());
+        let loader = Loader::new(services.clone(), 1, 2, 2);
+        let color = blinzel_ui::color::ColorManager::new(false, crate::color::build_lut);
+        let mut app = App::new(
+            WinHost { hwnd },
+            device,
+            D3dCanvas::new(gfx, renderer, swap),
+            services,
+            Settings::default(),
+            loader,
+            color,
+            96,
+            client,
+        );
+        app.cloaked = true;
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../blinzel-core/testdata/rgb420-64x48.avif");
+        let actions = app.open(file);
+        APP.with(|cell| *cell.borrow_mut() = Some(app));
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+        run_actions(hwnd, actions);
+
+        let start = Instant::now();
+        start_uncloak_timer(hwnd, UNCLOAK_FALLBACK_MS);
+        let mut msg = MSG::default();
+        while cloaked(hwnd) && start.elapsed() < Duration::from_secs(2) {
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let after = start.elapsed();
+        assert!(!cloaked(hwnd), "still invisible after {after:?}");
+        assert!(
+            after >= Duration::from_millis(350),
+            "visible after {after:?} already"
+        );
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert_eq!(with_app(|a| a.cloaked), Some(false));
+        drop(APP.with(|cell| cell.borrow_mut().take()));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
 }
