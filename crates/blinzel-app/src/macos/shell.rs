@@ -571,6 +571,9 @@ impl Shell {
                 self.hide();
                 vec![]
             }
+            // A measurement without an image (`docs/specs/startup.md`):
+            // `terminate` would exit with 0.
+            Action::Quit if self.app.exit_code() != 0 => std::process::exit(self.app.exit_code()),
             Action::Close | Action::Exit | Action::Quit => {
                 NSApplication::sharedApplication(mtm).terminate(None);
                 vec![]

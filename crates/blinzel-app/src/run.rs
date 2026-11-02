@@ -485,11 +485,13 @@ pub fn run() -> i32 {
 }
 
 fn finish() -> i32 {
-    APP.with(|cell| cell.borrow_mut().take());
+    let app = APP.with(|cell| cell.borrow_mut().take());
+    let code = app.as_ref().map_or(0, App::exit_code);
+    drop(app);
     if window::restart_requested() {
         update::start_installed_resident();
     }
-    0
+    code
 }
 
 /// DWM attributes that must be set before the window is shown.

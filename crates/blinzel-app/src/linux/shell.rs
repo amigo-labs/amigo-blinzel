@@ -1126,10 +1126,9 @@ pub fn run() -> i32 {
         eprintln!("amigo-blinzel: {e}");
         return 1;
     }
-    if let Some(app) = &shell.app {
-        app.save_settings_on_exit();
-    }
-    0
+    let Some(app) = &shell.app else { return 0 };
+    app.save_settings_on_exit();
+    app.exit_code()
 }
 
 #[cfg(test)]
