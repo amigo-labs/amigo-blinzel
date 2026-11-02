@@ -100,10 +100,10 @@ Releases are cut without manual steps: release-please turns the Conventional Com
 | AC-06 |      | open   |        |
 | AC-07 |      | open   |        |
 | AC-08 | `release.yml` job "Checksums and release" step "Sign SHA256SUMS" (`test -n "$RELEASE_SIGNING_KEY"`) | built |        |
-| AC-09 | `release.yml` step "Sign SHA256SUMS" (`sign` fails when its signature does not verify); the output format is not asserted | open   |        |
-| AC-10 |      | open   |        |
-| AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
+| AC-09 | `sign_writes_a_verified_hex_signature_and_prints_the_public_key` (`crates/blinzel-release/tests/cli.rs`), `signature_file_is_hex_and_checked_before_it_is_returned` (`crates/blinzel-release/src/main.rs`); `release.yml` step "Sign SHA256SUMS" runs that command | built |        |
+| AC-10 | `sign_without_a_valid_seed_fails_and_writes_nothing` (`crates/blinzel-release/tests/cli.rs`), `parse_hex_takes_hex_digits_only` (`crates/blinzel-core/src/update.rs`) | built |        |
+| AC-11 | `verify_accepts_the_matching_signature_only` (`crates/blinzel-release/tests/cli.rs`) | built |        |
+| AC-12 | `keygen_writes_a_seed_prints_its_key_and_never_overwrites` (`crates/blinzel-release/tests/cli.rs`) | built |        |
 | AC-13 | `release.yml` macOS step "App bundle and disk image" (`codesign --verify`); `signs_ad_hoc_without_an_identity` (`crates/blinzel-release/src/macos.rs`) for the identity choice | built |        |
 | AC-14 |      | open   |        |
 | AC-15 |      | open   |        |
@@ -113,3 +113,6 @@ Releases are cut without manual steps: release-please turns the Conventional Com
 
 ## Decisions
 
+- The CLI tests (AC-09 to AC-12) run the built `blinzel-release` binary (`CARGO_BIN_EXE_blinzel-release`) with a made-up seed, because exit codes, stdout and the files written are what the workflow and the operator see. AC-09 counts as built on them: `release.yml` runs exactly that command, and a real release run adds nothing the test does not check.
+- Two defects found by AC-10's test, fixed with it: `parse_hex` took a sign (`+1+1…` passed as a 64-digit seed, and a checksum or public key with `+` passed too), and an all-zero seed panicked in `KeyPair::from_seed` (exit 101) instead of exiting with 1; `sign` now uses `try_from_seed`.
+- The check that a fresh signature verifies cannot fail with a correct Ed25519 library, so `signature_file` takes the check as a function: the unit test passes one that refuses and expects no signature.
