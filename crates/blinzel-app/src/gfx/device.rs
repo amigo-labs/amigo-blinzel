@@ -17,8 +17,8 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext,
 };
 use windows::Win32::Graphics::Dxgi::{
-    DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO, IDXGIAdapter, IDXGIAdapter3,
-    IDXGIDevice1, IDXGIDevice3, IDXGIFactory2,
+    DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
+    IDXGIAdapter, IDXGIAdapter1, IDXGIAdapter3, IDXGIDevice1, IDXGIDevice3, IDXGIFactory2,
 };
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::core::HRESULT;
@@ -105,13 +105,19 @@ impl Gfx {
                     unsafe { dxgi.SetMaximumFrameLatency(1)? };
                     let adapter = unsafe { dxgi.GetAdapter()? };
                     let factory: IDXGIFactory2 = unsafe { adapter.GetParent()? };
+                    let flags = adapter
+                        .cast::<IDXGIAdapter1>()
+                        .ok()
+                        // SAFETY: a plain query of the adapter just created.
+                        .and_then(|a| unsafe { a.GetDesc1() }.ok())
+                        .map_or(0, |d| d.Flags);
                     return Ok(Gfx {
                         device,
                         context,
                         factory,
                         adapter,
                         feature_level,
-                        warp: driver == D3D_DRIVER_TYPE_WARP,
+                        warp: runs_on_warp(driver, flags),
                     });
                 }
                 Err(e) => last_err = Some(e),
@@ -161,6 +167,15 @@ impl Gfx {
     }
 }
 
+/// Whether a device created with `driver` on an adapter with
+/// `adapter_flags` (`DXGI_ADAPTER_DESC1::Flags`) renders with WARP: the WARP
+/// driver type, or the hardware type on the "Microsoft Basic Render
+/// Driver" of a machine without a GPU driver, a software adapter that is
+/// WARP too.
+fn runs_on_warp(driver: D3D_DRIVER_TYPE, adapter_flags: u32) -> bool {
+    driver == D3D_DRIVER_TYPE_WARP || adapter_flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
+}
+
 /// Half of what Windows grants the process (`os_budget`, DXGI), else half
 /// of the adapter's (dedicated, shared) memory, counting a quarter of the
 /// shared; clamped to 256 MiB … 3 GiB (`docs/specs/browsing.md` AC-13).
@@ -193,7 +208,7 @@ fn load_create_device() -> windows::core::Result<CreateDeviceFn> {
 
 #[cfg(test)]
 mod tests {
-    use super::texture_budget;
+    use super::*;
 
     const MIB: usize = 1 << 20;
     const GIB: usize = 1 << 30;
@@ -215,5 +230,22 @@ mod tests {
         assert_eq!(texture_budget(Some(0), || Some((0, 8 * GIB))), GIB);
         assert_eq!(texture_budget(None, || Some((0, 0))), 256 * MIB);
         assert_eq!(texture_budget(None, || None), 256 * MIB);
+    }
+
+    /// `docs/specs/startup.md` AC-11: `warp` is true on WARP, also when the
+    /// hardware driver type lands on the Basic Render Driver (CI runners).
+    #[test]
+    fn the_basic_render_driver_counts_as_warp() {
+        let software = DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32;
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, 0));
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, software));
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, software));
+        assert!(!runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, 0));
+        // Whatever this machine has: the Basic Render Driver is WARP.
+        let gfx = Gfx::create(false).expect("a Direct3D 11 device");
+        if gfx.adapter_name() == "Microsoft Basic Render Driver" {
+            assert!(gfx.warp);
+        }
+        assert!(Gfx::create(true).expect("WARP").warp);
     }
 }
