@@ -182,6 +182,42 @@ mod tests {
     }
 
     #[test]
+    fn exactly_nine_languages_ship_with_english_first_and_as_fallback() {
+        let codes: Vec<&str> = Lang::ALL.iter().map(|l| l.code()).collect();
+        assert_eq!(
+            codes,
+            ["en", "de", "es", "fr", "it", "ja", "pt-br", "ru", "zh-cn"]
+        );
+        assert_eq!(FALLBACK, Lang::ALL[0]);
+        assert_eq!(FALLBACK.code(), "en");
+        assert_eq!(negotiate(["xx"]), FALLBACK);
+    }
+
+    #[test]
+    fn no_shipped_language_falls_back_to_english() {
+        assert!(MISSING.is_empty(), "untranslated: {MISSING:?}");
+    }
+
+    #[test]
+    fn shipped_languages_use_their_plural_rule_family() {
+        use plural::Rule;
+        let expected = [
+            ("en", Rule::OneOther),
+            ("de", Rule::OneOther),
+            ("es", Rule::OneOther),
+            ("it", Rule::OneOther),
+            ("fr", Rule::ZeroOneOther),
+            ("pt-br", Rule::ZeroOneOther),
+            ("ru", Rule::EastSlavic),
+            ("ja", Rule::None),
+            ("zh-cn", Rule::None),
+        ];
+        for (code, rule) in expected {
+            assert_eq!(lang_from_code(code).unwrap().plural_rule(), rule, "{code}");
+        }
+    }
+
+    #[test]
     fn every_language_has_every_key_and_same_placeholders() {
         if !MISSING.is_empty() {
             eprintln!("warning: untranslated keys fall back to English: {MISSING:?}");

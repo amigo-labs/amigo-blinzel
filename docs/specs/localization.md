@@ -78,15 +78,15 @@ Every user-visible string goes through `blinzel-i18n` (AGENTS.md §5.5, §9). Th
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | — (`english_is_reference_and_german_ships` in `crates/blinzel-i18n/src/lib.rs` checks only `en` and `de`) | open | |
+| AC-01 | `exactly_nine_languages_ship_with_english_first_and_as_fallback` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-02 | `every_language_has_every_key_and_same_placeholders` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-03 | `german_is_complete` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-04 | — (only a build warning; no test asserts `MISSING` is empty) | open | |
+| AC-04 | `no_shipped_language_falls_back_to_english` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-05 | — (build script, no test) | open | |
 | AC-06 | — (build script, no test) | open | |
 | AC-07 | `translate_and_fill` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-08 | `rules` (`crates/blinzel-i18n/src/plural.rs`), `plural_messages`, `plural_forms_of_shipped_languages` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-09 | — (`plural_forms_of_shipped_languages` and `plural_messages` cover `en`, `de`, `fr`, `ru`, `ja`; not `es`, `it`, `pt-br`, `zh-cn`) | open | |
+| AC-09 | `shipped_languages_use_their_plural_rule_family` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-10 | — | open | |
 | AC-11 | `negotiation`, `negotiation_of_regional_variants` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-12 | — (`ids_roundtrip` in `crates/blinzel-ui/src/menu.rs` checks only command ids) | open | |
@@ -97,3 +97,5 @@ Every user-visible string goes through `blinzel-i18n` (AGENTS.md §5.5, §9). Th
 | AC-17 | `shipped_languages_are_left_to_right` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 
 ## Decisions
+
+- AC-01, AC-04, AC-09: the behavior already existed (this spec was extracted from the code), so their tests were green at once; each went red when broken on purpose (an extra `i18n/xx.toml`, a key removed from `es.toml`, `it.toml` switched to `zero-one-other`).
