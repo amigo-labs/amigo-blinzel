@@ -23,7 +23,8 @@ async function platform() {
   const arm = arch === "arm" || /aarch64|arm64/i.test(ua);
   if (/Win/i.test(os)) return arm ? "arm64" : "x64";
   if (/Mac/i.test(os)) return "macos";
-  if (/Linux|X11/i.test(os) && !/CrOS/i.test(ua)) return arm ? "linux-arm64" : "linux-x64";
+  // Only Linux: X11 alone is also a BSD, and ChromeOS says CrOS.
+  if (/Linux/i.test(os)) return arm ? "linux-arm64" : "linux-x64";
   return null;
 }
 
