@@ -8,6 +8,7 @@
 //! ours.
 
 use std::fmt;
+use std::time::Duration;
 
 use crate::json::Json;
 
@@ -289,6 +290,52 @@ pub fn check_due(last_check: Option<u64>, now: u64) -> bool {
     match last_check {
         None => true,
         Some(t) => t > now || now - t >= CHECK_INTERVAL_S,
+    }
+}
+
+/// Seconds after start before the first automatic check: the startup path
+/// stays free of it.
+pub const FIRST_CHECK_DELAY_S: u64 = 10;
+/// Seconds between two looks of a long-running (resident) instance at
+/// whether a check is due.
+pub const RECHECK_S: u64 = 3600;
+
+/// What the automatic check needs from a shell ([`auto_checks`]).
+pub trait AutoCheck {
+    /// Waits `d`; `false` ends the checks.
+    fn sleep(&mut self, d: Duration) -> bool;
+    /// The `auto_update` setting, read anew each time.
+    fn auto_update(&mut self) -> bool;
+    /// Unix time now.
+    fn now(&mut self) -> u64;
+    fn load(&mut self) -> State;
+    fn save(&mut self, state: &State);
+    /// Checks and puts an update in place; the shell logs a failure.
+    fn check(&mut self);
+}
+
+/// The automatic check's thread body (`docs/specs/updates.md` AC-10..AC-13):
+/// [`FIRST_CHECK_DELAY_S`] after start, and with `repeat` (a Windows
+/// instance that keeps running) every [`RECHECK_S`] after that, it reads
+/// the setting and, when it is on and a check is due, saves the time of the
+/// check before it runs, so a failed check is not repeated within a day.
+pub fn auto_checks(shell: &mut impl AutoCheck, repeat: bool) {
+    if !shell.sleep(Duration::from_secs(FIRST_CHECK_DELAY_S)) {
+        return;
+    }
+    loop {
+        if shell.auto_update() {
+            let mut state = shell.load();
+            let now = shell.now();
+            if check_due(state.last_check, now) {
+                state.last_check = Some(now);
+                shell.save(&state);
+                shell.check();
+            }
+        }
+        if !repeat || !shell.sleep(Duration::from_secs(RECHECK_S)) {
+            return;
+        }
     }
 }
 
@@ -652,6 +699,124 @@ mod tests {
         assert!(!check_due(Some(1000), 1000 + CHECK_INTERVAL_S - 1));
         assert!(check_due(Some(1000), 1000 + CHECK_INTERVAL_S));
         assert!(check_due(Some(5000), 1000));
+    }
+
+    /// A shell whose clock moves only while it sleeps, which ends the
+    /// checks after `sleeps` waits and logs what they do.
+    struct Clock {
+        t: u64,
+        sleeps: u32,
+        /// The setting per look; the last one stays.
+        setting: Vec<bool>,
+        state: State,
+        log: Vec<String>,
+    }
+
+    const T0: u64 = 1_700_000_000;
+
+    impl Clock {
+        fn new(sleeps: u32, setting: &[bool]) -> Clock {
+            Clock {
+                t: T0,
+                sleeps,
+                setting: setting.to_vec(),
+                state: State::default(),
+                log: Vec::new(),
+            }
+        }
+
+        fn count(&self, what: &str) -> usize {
+            self.log.iter().filter(|l| l.starts_with(what)).count()
+        }
+    }
+
+    impl AutoCheck for Clock {
+        fn sleep(&mut self, d: Duration) -> bool {
+            if self.sleeps == 0 {
+                return false;
+            }
+            self.sleeps -= 1;
+            self.t += d.as_secs();
+            self.log.push(format!("sleep {}", d.as_secs()));
+            true
+        }
+        fn auto_update(&mut self) -> bool {
+            let on = if self.setting.len() > 1 {
+                self.setting.remove(0)
+            } else {
+                self.setting[0]
+            };
+            self.log.push(format!("setting {on}"));
+            on
+        }
+        fn now(&mut self) -> u64 {
+            self.t
+        }
+        fn load(&mut self) -> State {
+            self.state.clone()
+        }
+        fn save(&mut self, state: &State) {
+            self.state = state.clone();
+            self.log.push(format!("save {:?}", state.last_check));
+        }
+        fn check(&mut self) {
+            self.log.push(format!("check at {}", self.t - T0));
+        }
+    }
+
+    /// AC-11, AC-12: 10 s after start, the time of the check is saved before
+    /// the check runs; Linux and macOS (no repeat) look once.
+    #[test]
+    fn the_automatic_check_waits_and_saves_its_time_first() {
+        let mut c = Clock::new(100, &[true]);
+        auto_checks(&mut c, false);
+        assert_eq!(
+            c.log,
+            [
+                "sleep 10",
+                "setting true",
+                &format!("save Some({})", T0 + 10),
+                "check at 10"
+            ]
+        );
+    }
+
+    /// AC-10, AC-12: a running Windows instance looks every hour and reads
+    /// the setting each time, but checks again only a day after the last
+    /// check (failed or not).
+    #[test]
+    fn a_running_instance_looks_every_hour_and_checks_daily() {
+        let mut c = Clock::new(1 + 48, &[true]);
+        auto_checks(&mut c, true);
+        assert_eq!(c.count("sleep 10"), 1);
+        assert_eq!(c.count("sleep 3600"), 48);
+        assert_eq!(c.count("setting"), 49, "the setting is read at every look");
+        let checks: Vec<_> = c.log.iter().filter(|l| l.starts_with("check")).collect();
+        assert_eq!(
+            checks,
+            ["check at 10", "check at 86410", "check at 172810"],
+            "{:?}",
+            c.log
+        );
+        // A recent check (another process) is not repeated.
+        let mut c = Clock::new(1, &[true]);
+        c.state.last_check = Some(T0 - 3600);
+        auto_checks(&mut c, false);
+        assert_eq!(c.count("check"), 0);
+        assert_eq!(c.count("save"), 0);
+    }
+
+    /// AC-13: with `auto_update` off nothing is checked or saved; turned on
+    /// while the instance runs, the next look checks.
+    #[test]
+    fn auto_update_off_checks_nothing() {
+        let mut c = Clock::new(1 + 30, &[false]);
+        auto_checks(&mut c, true);
+        assert_eq!((c.count("check"), c.count("save")), (0, 0), "{:?}", c.log);
+        let mut c = Clock::new(1 + 20, &[false, false, true]);
+        auto_checks(&mut c, true);
+        let checks: Vec<_> = c.log.iter().filter(|l| l.starts_with("check")).collect();
+        assert_eq!(checks, ["check at 7210"]);
     }
 
     #[test]
