@@ -96,8 +96,8 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 | AC-15 | `an_unknown_subcommand_prints_the_usage_and_exits_2`, `batch_with_an_unknown_format_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-16 | `.github/workflows/ci.yml`, job `windows`, steps `Generate corpus` … `upload-artifact` | built | |
 | AC-17 | CI step `App benchmark (offscreen, WARP)` (Windows job, fails on a non-zero exit) | built | |
-| AC-18 | `the_report_holds_every_measurement` (`crates/blinzel-app/src/bench.rs`), CI: Windows — written, not run yet | open | |
-| AC-19 | `the_report_holds_every_measurement` (a file that does not probe), `a_failing_step_ends_the_run_with_exit_code_1`, `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`), CI: Windows — written, not run yet | open | |
+| AC-18 | `the_report_holds_every_measurement` (`crates/blinzel-app/src/bench.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built | |
+| AC-19 | `the_report_holds_every_measurement` (a file that does not probe), `a_failing_step_ends_the_run_with_exit_code_1`, `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built | |
 
 ## Decisions
 

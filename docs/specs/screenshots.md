@@ -86,28 +86,28 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
 | AC-01 | `menu_settings_offers_each_platforms_entries` (`crates/blinzel-ui/src/app_settings_tests.rs`), `the_tray_menu_shows_opens_takes_screenshots_and_exits` (`crates/blinzel-ui/src/app_resident_tests.rs`), `screenshot_actions_do_nothing_on_linux` (`crates/blinzel-app/src/linux/shell.rs`) | built |        |
-| AC-02 | `print_and_ctrl_shift_print_open_the_overlay_in_resident_mode` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet | open   |        |
-| AC-03 | `a_taken_print_key_is_retried_for_a_minute_then_reported` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet; the notice's way (balloon while hidden, `hint_pending` for the next wake, 9 s in the window) has no test | open   |        |
-| AC-04 | `cmd_shift_1_opens_the_overlay_or_says_the_menu_bar_icon_still_works` (`crates/blinzel-app/src/macos/hotkey.rs`), CI: macOS — written, not run yet | open   |        |
+| AC-02 | `print_and_ctrl_shift_print_open_the_overlay_in_resident_mode` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-03 | `a_taken_print_key_is_retried_for_a_minute_then_reported` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`); the notice's way (balloon while hidden, `hint_pending` for the next wake, 9 s in the window) has no test | open   |        |
+| AC-04 | `cmd_shift_1_opens_the_overlay_or_says_the_menu_bar_icon_still_works` (`crates/blinzel-app/src/macos/hotkey.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-05 | `turning_the_screenshot_key_on_turns_resident_mode_on_too` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) | built |        |
 | AC-06 | `the_tray_entries_take_the_screen_or_open_the_overlay` (`crates/blinzel-ui/src/app_screenshot_tests.rs`), `the_whole_screen_is_the_monitor_under_the_pointer` (`crates/blinzel-ui/src/snip.rs`) | built |        |
-| AC-07 | `a_screenshot_freezes_the_virtual_desktop_under_a_cloaked_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet | open   |        |
-| AC-08 | `each_display_gets_a_panel_above_the_menu_bar_and_keeps_its_selection`, `a_frozen_picture_is_converted_to_srgb`, `every_display_is_frozen` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS — written, not run yet | open   |        |
+| AC-07 | `a_screenshot_freezes_the_virtual_desktop_under_a_cloaked_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-08 | `each_display_gets_a_panel_above_the_menu_bar_and_keeps_its_selection`, `a_frozen_picture_is_converted_to_srgb`, `every_display_is_frozen` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-09 | `quartz_frames_count_down_from_the_main_display`, `windows_map_into_display_pixels`, `crops_rows` (`crates/blinzel-app/src/macos/screenshot.rs`), macOS CI job | built |        |
 | AC-10 | `a_click_takes_the_frontmost_window_or_the_monitor` (`crates/blinzel-ui/src/snip.rs`), Linux CI job and all others | built |        |
 | AC-11 | `drags_a_region_in_any_direction` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-12 | `enter_takes_the_monitor_escape_cancels`, `arrows_move_the_pointer_and_enter_finishes_a_drag` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-13 | `arrows_move_the_pointer_and_enter_finishes_a_drag` (`crates/blinzel-ui/src/snip.rs`) | built |        |
-| AC-14 | `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet; `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS — written, not run yet | open   |        |
-| AC-15 | `a_shot_that_misses_the_clipboard_or_its_file_says_why` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) covers the notice; `a_screenshot_goes_on_the_clipboard_as_dibv5_and_png` (`crates/blinzel-app/src/clipboard.rs`), CI: Windows — written, not run yet; `a_screenshot_goes_on_the_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`), CI: macOS — written, not run yet | open   |        |
+| AC-14 | `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`); `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-15 | `a_shot_that_misses_the_clipboard_or_its_file_says_why` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) covers the notice; `a_screenshot_goes_on_the_clipboard_as_dibv5_and_png` (`crates/blinzel-app/src/clipboard.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`); `a_screenshot_goes_on_the_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-16 | `destination_follows_the_settings` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
 | AC-17 | `writes_free_names_and_sweeps_old_shots` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
-| AC-18 | `the_folder_is_the_chosen_one_else_the_systems`, `the_file_is_named_after_the_time_in_the_ui_language` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet; `the_folder_is_the_chosen_one_else_pictures_screenshots`, `the_file_is_named_after_the_time_in_the_ui_language` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS — written, not run yet | open   |        |
+| AC-18 | `the_folder_is_the_chosen_one_else_the_systems`, `the_file_is_named_after_the_time_in_the_ui_language` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`); `the_folder_is_the_chosen_one_else_pictures_screenshots`, `the_file_is_named_after_the_time_in_the_ui_language` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-19 | `a_shot_into_the_cache_sweeps_its_old_pngs_first`, `writes_free_names_and_sweeps_old_shots` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
 | AC-20 | `a_shot_opens_in_the_viewer_or_says_it_was_copied_then_goes_to_the_editor` (`crates/blinzel-ui/src/app_screenshot_tests.rs`), `edit_asks_for_an_editor_first` (`crates/blinzel-ui/src/app.rs`) | built |        |
 | AC-21 |      | open   |        |
 | AC-22 | CI step "Screenshot capture test" (Windows job, `.github/workflows/ci.yml`) | built |        |
-| AC-23 | `the_capture_test_exits_0_with_its_size_else_1` (`crates/blinzel-app/src/macos/screenshot.rs`) and the CI step "Screenshot capture test" (macOS job: exit code, PNG signature, ≥ 640 × 480), CI: macOS — written, not run yet | open |        |
+| AC-23 | `the_capture_test_exits_0_with_its_size_else_1` (`crates/blinzel-app/src/macos/screenshot.rs`) and the CI step "Screenshot capture test" (macOS job: exit code, PNG signature, ≥ 640 × 480), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 
 ## Decisions
 

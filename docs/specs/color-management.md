@@ -103,7 +103,7 @@ This spec records what the code does today.
 | AC-16 | `a_new_monitor_retargets_and_redraws` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux | built | |
 | AC-17 | `the_setting_switches_conversion_on_the_next_frame` (`crates/blinzel-ui/src/app_color_tests.rs`), `menu_settings_offers_each_platforms_entries`, `each_check_item_is_checked_when_its_setting_is_on` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux | built | |
 | AC-18 | `a_failed_build_is_not_retried_until_the_target_changes` (`crates/blinzel-ui/src/color.rs`), `no_transform_for_grey_cmyk_or_broken_profiles` (`crates/blinzel-app/src/lcms.rs`), CI: Linux, macOS | built | |
-| AC-19 | `the_warm_up_builds_one_display_p3_transform` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux, built; `a_resident_start_warms_up_once_before_the_hint_frame` (`crates/blinzel-app/src/run.rs`, `warm_resident`: the `--resident` branch's warm-up runs once, before the hint frame), CI: Windows — written, not run yet | built | |
+| AC-19 | `the_warm_up_builds_one_display_p3_transform` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux, built; `a_resident_start_warms_up_once_before_the_hint_frame` (`crates/blinzel-app/src/run.rs`, `warm_resident`: the `--resident` branch's warm-up runs once, before the hint frame), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built | |
 
 ## Decisions
 

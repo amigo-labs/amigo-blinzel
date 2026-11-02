@@ -81,16 +81,16 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | `windows_11_24h2_and_newer_are_supported`, `the_build_number_is_the_real_one` (`crates/blinzel-app/src/platform/os.rs`), `an_unsupported_windows_refuses_the_install_with_2` (`crates/blinzel-app/src/setup/mod.rs`), CI: Windows — written, not run yet | open |        |
-| AC-02 | `the_executable_embeds_its_application_manifest` (`crates/blinzel-app/tests/manifest.rs`), CI: Windows — written, not run yet | open |        |
-| AC-03 | `the_plain_window_resizes_at_the_top_and_moves_on_the_free_strip` (`crates/blinzel-app/src/window.rs`), CI: Windows — written, not run yet | open |        |
-| AC-04 | `maximized_stays_on_the_monitor_and_full_screen_has_no_caption` (`crates/blinzel-app/src/window.rs`), CI: Windows — written, not run yet | open |        |
+| AC-01 | `windows_11_24h2_and_newer_are_supported`, `the_build_number_is_the_real_one` (`crates/blinzel-app/src/platform/os.rs`), `an_unsupported_windows_refuses_the_install_with_2` (`crates/blinzel-app/src/setup/mod.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-02 | `the_executable_embeds_its_application_manifest` (`crates/blinzel-app/tests/manifest.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-03 | `the_plain_window_resizes_at_the_top_and_moves_on_the_free_strip` (`crates/blinzel-app/src/window.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-04 | `maximized_stays_on_the_monitor_and_full_screen_has_no_caption` (`crates/blinzel-app/src/window.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-05 |      | open   |        |
 | AC-06 |      | open   |        |
 | AC-07 | `restores_on_an_existing_monitor_only` (`crates/blinzel-app/tests/placement.rs`), Windows CI job | built |        |
-| AC-08 | `remembers_the_normal_rect_and_whether_it_is_maximized` (`crates/blinzel-app/tests/placement.rs`), `full_screen_remembers_the_rect_from_before` (`crates/blinzel-app/src/window.rs`), CI: Windows — written, not run yet | open |        |
+| AC-08 | `remembers_the_normal_rect_and_whether_it_is_maximized` (`crates/blinzel-app/tests/placement.rs`), `full_screen_remembers_the_rect_from_before` (`crates/blinzel-app/src/window.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-09 | `warp_golden.rs`: `ycc_subsamplings_with_tile_seams`, `all_orientations_minified`, `zoom_crop_gray_and_alpha`, `heavy_minification_uses_box_filter`, `overlay_shapes_and_text_render`, `colour_transform_lut`, Windows CI job | built |        |
-| AC-10 | CI step "Startup smoke test (window, first frame)" of the Windows job, no longer `continue-on-error` — not run yet | open |        |
+| AC-10 | CI step "Startup smoke test (window, first frame)" of the Windows job, no longer `continue-on-error` — Windows job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-11 | `the_edges_resize_the_plain_window_only`, `a_press_resizes_moves_or_goes_to_the_app` (`crates/blinzel-app/src/linux/shell.rs`); `a_double_click_below_the_caption_strip_toggles_full_screen` (`crates/blinzel-ui/src/app_viewing_tests.rs`, the App answers none on the strip) | built |        |
 | AC-12 | `keyboard_skips_separators_and_disabled_items`, `mouse_opens_submenus_and_chooses`, `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), Linux CI job | built |        |
 | AC-13 |      | open   |        |
@@ -101,7 +101,7 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 | AC-18 | CI step "Linux viewer smoke test" (Linux job) | built |        |
 | AC-19 | `system_buttons_leave_the_menu_alone` (`crates/blinzel-ui/src/chrome.rs`), Linux CI job and all others | built |        |
 | AC-20 |      | open   |        |
-| AC-21 | `a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed`, `a_copy_lands_on_the_general_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`); `delete_moves_the_file_away_and_shows_the_one_that_took_its_place` (`crates/blinzel-ui/src/app_viewing_tests.rs`), CI: macOS — written, not run yet | open |        |
+| AC-21 | `a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed`, `a_copy_lands_on_the_general_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`); `delete_moves_the_file_away_and_shows_the_one_that_took_its_place` (`crates/blinzel-ui/src/app_viewing_tests.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-22 |      | open   |        |
 | AC-23 | `metal_golden.rs`: the same six tests, macOS CI job (`BLINZEL_REQUIRE_GPU=1`) | built |        |
 | AC-24 | CI step "App bundle and smoke test (window, first frame)" (macOS job) | built |        |
