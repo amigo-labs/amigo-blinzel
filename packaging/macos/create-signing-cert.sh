@@ -26,6 +26,13 @@
 # Bash on Windows, on macOS and on Linux; the key never goes into a
 # repository.
 
+# Sourced ("source" or "."), `set -e` and `exit` would hit the terminal's
+# own shell and close it.
+if (return 0 2>/dev/null); then
+    echo "run it, do not source it: bash ${BASH_SOURCE[0]} $*" >&2
+    return 1
+fi
+
 set -euo pipefail
 
 NAME="amigo-labs"
