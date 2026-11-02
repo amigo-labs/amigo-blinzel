@@ -126,7 +126,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | AC-17 | `probe_reports_the_orientation` (`crates/blinzel-core/src/decode/mod.rs`), `exif_orientation_is_probed` (`crates/blinzel-core/src/decode/webp.rs`), CI: Linux | built | |
 | AC-18 | `tiff_raws_list_their_jpegs`, `image_size_trusts_exif_only_with_the_previews_aspect`, `raf_header_and_records`, `cr3_boxes`, `garbage_yields_nothing` (`crates/blinzel-core/src/raw.rs`), CI: Linux | built | |
 | AC-19 | `jpeg_previews_from_exif_and_mpf` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
-| AC-20 | — | open | |
+| AC-20 | `a_raw_preview_that_covers_the_stage_is_the_stage_and_the_system_decoder_is_not_asked`, `a_raw_preview_that_covers_half_the_screen_box_shows_first_and_the_developed_size_wins`, `a_jpeg_preview_shows_first_only_with_under_a_third_of_the_pixels`, `the_next_image_gets_its_preview_first_and_later_ones_do_not` (`crates/blinzel-ui/src/app_format_tests.rs`), CI: Linux | built | |
 | AC-21 | — | open | |
 | AC-22 | — | open | |
 | AC-23 | — | open | |
@@ -138,3 +138,5 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 - 2026-11-02: AC-03, AC-17 and AC-19 described behavior the code already had, so their tests were green at once; each was checked by breaking the code it covers (the 12-bit check, the CR2/sub-IFD/DNG checks, the ICO signature, the EXIF/WebP/JPEG XL orientation, the 8-bit/lossless/duplicate filters, the sort and `full_width`), which turned it red.
 - 2026-11-02: The JPEG XL orientation fixture `crates/blinzel-core/testdata/orient6-4x2.jxl` (84 bytes, container with an `Exif` box) was made with `cjxl -d 0` (libjxl 0.7) from a 4 × 2 PNG with an `eXIf` orientation 6; `jxlinfo` shows orientation 6 in the codestream header.
 - 2026-11-02: An AVIF with major brand `mif1`/`msf1` counts as AVIF when its compatible brands (inside the `ftyp` box) name `avif`/`avis` and no HEVC brand; a file naming both stays HEIF, since zune-heic or the system decoder can then still try it.
+- 2026-11-02: AC-20 described behavior the loader already had, so its tests were green at once; each was checked by breaking the code it covers (the 1 % tolerance, the raw-only covering preview, the developed size from the decoder, the half-screen-box and one-third rules, the preview flag of the next image), which turned it red. The harness's stand-in system decoder (`Harness::set_system_decoder`) develops what the native decoders refuse to a given size; the raws are RAFs (`testkit::raf`) the native probe reads.
+- 2026-11-02: The image one step against the browsing direction gets its preview first too (`wanted_jobs`, browsing AC-06); AC-20 names only the next one, so its test checks the next image and one two ahead.

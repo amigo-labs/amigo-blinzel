@@ -29,7 +29,7 @@ use blinzel_core::geom::{Affine, Orientation, Rect};
 use blinzel_core::icc::Profile;
 use blinzel_core::layout::{Layout, ViewMode, ViewState};
 use blinzel_core::lut::Lut3d;
-use blinzel_core::pixel::Image;
+use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 use blinzel_core::settings::Settings;
 use blinzel_i18n::Lang;
 
@@ -272,6 +272,9 @@ pub(crate) struct FakeServices {
     pub decodes: Mutex<Vec<((u32, u32), usize)>>,
     /// Embedded previews the probe reports, by file length.
     pub previews: Mutex<HashMap<usize, EmbeddedPreview>>,
+    /// A stand-in system decoder: what the native decoders report as not
+    /// decoded natively (a raw's sensor data) develops to this size.
+    pub develops: Mutex<Option<(u32, u32)>>,
 }
 
 impl FakeServices {
@@ -317,7 +320,12 @@ impl Services for FakeServices {
         if let Some(e) = self.decode_error.lock().unwrap().clone() {
             return Err(e);
         }
-        decode::decode_with(data, req, threads)
+        match decode::decode_with(data, req, threads) {
+            Err(DecodeError::Unsupported(_)) if let Some(size) = *self.develops.lock().unwrap() => {
+                Ok(developed(size, req))
+            }
+            r => r,
+        }
     }
     fn log(&self, msg: &str) {
         eprintln!("blinzel: {msg}");
@@ -336,6 +344,27 @@ impl Services for FakeServices {
     }
     fn utc_offset(&self, _t: std::time::SystemTime) -> i32 {
         self.utc_offset.load(Ordering::Relaxed)
+    }
+}
+
+/// What the stand-in system decoder makes of a file it develops to
+/// `size`: a gray image of that size, or fitted to a `Fit` request.
+fn developed(size: (u32, u32), req: Request) -> Image {
+    let (w, h) = match req {
+        Request::Fit { w, h } => (w.min(size.0), h.min(size.1)),
+        _ => size,
+    };
+    Image {
+        pixels: Pixels::Packed {
+            plane: Plane::new(w, h, 1),
+            format: PackedFormat::Gray8,
+            alpha: Alpha::Opaque,
+        },
+        width: w,
+        height: h,
+        full_width: size.0,
+        full_height: size.1,
+        region: None,
     }
 }
 
@@ -395,6 +424,26 @@ pub(crate) fn jpeg(w: u32, h: u32) -> Vec<u8> {
     };
     let rgb = blinzel_core::testimg::rgb(w, h);
     blinzel_core::decode::jpeg::encode_rgb(&rgb, w, h, opts).unwrap()
+}
+
+/// A Fujifilm RAF whose header points at `preview` (a JPEG) and whose
+/// cropped-size record says `size`: a camera raw only the system decoder
+/// develops.
+pub(crate) fn raf(preview: &[u8], size: (u16, u16)) -> Vec<u8> {
+    let mut d = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+    d.resize(200, 0);
+    let meta = 200 + preview.len() as u32;
+    d[84..88].copy_from_slice(&200u32.to_be_bytes());
+    d[88..92].copy_from_slice(&(preview.len() as u32).to_be_bytes());
+    d[92..96].copy_from_slice(&meta.to_be_bytes());
+    d.extend_from_slice(preview);
+    // One record: 0x111, the cropped size (height, width).
+    d.extend(1u32.to_be_bytes());
+    d.extend(0x111u16.to_be_bytes());
+    d.extend(4u16.to_be_bytes());
+    d.extend(size.1.to_be_bytes());
+    d.extend(size.0.to_be_bytes());
+    d
 }
 
 /// An animated GIF of `w` × `h`: one frame per entry of `delays`
@@ -611,6 +660,7 @@ impl Harness {
             decode_error: Mutex::new(None),
             decodes: Mutex::new(Vec::new()),
             previews: Mutex::new(HashMap::new()),
+            develops: Mutex::new(None),
         });
         let device = Arc::new(FakeDevice {
             budget,
@@ -1081,6 +1131,13 @@ impl Harness {
             .lock()
             .unwrap()
             .insert(file_len, p);
+    }
+
+    /// A stand-in system decoder develops what the native decoders do not
+    /// handle to `size` from now on (`None`: no system decoder, as on
+    /// Linux).
+    pub fn set_system_decoder(&self, size: Option<(u32, u32)>) {
+        *self.app.services.develops.lock().unwrap() = size;
     }
 
     /// Decodes so far: the image's size and the threads it was given.

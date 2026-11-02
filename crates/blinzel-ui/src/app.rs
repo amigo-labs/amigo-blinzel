@@ -2559,6 +2559,10 @@ mod viewing_tests;
 mod browsing_tests;
 
 #[cfg(test)]
+#[path = "app_format_tests.rs"]
+mod format_tests;
+
+#[cfg(test)]
 #[path = "app_startup_tests.rs"]
 mod startup_tests;
 
