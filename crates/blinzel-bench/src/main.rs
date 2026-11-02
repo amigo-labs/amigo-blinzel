@@ -314,7 +314,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 let info = blinzel_jpeg::parse(&data).map_err(|e| format!("{name}: {e}"))?;
                 if verify
                     && blinzel_jpeg::is_supported(&info)
-                    && let Err(e) = verify_own_jpeg(&data, cpus)
+                    && let Err(e) = verify_own_jpeg(&data)
                 {
                     mismatches.push(format!("  {name}: {e}"));
                 }
@@ -587,11 +587,22 @@ fn run(args: &[String]) -> Result<(), String> {
 /// blinzel-jpeg, decoding in parallel, must reproduce libjpeg-turbo's
 /// planes exactly; the corpus has the file sizes where every parallel code
 /// path (speculation, retries, restart markers) actually runs.
-fn verify_own_jpeg(data: &[u8], threads: usize) -> Result<(), String> {
+fn verify_own_jpeg(data: &[u8]) -> Result<(), String> {
+    verify_own_jpeg_with(data, own_jpeg)
+}
+
+/// [`verify_own_jpeg`] with blinzel-jpeg's decode (`ours(data, scale,
+/// threads)`) passed in, so a test sees what it is asked for: full size and
+/// 1/8, each on all logical CPUs (benchmark-gate AC-04).
+fn verify_own_jpeg_with(
+    data: &[u8],
+    mut ours: impl FnMut(&[u8], u32, usize) -> Vec<PoolBuf>,
+) -> Result<(), String> {
     let info = blinzel_jpeg::parse(data).map_err(|e| e.to_string())?;
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     for scale in [8, 1] {
         let layouts = blinzel_jpeg::plane_layouts(&info, scale);
-        let ours = own_jpeg(data, scale, threads);
+        let ours = ours(data, scale, threads);
         let req = Request::Fit {
             w: blinzel_jpeg::scaled(info.width, scale),
             h: blinzel_jpeg::scaled(info.height, scale),
@@ -1173,6 +1184,21 @@ mod tests {
             assert!(e.contains(part), "{part} missing from {e}");
         }
         assert!(e.contains("built without optimization"), "{e}");
+    }
+
+    /// AC-04: `--check` compares blinzel-jpeg at full size and at 1/8,
+    /// decoding on all logical CPUs.
+    #[test]
+    fn check_verifies_full_size_and_one_eighth_on_all_logical_cpus() {
+        let jpeg = render(Content::Jpeg(EncodeOptions::default()), 64, 48);
+        let mut asked = Vec::new();
+        let r = verify_own_jpeg_with(&jpeg, |data, scale, threads| {
+            asked.push((scale, threads));
+            own_jpeg(data, scale, threads)
+        });
+        assert_eq!(r, Ok(()));
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(asked, [(8, cpus), (1, cpus)]);
     }
 
     #[test]
