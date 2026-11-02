@@ -130,7 +130,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | AC-21 | — | open | |
 | AC-22 | — | open | |
 | AC-23 | — | open | |
-| AC-24 | — | open | |
+| AC-24 | `without_a_system_decoder_raws_keep_their_previews_and_other_files_fail` (`crates/blinzel-app/src/linux/shell.rs`), `without_a_system_decoder_a_raw_shows_its_preview_and_other_files_fail` (`crates/blinzel-ui/src/app_format_tests.rs`), CI: Linux | built | |
 
 ## Decisions
 
@@ -140,3 +140,4 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 - 2026-11-02: An AVIF with major brand `mif1`/`msf1` counts as AVIF when its compatible brands (inside the `ftyp` box) name `avif`/`avis` and no HEVC brand; a file naming both stays HEIF, since zune-heic or the system decoder can then still try it.
 - 2026-11-02: AC-20 described behavior the loader already had, so its tests were green at once; each was checked by breaking the code it covers (the 1 % tolerance, the raw-only covering preview, the developed size from the decoder, the half-screen-box and one-third rules, the preview flag of the next image), which turned it red. The harness's stand-in system decoder (`Harness::set_system_decoder`) develops what the native decoders refuse to a given size; the raws are RAFs (`testkit::raf`) the native probe reads.
 - 2026-11-02: The image one step against the browsing direction gets its preview first too (`wanted_jobs`, browsing AC-06); AC-20 names only the next one, so its test checks the next image and one two ahead.
+- 2026-11-02: AC-24 is tested headless: the Linux services' probe and decode are free functions in `linux/shell.rs` (`probe`, `decode_with`) that the trait methods call, so no display is needed. The App-level half runs on the harness, whose services have no system decoder unless a test sets one, like Linux. Both were green at once (the behavior existed) and turned red when the shell function masked "not decoded natively", dropped the raw's previews, or the loader skipped the preview.

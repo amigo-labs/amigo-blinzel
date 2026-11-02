@@ -143,3 +143,39 @@ fn the_next_image_gets_its_preview_first_and_later_ones_do_not() {
     assert!(h.app.has_stage(next, Stage::Preview), "the next image");
     assert!(!h.app.has_stage(later, Stage::Preview), "two ahead");
 }
+
+/// AC-24: without a system decoder (Linux, whose shell hands the loader
+/// the native decoders only) a raw shows its embedded preview, and a file
+/// the native decoders do not handle says why.
+#[test]
+fn without_a_system_decoder_a_raw_shows_its_preview_and_other_files_fail() {
+    let mut h = Harness::new();
+    h.write_file("a.raf", &raf(&jpeg(1000, 667), (6240, 4160)));
+    // An ICO header: recognized, not decoded natively.
+    h.write_file("b.ico", &[0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0]);
+    h.open("a.raf");
+    let drawn = &h.frame().images;
+    assert_eq!(drawn.len(), 1);
+    assert_eq!(
+        (drawn[0].size, drawn[0].full_size),
+        ((1000, 667), (6240, 4160))
+    );
+    assert!(h.frame().texts.is_empty(), "no error over the preview");
+    assert_eq!(
+        h.decodes(),
+        [((6240, 4160), 2)],
+        "the sensor data was tried"
+    );
+
+    h.open("b.ico");
+    let id = current_id(&h);
+    assert_eq!(h.app.error_of(id), Some("Ico is not decoded natively"));
+    assert!(h.frame().images.is_empty());
+    // The window shows it in words of its own (viewing.md).
+    assert!(
+        h.frame()
+            .texts
+            .iter()
+            .any(|t| t.starts_with("Could not open “b.ico”"))
+    );
+}
