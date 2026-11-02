@@ -141,6 +141,13 @@ fn is_traditional_chinese(tag: &str) -> bool {
     parts.next() == Some("zh") && parts.any(|p| matches!(p, "hant" | "tw" | "hk" | "mo"))
 }
 
+/// The UI language for the `language` setting: the shipped language it
+/// names, otherwise (no setting, `auto`, or a language that is not
+/// shipped) `system()`, which is only asked then.
+pub fn choose(setting: Option<&str>, system: impl FnOnce() -> Lang) -> Lang {
+    setting.and_then(lang_from_code).unwrap_or_else(system)
+}
+
 /// Looks up a language by its code (`"de"`), case-insensitively.
 pub fn lang_from_code(code: &str) -> Option<Lang> {
     Lang::ALL
@@ -315,6 +322,17 @@ mod tests {
     fn tr_n(lang: Lang, cat: Category, n: u64) -> String {
         let text = PLURAL_TABLE[lang as usize][PluralMsg::ImagesCount as usize][cat as usize];
         fill(text, &[("n", &n)])
+    }
+
+    #[test]
+    fn a_setting_without_a_shipped_language_asks_the_system() {
+        let (de, ja) = (lang_from_code("de").unwrap(), lang_from_code("ja").unwrap());
+        let unasked = || -> Lang { panic!("the system is not asked") };
+        assert_eq!(choose(Some("de"), unasked), de);
+        assert_eq!(choose(Some("DE"), unasked), de);
+        for setting in [None, Some("auto"), Some(""), Some("xx")] {
+            assert_eq!(choose(setting, || ja), ja, "{setting:?}");
+        }
     }
 
     #[test]

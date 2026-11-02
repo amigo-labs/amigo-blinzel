@@ -414,12 +414,10 @@ impl<B: Backend> App<B> {
     pub fn reload_settings(&mut self) {
         self.settings = settings_store::load();
         self.color.set_enabled(self.settings.color_management);
-        let lang = self
-            .settings
-            .language
-            .as_deref()
-            .and_then(blinzel_i18n::lang_from_code);
-        blinzel_i18n::set_lang(lang.unwrap_or_else(|| self.services.system_language()));
+        blinzel_i18n::set_lang(blinzel_i18n::choose(
+            self.settings.language.as_deref(),
+            || self.services.system_language(),
+        ));
     }
 
     /// The viewer exits normally: writes the settings file once more,

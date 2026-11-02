@@ -1783,12 +1783,10 @@ pub fn run() -> i32 {
         return 0;
     }
     let resident_start = args.resident;
-    let lang = settings
-        .language
-        .as_deref()
-        .and_then(blinzel_i18n::lang_from_code)
-        .unwrap_or_else(system_language);
-    blinzel_i18n::set_lang(lang);
+    blinzel_i18n::set_lang(blinzel_i18n::choose(
+        settings.language.as_deref(),
+        system_language,
+    ));
     if super::update::on_start() {
         return 0;
     }
