@@ -41,7 +41,7 @@ type Img<B> = <<B as Backend>::Device as Device>::Image;
 type Lut<B> = <<B as Backend>::Device as Device>::Lut;
 
 /// Deferred work that may re-enter the window procedure.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     ShowMenu {
         x: i32,
@@ -126,7 +126,7 @@ fn edit_action(editor: Option<&str>, file: PathBuf) -> Action {
 }
 
 /// A cutout to save (selection, otherwise the view crop).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SaveJob {
     pub source: PathBuf,
     pub cut: blinzel_core::export::Cutout,
@@ -2276,9 +2276,51 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
     }
 }
 
+/// Read access to private state for the headless harness
+/// ([`crate::testkit`]); nothing here changes behaviour.
+#[cfg(test)]
+impl<B: Backend> App<B> {
+    /// The folder listing is still running.
+    pub(crate) fn is_listing(&self) -> bool {
+        self.list_rx.is_some()
+    }
+
+    /// The current folder's images, in browsing order.
+    pub(crate) fn list(&self) -> &FileList {
+        &self.list
+    }
+
+    /// The selection, in oriented image coordinates.
+    pub(crate) fn selection(&self) -> Option<Rect> {
+        self.selection
+    }
+
+    /// The user's rotation on top of the file's orientation.
+    pub(crate) fn user_rotation(&self) -> Orientation {
+        self.user_rotation
+    }
+
+    /// The layout of the image on screen, once one is loaded.
+    pub(crate) fn current_layout(&self) -> Option<Layout> {
+        self.layout()
+    }
+
+    /// Why image `cache_id` could not be shown (0: opening failed).
+    pub(crate) fn error_of(&self, cache_id: u64) -> Option<&str> {
+        self.failed.get(&cache_id).map(String::as_str)
+    }
+
+    /// A texture of `stage` is cached for image `cache_id`.
+    pub(crate) fn has_stage(&self, cache_id: u64, stage: Stage) -> bool {
+        self.textures.contains(&loader::key(cache_id, stage))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{Harness, IMAGE_SIZE};
+    use Key::*;
 
     #[test]
     fn edit_asks_for_an_editor_first() {
@@ -2294,5 +2336,69 @@ mod tests {
             }
             a => panic!("{a:?}"),
         }
+    }
+
+    #[test]
+    fn opening_loads_the_image_and_the_folder() {
+        let h = Harness::with_images(&["b.png", "a.png", "c.png"]);
+        assert_eq!(h.current_name().as_deref(), Some("b.png"));
+        assert_eq!(h.names(), ["a.png", "b.png", "c.png"]);
+        let cur = h.app.current.as_ref().unwrap();
+        assert_eq!(cur.index, Some(1));
+        assert!(h.app.has_stage(cur.cache_id, Stage::Screen));
+        let frame = h.frame();
+        assert_eq!(frame.images.len(), 1);
+        assert_eq!(frame.images[0].full_size, IMAGE_SIZE);
+        assert!(h.host().title.contains("b.png"));
+        assert!(h.actions().contains(&Action::Uncloak));
+    }
+
+    #[test]
+    fn arrows_step_through_the_folder() {
+        let mut h = Harness::with_images(&["a.png", "b.png", "c.png"]);
+        h.key(Right);
+        assert_eq!(h.current_name().as_deref(), Some("b.png"));
+        h.key(Right);
+        assert_eq!(h.current_name().as_deref(), Some("c.png"));
+        h.key(Left);
+        assert_eq!(h.current_name().as_deref(), Some("b.png"));
+        assert_eq!(h.current_path(), Some(h.images.join("b.png")));
+    }
+
+    #[test]
+    fn home_and_end_jump_to_the_first_and_last_image() {
+        let mut h = Harness::with_images(&["a.png", "b.png", "c.png", "d.png"]);
+        h.open("b.png");
+        h.key(End);
+        assert_eq!(h.current_name().as_deref(), Some("d.png"));
+        h.key(Home);
+        assert_eq!(h.current_name().as_deref(), Some("a.png"));
+    }
+
+    #[test]
+    fn digits_switch_the_view_mode_and_save_it() {
+        let mut h = Harness::with_images(&["a.png"]);
+        assert_eq!(h.mode(), ViewMode::FitImageToWindow);
+        h.key(Digit(3));
+        assert_eq!(h.mode(), ViewMode::ActualSize);
+        assert_eq!(h.menu_state().mode, ViewMode::ActualSize);
+        assert_eq!(h.layout().unwrap().scale, 1.0);
+        assert_eq!(h.saved_settings().unwrap().view.mode, ViewMode::ActualSize);
+        h.key(Digit(1));
+        assert_eq!(h.mode(), ViewMode::FitWindowToImage);
+        h.key(Digit(2));
+        assert_eq!(
+            h.saved_settings().unwrap().view.mode,
+            ViewMode::FitImageToWindow
+        );
+    }
+
+    #[test]
+    fn ctrl_o_asks_for_a_file_and_escape_closes() {
+        let mut h = Harness::with_images(&["a.png"]);
+        assert_eq!(h.ctrl(Letter('O')), [Action::OpenDialog]);
+        assert_eq!(h.key(Escape), [Action::Close]);
+        // An unbound key is left to the platform.
+        assert!(h.press(Letter('Q'), false, false).is_none());
     }
 }

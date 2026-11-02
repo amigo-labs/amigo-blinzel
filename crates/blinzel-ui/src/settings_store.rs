@@ -6,7 +6,26 @@ use std::path::PathBuf;
 use blinzel_core::settings::Settings;
 
 pub fn path() -> Option<PathBuf> {
-    crate::dirs::config().map(|d| d.join("settings.toml"))
+    config_dir().map(|d| d.join("settings.toml"))
+}
+
+#[cfg(not(test))]
+fn config_dir() -> Option<PathBuf> {
+    crate::dirs::config()
+}
+
+/// Unit tests never touch the real settings file: the folder is the one
+/// this thread set in [`TEST_CONFIG_DIR`] (the test harness's temp folder),
+/// or none.
+#[cfg(test)]
+fn config_dir() -> Option<PathBuf> {
+    TEST_CONFIG_DIR.with(|d| d.borrow().clone())
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_CONFIG_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Loads settings (defaults if missing or unreadable; never fails).
