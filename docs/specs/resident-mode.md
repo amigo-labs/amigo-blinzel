@@ -55,7 +55,7 @@ Opening an image costs a process start, a GPU device and the first use of shader
 - [ ] AC-20 (event, CI: windows): When started with `--resident`, the viewer shows no window and no taskbar button, and before idling decodes, uploads and presents a generated 3072 × 2048 JPEG once and, with colour management on, builds one colour transform (Display P3 → sRGB), so the platform's colour system is loaded.
 - [ ] AC-21 (event): When a window hides while an update has been installed whose version differs from the running one, the instance starts the installed version with `--resident` (macOS: `open -n -g <bundle> --args --resident`) and ends.
 - [ ] AC-22 (state): While the window is hidden, messages for the user (screenshot copied or failed, screenshot key taken) appear as a tray balloon (Windows) or for 4 s as a title next to the menu bar icon (macOS) instead of an in-window notice.
-- [ ] AC-23 (event): When a second launch hands a 24 MP JPEG to a warm hidden instance on an idle Windows 11 machine, the window is visible ≤ 25 ms after the instance received the handoff (median over repeated handoffs of `handoff_received` → `uncloak` in the marks file of an instance started with `blinzel.exe --resident --json <file>`).
+- [ ] AC-23 (event, manual: measurement): When a second launch hands a 24 MP JPEG to a warm hidden instance on an idle Windows 11 machine, the window is visible ≤ 25 ms after the instance received the handoff (median over repeated handoffs of `handoff_received` → `uncloak` in the marks file of an instance started with `blinzel.exe --resident --json <file>`).
 
 ## Technical notes
 
@@ -95,7 +95,7 @@ Opening an image costs a process start, a GPU device and the first use of shader
 | AC-10 | `a_woken_instance_reloads_the_settings_from_disk` (`crates/blinzel-ui/src/app_resident_tests.rs`) | built |        |
 | AC-11 | `exiting_writes_the_settings_once_more` (`crates/blinzel-ui/src/app_settings_tests.rs`, its Windows branch), `closing_hides_a_resident_window_unless_another_one_is_hidden` (`crates/blinzel-app/src/window.rs`), CI: Windows — written, not run yet | open   |        |
 | AC-12 | `the_tray_menu_shows_opens_takes_screenshots_and_exits` (`crates/blinzel-ui/src/app_resident_tests.rs`) | built |        |
-| AC-13 |      | open   |        |
+| AC-13 | `the_tray_icon_shows_the_window_or_opens_its_menu` (`crates/blinzel-app/src/resident.rs`), CI: Windows — written, not run yet; "Show" as the menu's default item and the re-add after `TaskbarCreated` have no test yet | open   |        |
 | AC-14 |      | open   |        |
 | AC-15 | `installs_updates_and_uninstalls_in_a_sandbox` (`crates/blinzel-app/tests/setup.rs`), Windows CI job | built |        |
 | AC-16 |      | open   |        |
@@ -105,7 +105,7 @@ Opening an image costs a process start, a GPU device and the first use of shader
 | AC-20 |      | open   |        |
 | AC-21 |      | open   |        |
 | AC-22 |      | open   |        |
-| AC-23 |      | open   |        |
+| AC-23 | manual: measurement (Windows 11, `blinzel.exe --resident --json <file>`, median `handoff_received` → `uncloak`) | open   |        |
 
 ## Decisions
 
@@ -116,3 +116,5 @@ Opening an image costs a process start, a GPU device and the first use of shader
 - AC-03, AC-04, AC-11: the Windows close decision is a pure function `close_hides(resident, hidden, other_hidden)` in `window.rs` (the instance lookup only runs when it matters); its test covers hide or exit for every case. What `hide_window` does then (leave full screen, remember the placement, save the settings, hide) is not tested: a test of it would write the CI machine's real settings file (`settings_store` has its test folder only inside `blinzel-ui`). AC-11's "does not write" is the App's `save_settings_on_exit`, whose Windows branch the existing settings test checks; every way of ending a hidden instance (tray "Exit", the quit request, a close while hidden) goes through `exit`, which calls it. These tests run only in the Windows CI job; their first run there is the proof.
 - AC-07, AC-08: the launch's hand-off is a pure function `hand_off(file, single_instance, resident, target, send)` in `run.rs` over `instance::target` (whose rules `pick` tests) and the two senders; it returns the exit code 0 when the instance took over. It now skips the instance lookup for a launch without a file while resident mode is off (it handed nothing over before either). The test ran green in a standalone copy on Linux, and red with the exit code changed; in the crate it runs only in the Windows CI job.
 - AC-09: the WARP window test of `startup.md` AC-07 was split into helpers (`cloaked_window`, `warp_app`, `pump_while_cloaked`), and a second test wakes a hidden App through `run_actions`: shown, cloaked until the 400 ms timer (the loader has no device, so the image never comes), then activated; without a file visible at once; awake, only activated. It runs only in the Windows CI job.
+- AC-13: the tray icon's data (tooltip, callback message, version 4) and its event mapping (`on_tray`) are tested; `SetMenuDefaultItem` in `menu::show_tray` and the `TaskbarCreated` re-add call the shell directly and stay untested. The test runs only in the Windows CI job.
+- AC-23 is a manual measurement, like `jpeg-decoder.md` AC-17 and `browsing.md` AC-21: it names an idle Windows 11 machine with a real GPU and a time limit, the development VM is Linux and the Windows CI runner has no GPU (WARP) and no idle guarantee, and no CI step asserts a time; only a run of `blinzel.exe --resident --json <file>` with repeated hand-offs on such a machine, reading the median of `handoff_received` → `uncloak`, can be its evidence.

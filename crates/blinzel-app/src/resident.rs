@@ -173,3 +173,37 @@ pub fn refresh_autostart() {
         set_autostart(true);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::WM_MOUSEMOVE;
+
+    /// `docs/specs/resident-mode.md` AC-13: the icon has the app name as
+    /// tooltip and reports to `WM_TRAY` in the version 4 format; a click,
+    /// the keyboard or its balloon show the window, a right click opens
+    /// the tray menu where it happened.
+    #[test]
+    fn the_tray_icon_shows_the_window_or_opens_its_menu() {
+        let d = tray_data(HWND::default());
+        let end = d.szTip.iter().position(|&c| c == 0).unwrap();
+        assert_eq!(String::from_utf16_lossy(&d.szTip[..end]), tr(Msg::AppName));
+        assert_eq!(d.uCallbackMessage, WM_TRAY);
+        assert!(
+            d.uFlags
+                .contains(NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP)
+        );
+        // SAFETY: `tray_data` wrote the union's `uVersion` field.
+        assert_eq!(unsafe { d.Anonymous.uVersion }, NOTIFYICON_VERSION_4);
+
+        let at = |x: i16, y: i16| WPARAM(x as u16 as usize | (y as u16 as usize) << 16);
+        let event = |e: u32| LPARAM(e as isize);
+        for e in [NIN_SELECT, NIN_KEYSELECT, NIN_BALLOONUSERCLICK] {
+            let a = on_tray(at(5, 5), event(e));
+            assert_eq!(a, Some(Action::Wake { opened: false }), "{e:#x}");
+        }
+        let menu = on_tray(at(-20, 1060), event(WM_CONTEXTMENU));
+        assert_eq!(menu, Some(Action::TrayMenu { x: -20, y: 1060 }));
+        assert_eq!(on_tray(at(5, 5), event(WM_MOUSEMOVE)), None);
+    }
+}
