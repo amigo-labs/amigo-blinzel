@@ -322,6 +322,7 @@ Pitfalls that code and git history don't show. Short entries; `/spec-build` adds
 - **Laptop measurements vary by up to 30 %** between consecutive runs (throttling). Measure the candidates alternately and run libjpeg-turbo alongside as a control (§4).
 - **Git Bash rewrites arguments that look like paths** (`/CN=…` becomes a Windows path). Scripts that pass such arguments set `MSYS_NO_PATHCONV=1`.
 - **Shell scripts under `packaging/` are run, not sourced.** Their `set -e` and `exit` would close the terminal; `create-signing-cert.sh` refuses to be sourced.
+- **`App` commands write the settings file, and the UI language is a process global.** In `blinzel-ui` tests, `settings_store` only writes to the thread's `TEST_CONFIG_DIR` (the harness's temp folder), never `~/.config`; App-level tests use `testkit::Harness`, which holds a lock so tests that switch the language cannot race. The harness auto-applies only `Uncloak` (each render returns it until the shell clears `cloaked`); other window feedback goes through `Harness::shell`.
 
 ---
 
