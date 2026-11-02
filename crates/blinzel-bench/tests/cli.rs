@@ -279,3 +279,249 @@ fn run_times_every_group_and_writes_every_result() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A file in `write_json`'s layout with one result per entry.
+fn result_json(cpu: &str, features: &str, rows: &[(&str, &str, f64)]) -> String {
+    let rows: Vec<String> = rows
+        .iter()
+        .map(|(candidate, file, median)| {
+            format!(
+                "    {{\"group\": \"jpeg-full\", \"candidate\": \"{candidate}\", \"file\": \"{file}\", \"megapixels\": 24.000, \"mp_per_s\": 1.000, \"stats\": {{\"min_ms\": 1.000, \"median_ms\": {median:.3}, \"p99_ms\": 1.000, \"mean_ms\": 1.000, \"n\": 9}}}}"
+            )
+        })
+        .collect();
+    format!(
+        "{{\n  \"os\": \"windows\", \"arch\": \"x86_64\", \"logical_cpus\": 4,\n  \"cpu\": \"{cpu}\", \"cpu_features\": [\"avx2\"], \"build_features\": [{features}],\n  \"results\": [\n{}\n  ]\n}}\n",
+        rows.join(",\n")
+    )
+}
+
+/// AC-09: `compare` reads two runs, prints the table of the shared results
+/// and appends it to `$GITHUB_STEP_SUMMARY`.
+#[test]
+fn compare_prints_the_shared_results_and_appends_them_to_the_step_summary() {
+    let dir = temp("compare");
+    let (a, b) = (dir.join("base.json"), dir.join("v3.json"));
+    std::fs::write(
+        &a,
+        result_json(
+            "CPU A",
+            "",
+            &[("turbo", "x.jpg", 30.0), ("only-a", "x.jpg", 1.0)],
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &b,
+        result_json(
+            "CPU B",
+            "\"avx2\", \"fma\"",
+            &[("turbo", "x.jpg", 20.0), ("turbo", "y.jpg", 1.0)],
+        ),
+    )
+    .unwrap();
+    let summary = dir.join("summary.md");
+    std::fs::write(&summary, "before\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_blinzel-bench"))
+        .args(["compare", a.to_str().unwrap(), b.to_str().unwrap()])
+        .env("GITHUB_STEP_SUMMARY", &summary)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let md = stdout(&o);
+    assert!(md.contains("| CPU | CPU A | CPU B |"), "{md}");
+    assert!(md.contains("| build features | - | avx2 fma |"), "{md}");
+    assert!(
+        md.contains("| jpeg-full | turbo | x.jpg | 30.000 | 20.000 | 1.50x |"),
+        "{md}"
+    );
+    assert!(!md.contains("only-a") && !md.contains("y.jpg"), "{md}");
+    assert_eq!(
+        std::fs::read_to_string(&summary).unwrap(),
+        format!("before\n{md}")
+    );
+
+    // Without the variable nothing is written.
+    std::fs::remove_file(&summary).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_blinzel-bench"))
+        .args(["compare", a.to_str().unwrap(), b.to_str().unwrap()])
+        .env_remove("GITHUB_STEP_SUMMARY")
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0));
+    assert_eq!(stdout(&o), md);
+    assert!(!summary.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// AC-11: `jpeg-ab` decodes a file with both decoders and prints both.
+#[test]
+fn jpeg_ab_prints_both_decoders_and_their_ratio() {
+    use blinzel_core::decode::jpeg::{EncodeOptions, encode_rgb};
+    let dir = temp("jpeg-ab");
+    let (w, h) = (256, 192);
+    let jpeg = encode_rgb(
+        &blinzel_core::testimg::rgb(w, h),
+        w,
+        h,
+        EncodeOptions::default(),
+    )
+    .unwrap();
+    let file = dir.join("a.jpg");
+    std::fs::write(&file, jpeg).unwrap();
+    let o = bench(&["jpeg-ab", file.to_str().unwrap(), "4", "2", "3"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let out = stdout(&o);
+    assert!(out.contains(" 4/8, 2 threads: turbojpeg median "), "{out}");
+    assert!(
+        out.contains(" | blinzel-jpeg median ") && out.contains(" | ratio "),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The entries of a folder whose names start with `prefix`.
+fn entries(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(prefix))
+        .collect();
+    v.sort();
+    v
+}
+
+/// The size of a JPEG file.
+fn jpeg_size(path: &Path) -> (u32, u32) {
+    let info = blinzel_jpeg::parse(&std::fs::read(path).unwrap()).unwrap();
+    (info.width, info.height)
+}
+
+/// AC-12, AC-14: `thumbs` writes its photos once and measures cold, store
+/// and warm; `batch` resizes them (or `--from`'s files) and keeps the
+/// outputs only with `--keep`.
+#[test]
+fn thumbs_and_batch_measure_the_photo_corpus() {
+    let dir = temp("thumbs");
+    let tmp = dir.join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let with_tmp = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_blinzel-bench"))
+            .args(args)
+            .env("TMPDIR", &tmp)
+            .output()
+            .unwrap()
+    };
+    let d = dir.to_str().unwrap();
+
+    // AC-12: two distinct 12 MP photos, written once.
+    let o = with_tmp(&["thumbs", d, "--count", "2", "--threads", "2"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let photos = entries(&dir.join("thumbs-12mp"), "photo-");
+    assert_eq!(photos.len(), 2);
+    for p in &photos {
+        assert_eq!(jpeg_size(p), (4000, 3000));
+    }
+    let bytes: Vec<Vec<u8>> = photos.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    assert_ne!(bytes[0], bytes[1]);
+    let out = stdout(&o);
+    assert!(
+        out.contains("cold:  2/2 thumbnails in ") && out.contains(" on 2 threads = "),
+        "{out}"
+    );
+    assert!(out.contains("store: 2 thumbnails in "), "{out}");
+    assert!(
+        out.contains("warm:  2/2 from the cache in ") && out.contains("(open "),
+        "{out}"
+    );
+    assert!(entries(&tmp, "blinzel-bench-thumbs-").is_empty());
+
+    let modified = |p: &Path| std::fs::metadata(p).unwrap().modified().unwrap();
+    let before: Vec<_> = photos.iter().map(|p| modified(p)).collect();
+    let o = with_tmp(&["thumbs", d, "--count", "2", "--keep-cache"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let after: Vec<_> = photos.iter().map(|p| modified(p)).collect();
+    assert_eq!(before, after, "the photos were written again");
+    assert_eq!(entries(&tmp, "blinzel-bench-thumbs-").len(), 1);
+
+    // AC-14: the photos to a long edge of 64 as JPEG, kept in `--keep`.
+    let keep = dir.join("keep");
+    let o = with_tmp(&[
+        "batch",
+        d,
+        "--count",
+        "2",
+        "--edge",
+        "64",
+        "--keep",
+        keep.to_str().unwrap(),
+    ]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let out = stdout(&o);
+    assert!(
+        out.starts_with("2 of 2 files (12 MP JPEG → Jpeg, long edge 64) in "),
+        "{out}"
+    );
+    assert!(
+        out.contains("/s, ") && out.trim_end().ends_with(" KiB per file"),
+        "{out}"
+    );
+    let made = entries(&keep, "");
+    assert_eq!(made.len(), 2);
+    for p in &made {
+        assert_eq!(jpeg_size(p), (64, 48));
+    }
+
+    // Without `--keep` the outputs are deleted; `--from` takes its files.
+    let from = dir.join("from");
+    std::fs::create_dir_all(&from).unwrap();
+    std::fs::copy(&photos[0], from.join("one.jpg")).unwrap();
+    let o = with_tmp(&[
+        "batch",
+        d,
+        "--from",
+        from.to_str().unwrap(),
+        "--edge",
+        "32",
+        "--format",
+        "png",
+    ]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(
+        stdout(&o).starts_with("1 of 1 files (12 MP JPEG → Png, long edge 32)"),
+        "{}",
+        stdout(&o)
+    );
+    assert!(entries(&tmp, "blinzel-bench-batch-").is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// AC-13: `resize --quick` prints all four cases with both timings and the
+/// largest difference.
+#[test]
+fn resize_prints_every_case() {
+    let o = bench(&["resize", "--quick", "--runs", "1"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let out = stdout(&o);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[0].split_whitespace().collect::<Vec<_>>(),
+        ["case", "own", "ms", "fir", "ms", "max", "diff"]
+    );
+    let names = [
+        "24 MP -> 1600",
+        "24 MP -> 400",
+        "12 MP -> 2048 alpha",
+        "2 MP -> 4 MP up",
+    ];
+    assert_eq!(lines.len(), 1 + names.len(), "{out}");
+    for (l, name) in lines[1..].iter().zip(names) {
+        assert!(l.starts_with(name), "{l}");
+        let nums: Vec<f64> = l[name.len()..]
+            .split_whitespace()
+            .map(|n| n.parse().unwrap())
+            .collect();
+        assert_eq!(nums.len(), 3, "{l}");
+        assert!(nums[0] > 0.0 && nums[1] > 0.0 && nums[2] <= 255.0, "{l}");
+    }
+}

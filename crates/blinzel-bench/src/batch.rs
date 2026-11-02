@@ -13,8 +13,9 @@ use blinzel_core::batch::{Codec, Job, Output, Size};
 
 use crate::{option, usage};
 
-pub fn batch(args: &[String]) -> Result<(), String> {
-    let dir = PathBuf::from(args.first().ok_or_else(usage)?);
+/// `--count` (default 48), `--threads` (default all logical CPUs),
+/// `--edge` (default 1920) and `--format` (default JPEG).
+fn options(args: &[String]) -> Result<(usize, usize, u32, Codec), String> {
     let parse = |name: &str, default: usize| -> Result<usize, String> {
         option(args, name).map_or(Ok(default), |v| {
             v.parse().map_err(|_| format!("bad {name}"))
@@ -33,6 +34,12 @@ pub fn batch(args: &[String]) -> Result<(), String> {
         "avif" => Codec::Avif,
         f => return Err(format!("unknown format {f}")),
     };
+    Ok((count, threads, edge, codec))
+}
+
+pub fn batch(args: &[String]) -> Result<(), String> {
+    let dir = PathBuf::from(args.first().ok_or_else(usage)?);
+    let (count, threads, edge, codec) = options(args)?;
     let files: Vec<PathBuf> = match option(args, "--from") {
         Some(from) => {
             let mut v: Vec<PathBuf> = std::fs::read_dir(from)
@@ -87,4 +94,38 @@ pub fn batch(args: &[String]) -> Result<(), String> {
         bytes.load(Ordering::Relaxed) as f64 / 1024.0 / sum.done.max(1) as f64,
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// AC-14: 48 files to a long edge of 1920 as JPEG on all logical CPUs
+    /// by default; every format by name.
+    #[test]
+    fn batch_defaults_to_48_jpegs_at_1920() {
+        let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let (count, threads, edge, codec) = options(&[]).unwrap();
+        assert_eq!((count, threads, edge), (48, cpus, 1920));
+        assert!(matches!(codec, Codec::Jpeg));
+        let o = options(&args(&["--count", "2", "--threads", "1", "--edge", "64"])).unwrap();
+        assert_eq!((o.0, o.1, o.2), (2, 1, 64));
+        for (name, want) in [
+            ("jpeg", Codec::Jpeg),
+            ("png", Codec::Png),
+            ("webp", Codec::Webp),
+            ("avif", Codec::Avif),
+        ] {
+            let (.., codec) = options(&args(&["--format", name])).unwrap();
+            assert_eq!(format!("{codec:?}"), format!("{want:?}"), "{name}");
+        }
+        assert_eq!(
+            options(&args(&["--format", "bmp"])).err().as_deref(),
+            Some("unknown format bmp")
+        );
+    }
 }

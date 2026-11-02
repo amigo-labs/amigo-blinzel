@@ -87,12 +87,12 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 | AC-06 | `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) | built | |
 | AC-07 | `run_without_a_corpus_says_to_write_it_and_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-08 | `json_has_the_machine_and_one_result_per_line` (`crates/blinzel-bench/src/main.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |
-| AC-09 | — (`reads_fields` in `crates/blinzel-bench/src/compare.rs` covers only reading the fields; CI step `Compare with x86-64-v3` runs it) | open | |
+| AC-09 | `the_table_has_both_machines_and_the_shared_results` (`crates/blinzel-bench/src/compare.rs`); `compare_prints_the_shared_results_and_appends_them_to_the_step_summary` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-10 | `each_level_runs_in_a_child_with_only_its_variable`, `the_factor_is_against_the_lowest_level` (`crates/blinzel-bench/src/simd.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |
-| AC-11 | — | open | |
-| AC-12 | — | open | |
-| AC-13 | — | open | |
-| AC-14 | — | open | |
+| AC-11 | `jpeg_ab_defaults_to_full_size_on_all_cpus_for_15_rounds`, `jpeg_ab_alternates_and_discards_the_first_round`, `jpeg_ab_prints_both_medians_minima_and_ratios` (`crates/blinzel-bench/src/main.rs`); `jpeg_ab_prints_both_decoders_and_their_ratio` (`crates/blinzel-bench/tests/cli.rs`) | built | |
+| AC-12 | `thumbs_defaults_to_200_photos_on_all_cpus` (`crates/blinzel-bench/src/thumbs.rs`); `thumbs_and_batch_measure_the_photo_corpus` (`crates/blinzel-bench/tests/cli.rs`) | built | |
+| AC-13 | `resize_has_four_cases_quartered_when_quick`, `the_difference_counts_alpha_only_where_the_image_has_it` (`crates/blinzel-bench/src/resize.rs`); `resize_prints_every_case` (`crates/blinzel-bench/tests/cli.rs`) | built | |
+| AC-14 | `batch_defaults_to_48_jpegs_at_1920` (`crates/blinzel-bench/src/batch.rs`); `thumbs_and_batch_measure_the_photo_corpus` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-15 | `an_unknown_subcommand_prints_the_usage_and_exits_2`, `batch_with_an_unknown_format_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-16 | `.github/workflows/ci.yml`, job `windows`, steps `Generate corpus` … `upload-artifact` | built | |
 | AC-17 | CI step `App benchmark (offscreen, WARP)` (Windows job, fails on a non-zero exit) | built | |
@@ -107,3 +107,4 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 - 2026-11-02: `jpeg-header` was timed over 10× the runs of every other candidate (90, 30 with `--quick`); it now gets 9 (3) like the rest, as AC-03 says. A header parse takes microseconds, so its median is noisier, and no gate reads it.
 - 2026-11-02: Every result prints the same line (`line`: group, candidate, file, median, minimum, MP/s or "-" without pixels), as AC-03 says; `natsort`, `alloc-96mb` and `simd` used to print shorter lines without file, minimum or rate. The `simd` lines append the factor against the lowest level (`  2.00x vs none`).
 - 2026-11-02: The `run` test runs the real binary on a small folder (a 2880 × 1620 JPEG named `jpeg-24mp-420.jpg` so the `simd` group runs, a PNG, the AVIF and HEIC fixtures of `blinzel-core`, a broken AVIF). It takes about 75 s in a test build, mostly the own kernels on the 12 MP image AC-10 asks for, because workspace crates are not optimized in the test profile. The JSON machine fields and the result layout are checked exactly by a unit test on `json(host, results)`.
+- 2026-11-02: `compare`, `jpeg-ab`, `thumbs`, `resize` and `batch` keep their measuring code; what decides the output moved into small functions with unit tests (`table`, `ab_args`, `alternate`, `ab_line`, `options` in `thumbs.rs` and `batch.rs`, `cases`, `max_diff`, `runs`), and `tests/cli.rs` runs each command once on small input (`thumbs --count 2`, `batch --edge 64`, `resize --quick --runs 1`). `TMPDIR` points the cache and the batch outputs at the test's folder, so the tests see them deleted. `jpeg-ab` with 0 rounds now says "rounds must be at least 1" instead of panicking.

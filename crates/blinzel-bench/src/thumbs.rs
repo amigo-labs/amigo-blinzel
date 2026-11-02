@@ -24,14 +24,7 @@ const H: u32 = 3000;
 
 pub fn thumbs(args: &[String]) -> Result<(), String> {
     let dir = PathBuf::from(args.first().ok_or_else(usage)?);
-    let count: usize = option(args, "--count")
-        .map(|v| v.parse().map_err(|_| "bad --count"))
-        .transpose()?
-        .unwrap_or(200);
-    let threads: usize = option(args, "--threads")
-        .map(|v| v.parse().map_err(|_| "bad --threads"))
-        .transpose()?
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
+    let (count, threads) = options(args)?;
     let files = corpus(&dir.join("thumbs-12mp"), count)?;
 
     // Cold.
@@ -106,6 +99,19 @@ pub fn thumbs(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `--count` (default 200) and `--threads` (default all logical CPUs).
+fn options(args: &[String]) -> Result<(usize, usize), String> {
+    let count: usize = option(args, "--count")
+        .map(|v| v.parse().map_err(|_| "bad --count"))
+        .transpose()?
+        .unwrap_or(200);
+    let threads: usize = option(args, "--threads")
+        .map(|v| v.parse().map_err(|_| "bad --threads"))
+        .transpose()?
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
+    Ok((count, threads))
+}
+
 /// Runs `f` over `items` on `threads` threads, results in order.
 fn parallel<T: Sync, R: Send>(
     items: &[T],
@@ -176,4 +182,18 @@ pub(crate) fn corpus(dir: &Path, count: usize) -> Result<Vec<PathBuf>, String> {
         return Err(e);
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-12: 200 photos on all logical CPUs by default.
+    #[test]
+    fn thumbs_defaults_to_200_photos_on_all_cpus() {
+        let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
+        assert_eq!(options(&[]).unwrap(), (200, cpus));
+        let args: Vec<String> = ["--count", "3", "--threads", "2"].map(String::from).into();
+        assert_eq!(options(&args).unwrap(), (3, 2));
+    }
 }

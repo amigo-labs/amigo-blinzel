@@ -668,6 +668,30 @@ fn check(results: &[Result_], mismatches: &[String]) -> Result<(), String> {
 /// blinzel-jpeg alternately in one process, so machine noise hits both
 /// alike. For development; not part of `run`.
 fn jpeg_ab(args: &[String]) -> Result<(), String> {
+    let (file, scale, threads, rounds) = ab_args(args)?;
+    let data = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+    let info = blinzel_jpeg::parse(&data).map_err(|e| e.to_string())?;
+    let req = Request::Fit {
+        w: blinzel_jpeg::scaled(info.width, scale),
+        h: blinzel_jpeg::scaled(info.height, scale),
+    };
+    let (a, b) = alternate(
+        rounds,
+        || {
+            std::hint::black_box(decode::decode(&data, req).unwrap());
+        },
+        || {
+            std::hint::black_box(own_jpeg(&data, scale, threads));
+        },
+    )
+    .ok_or("rounds must be at least 1")?;
+    println!("{}", ab_line(file, scale, threads, &a, &b));
+    Ok(())
+}
+
+/// `jpeg-ab`'s file, scale (default 8, full size), threads (default all
+/// logical CPUs) and rounds (default 15).
+fn ab_args(args: &[String]) -> Result<(&str, u32, usize, usize), String> {
     let file = args
         .first()
         .ok_or("usage: blinzel-bench jpeg-ab <file> [scale] [threads] [rounds]")?;
@@ -675,34 +699,32 @@ fn jpeg_ab(args: &[String]) -> Result<(), String> {
         args.get(i)
             .map_or(Ok(default), |s| s.parse().map_err(|e| format!("{s}: {e}")))
     };
-    let scale = num(1, 8)? as u32;
-    let threads = num(
-        2,
-        std::thread::available_parallelism().map_or(1, |n| n.get()),
-    )?;
-    let rounds = num(3, 15)?;
-    let data = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
-    let info = blinzel_jpeg::parse(&data).map_err(|e| e.to_string())?;
-    let req = Request::Fit {
-        w: blinzel_jpeg::scaled(info.width, scale),
-        h: blinzel_jpeg::scaled(info.height, scale),
-    };
-    let (mut a, mut b) = (Vec::new(), Vec::new());
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    Ok((file, num(1, 8)? as u32, num(2, cpus)?, num(3, 15)?))
+}
+
+/// Times `a` and `b` alternately: one round that warms caches and the pool,
+/// then `rounds` timed ones. `None` without timed rounds.
+fn alternate(rounds: usize, mut a: impl FnMut(), mut b: impl FnMut()) -> Option<(Stats, Stats)> {
+    let (mut ta, mut tb) = (Vec::new(), Vec::new());
     for i in 0..=rounds {
         let t = Instant::now();
-        std::hint::black_box(decode::decode(&data, req).unwrap());
-        let ta = t.elapsed().as_secs_f64() * 1e3;
+        a();
+        let da = t.elapsed().as_secs_f64() * 1e3;
         let t = Instant::now();
-        std::hint::black_box(own_jpeg(&data, scale, threads));
-        let tb = t.elapsed().as_secs_f64() * 1e3;
-        // The first round warms caches and the pool.
+        b();
+        let db = t.elapsed().as_secs_f64() * 1e3;
         if i > 0 {
-            a.push(ta);
-            b.push(tb);
+            ta.push(da);
+            tb.push(db);
         }
     }
-    let (a, b) = (Stats::of(&a).unwrap(), Stats::of(&b).unwrap());
-    println!(
+    Some((Stats::of(&ta)?, Stats::of(&tb)?))
+}
+
+/// Both medians and minima and the ratios libjpeg-turbo / blinzel-jpeg.
+fn ab_line(file: &str, scale: u32, threads: usize, a: &Stats, b: &Stats) -> String {
+    format!(
         "{file} {scale}/8, {threads} threads: turbojpeg median {:.2} min {:.2} | blinzel-jpeg median {:.2} min {:.2} | ratio {:.2}x (min {:.2}x)",
         a.median,
         a.min,
@@ -710,8 +732,7 @@ fn jpeg_ab(args: &[String]) -> Result<(), String> {
         b.min,
         a.median / b.median,
         a.min / b.min
-    );
-    Ok(())
+    )
 }
 
 /// blinzel-jpeg into pooled planes, like the viewer would.
@@ -1024,6 +1045,55 @@ mod tests {
             lines[5]
         );
         assert_eq!(&lines[6..], ["  ]", "}"]);
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// AC-11: scale 8, all logical CPUs and 15 rounds by default.
+    #[test]
+    fn jpeg_ab_defaults_to_full_size_on_all_cpus_for_15_rounds() {
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let args = strings(&["f.jpg"]);
+        assert_eq!(ab_args(&args).unwrap(), ("f.jpg", 8, cpus, 15));
+        let args = strings(&["f.jpg", "2", "3", "4"]);
+        assert_eq!(ab_args(&args).unwrap(), ("f.jpg", 2, 3, 4));
+        assert!(ab_args(&strings(&["f.jpg", "x"])).is_err());
+        assert!(ab_args(&[]).is_err());
+    }
+
+    /// AC-11: the two decoders take turns, and the first round is not
+    /// timed.
+    #[test]
+    fn jpeg_ab_alternates_and_discards_the_first_round() {
+        let order = std::cell::RefCell::new(String::new());
+        let (a, b) = alternate(
+            4,
+            || {
+                let first = order.borrow().is_empty();
+                order.borrow_mut().push('a');
+                if first {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            },
+            || order.borrow_mut().push('b'),
+        )
+        .unwrap();
+        assert_eq!(order.into_inner(), "ababababab");
+        assert_eq!((a.n, b.n), (4, 4));
+        assert!(a.p99 < 50.0, "the warm-up round was timed: {a:?}");
+        assert!(alternate(0, || (), || ()).is_none());
+    }
+
+    /// AC-11: both medians and minima and their ratios.
+    #[test]
+    fn jpeg_ab_prints_both_medians_minima_and_ratios() {
+        let l = ab_line("f.jpg", 8, 4, &stats(10.0, 20.0), &stats(4.0, 8.0));
+        assert_eq!(
+            l,
+            "f.jpg 8/8, 4 threads: turbojpeg median 20.00 min 10.00 | blinzel-jpeg median 8.00 min 4.00 | ratio 2.50x (min 2.50x)"
+        );
     }
 
     #[test]
