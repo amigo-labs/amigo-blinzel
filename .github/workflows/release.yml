@@ -168,6 +168,8 @@ jobs:
           cargo run --release --locked -p blinzel-release -- macos-bundle dist/amigo-blinzel.app \
             target/aarch64-apple-darwin/release/blinzel target/x86_64-apple-darwin/release/blinzel
           lipo -info dist/amigo-blinzel.app/Contents/MacOS/blinzel
+          # One universal binary: fails unless both architectures are in it.
+          lipo dist/amigo-blinzel.app/Contents/MacOS/blinzel -verify_arch arm64 x86_64
           codesign --verify --verbose dist/amigo-blinzel.app
           codesign --display --verbose=2 dist/amigo-blinzel.app 2>&1 | grep -E '^(Authority|Signature)='
           ditto -c -k --keepParent dist/amigo-blinzel.app dist/amigo-blinzel-macos.zip
