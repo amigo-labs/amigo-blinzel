@@ -114,9 +114,15 @@ pub fn system_language() -> Lang {
         {
             return negotiate([]);
         }
-        let all = String::from_utf16_lossy(&buf);
-        negotiate(all.split('\0').filter(|s| !s.is_empty()))
+        language_from_names(&buf)
     }
+}
+
+/// The best shipped language for a `GetUserPreferredUILanguages` list:
+/// language names separated and ended by NULs, in order of preference.
+fn language_from_names(names: &[u16]) -> Lang {
+    let all = String::from_utf16_lossy(names);
+    negotiate(all.split('\0').filter(|s| !s.is_empty()))
 }
 
 fn monitor_under_cursor() -> (HMONITOR, RECT, RECT) {
@@ -173,12 +179,10 @@ pub fn run() -> i32 {
         };
     }
     let settings = settings_store::load();
-    let lang = settings
-        .language
-        .as_deref()
-        .and_then(blinzel_i18n::lang_from_code)
-        .unwrap_or_else(system_language);
-    set_lang(lang);
+    set_lang(blinzel_i18n::choose(
+        settings.language.as_deref(),
+        system_language,
+    ));
     // The executable is its own installer (setup file name, --install,
     // --uninstall).
     let raw: Vec<String> = std::env::args().skip(1).collect();
@@ -577,8 +581,27 @@ fn decode_workers(performance: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, decode_workers, io_threads, may_hand_off, report_path, uncloak_fallback};
+    use super::{
+        Args, decode_workers, io_threads, language_from_names, may_hand_off, report_path,
+        uncloak_fallback,
+    };
     use std::path::PathBuf;
+
+    /// `docs/specs/localization.md` AC-10: the user's preferred UI
+    /// languages, in order, as Windows lists them.
+    #[test]
+    fn the_system_language_comes_from_the_preferred_ui_languages_in_order() {
+        let code = |names: &str| {
+            let wide: Vec<u16> = names.encode_utf16().collect();
+            language_from_names(&wide).code()
+        };
+        assert_eq!(code("de-AT\0en-US\0\0"), "de");
+        assert_eq!(code("en-US\0de-DE\0\0"), "en");
+        assert_eq!(code("zh-TW\0ja-JP\0\0"), "ja");
+        assert_eq!(code("xx-YY\0pt-PT\0\0"), "pt-br");
+        assert_eq!(code("\0\0"), "en");
+        assert_eq!(code(""), "en");
+    }
 
     /// `docs/specs/startup.md` AC-10: measuring never hands over, and its
     /// report goes to `--json`'s path or `startup.json`.

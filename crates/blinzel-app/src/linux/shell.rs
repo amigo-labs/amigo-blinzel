@@ -81,11 +81,19 @@ pub(super) fn log(msg: &str) {
     }
 }
 
-/// The desktop's language preference (`LANGUAGE`, `LC_ALL`, `LANG`).
+/// The desktop's language preference (`LANGUAGE`, `LC_ALL`,
+/// `LC_MESSAGES`, `LANG`).
 pub fn system_language() -> Lang {
+    language_from_env(|v| std::env::var(v).ok())
+}
+
+/// The language the variables `var` reads prefer, in the order
+/// `LANGUAGE` (colon-separated), `LC_ALL`, `LC_MESSAGES`, `LANG`; `C`,
+/// `POSIX` and `.encoding` / `@modifier` suffixes are ignored.
+fn language_from_env(var: impl Fn(&str) -> Option<String>) -> Lang {
     let vars: Vec<String> = ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
-        .filter_map(|v| std::env::var(v).ok())
+        .filter_map(|v| var(v))
         .flat_map(|v| {
             v.split(':')
                 .map(|tag| tag.split(['.', '@']).next().unwrap_or("").replace('_', "-"))
@@ -1058,12 +1066,10 @@ pub fn run() -> i32 {
     timing::mark("main");
     let args = parse_args();
     let settings = settings_store::load();
-    let lang = settings
-        .language
-        .as_deref()
-        .and_then(blinzel_i18n::lang_from_code)
-        .unwrap_or_else(system_language);
-    blinzel_i18n::set_lang(lang);
+    blinzel_i18n::set_lang(blinzel_i18n::choose(
+        settings.language.as_deref(),
+        system_language,
+    ));
     if args.install || args.uninstall {
         return super::install::run(args.uninstall);
     }
@@ -1147,6 +1153,38 @@ pub fn run() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/localization.md` AC-10: the UI language from the
+    /// environment, in the order the variables are read.
+    #[test]
+    fn the_system_language_comes_from_the_locale_variables_in_order() {
+        let code = |vars: &[(&str, &str)]| {
+            language_from_env(|name| {
+                vars.iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| v.to_string())
+            })
+            .code()
+        };
+        assert_eq!(code(&[]), "en");
+        assert_eq!(code(&[("LANG", "C.UTF-8")]), "en");
+        assert_eq!(code(&[("LANG", "POSIX")]), "en");
+        assert_eq!(code(&[("LANG", "de_DE.UTF-8")]), "de");
+        assert_eq!(code(&[("LANG", "de_DE"), ("LC_MESSAGES", "fr_FR")]), "fr");
+        assert_eq!(
+            code(&[("LC_MESSAGES", "fr_FR"), ("LC_ALL", "it_IT.UTF-8")]),
+            "it"
+        );
+        assert_eq!(code(&[("LC_ALL", "it_IT"), ("LANGUAGE", "ja_JP")]), "ja");
+        // `LANGUAGE` is a list; tags that map to nothing are skipped.
+        assert_eq!(
+            code(&[("LANGUAGE", "xx:C:ru_RU@euro"), ("LANG", "de_DE")]),
+            "ru"
+        );
+        assert_eq!(code(&[("LANGUAGE", "pt_PT.UTF-8:de")]), "pt-br");
+        assert_eq!(code(&[("LC_ALL", "C"), ("LANG", "es_ES.UTF-8")]), "es");
+        assert_eq!(code(&[("LANG", "sr_RS@latin")]), "en");
+    }
 
     /// `docs/specs/batch-resize.md` AC-23: the files of one drop reach the
     /// App together, in order, before the next event.
