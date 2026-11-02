@@ -506,9 +506,14 @@ pub fn run() -> i32 {
         // the hint frame warms the renderer and text pipeline.
         update::on_first_frame();
         window::warm_hidden(hwnd, || {
-            #[cfg(feature = "turbojpeg")]
-            window::with_app(|a| a.warm_up(cpu.performance));
-            run_actions(hwnd, window::with_app(|a| a.render()).unwrap_or_default());
+            let actions = warm_resident(
+                || {
+                    #[cfg(feature = "turbojpeg")]
+                    window::with_app(|a| a.warm_up(cpu.performance));
+                },
+                || window::with_app(|a| a.render()).unwrap_or_default(),
+            );
+            run_actions(hwnd, actions);
         });
         blinzel_core::bufpool::global().set_max_retained(0);
         message_loop();
@@ -598,6 +603,16 @@ fn message_loop() {
     }
 }
 
+/// What a hidden `--resident` start does before its message loop, so the
+/// first hand-off pays no first-use costs: `warm_up` (`App::warm_up`:
+/// decoder, upload, drawing and, with colour management on, the colour
+/// engine with Display P3, `docs/specs/color-management.md` AC-19), then
+/// `render` (the hint frame); returns what the frame asks of the shell.
+fn warm_resident(warm_up: impl FnOnce(), render: impl FnOnce() -> Vec<Action>) -> Vec<Action> {
+    warm_up();
+    render()
+}
+
 /// How long after the device and swap chain a window with a file to show
 /// may stay invisible waiting for its image (`docs/specs/startup.md`
 /// AC-07); without a file it is shown with the hint at once (AC-03).
@@ -622,7 +637,7 @@ fn decode_workers(performance: usize) -> usize {
 mod tests {
     use super::{
         Args, ResidentStart, decode_workers, hand_off, io_threads, language_from_names,
-        may_hand_off, report_path, resident_start, uncloak_fallback,
+        may_hand_off, report_path, resident_start, uncloak_fallback, warm_resident,
     };
     use std::path::{Path, PathBuf};
 
@@ -695,6 +710,29 @@ mod tests {
             }
         );
         assert_eq!(resident_start(true, || false), ResidentStart::Run);
+    }
+
+    /// `docs/specs/color-management.md` AC-19: a `--resident` start warms
+    /// up the App (colour engine included) once, before its hint frame and
+    /// before any hand-off.
+    #[test]
+    fn a_resident_start_warms_up_once_before_the_hint_frame() {
+        use blinzel_ui::app::Action;
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let actions = warm_resident(
+            || calls.borrow_mut().push("warm_up"),
+            || {
+                calls.borrow_mut().push("render");
+                vec![Action::Uncloak]
+            },
+        );
+        assert_eq!(calls.into_inner(), ["warm_up", "render"]);
+        assert_eq!(
+            actions,
+            [Action::Uncloak],
+            "the frame's actions go to the shell"
+        );
     }
 
     /// `docs/specs/localization.md` AC-10: the user's preferred UI
