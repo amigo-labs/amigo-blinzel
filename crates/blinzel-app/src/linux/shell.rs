@@ -266,7 +266,35 @@ struct Shell {
     dir_due: Option<Instant>,
     /// Fractional wheel steps of touchpads (in 1/120).
     wheel_rest: f64,
+    /// The files of a drop still being reported.
+    dropped: Dropped,
     exiting: bool,
+}
+
+/// The files of one drop. winit reports a drop of several files as one
+/// `DroppedFile` event per file, in a row; they are collected until another
+/// event or the end of the event batch, so that the App gets the whole
+/// drop at once (and opens its first file when no dialog is open).
+#[derive(Default)]
+struct Dropped(Vec<PathBuf>);
+
+impl Dropped {
+    /// Keeps `event` when it reports a dropped file. Otherwise returns the
+    /// drop collected so far, which comes before `event`.
+    fn feed(&mut self, event: WindowEvent) -> (Option<Vec<PathBuf>>, Option<WindowEvent>) {
+        match event {
+            WindowEvent::DroppedFile(path) => {
+                self.0.push(path);
+                (None, None)
+            }
+            event => (self.take(), Some(event)),
+        }
+    }
+
+    /// The drop collected so far, if any.
+    fn take(&mut self) -> Option<Vec<PathBuf>> {
+        (!self.0.is_empty()).then(|| std::mem::take(&mut self.0))
+    }
 }
 
 impl Shell {
@@ -537,6 +565,12 @@ impl Shell {
     }
 
     /// Work that waits for the end of an event: a copy's pixels.
+    /// Every file of one drop, to the App.
+    fn files_dropped(&mut self, el: &ActiveEventLoop, paths: Vec<PathBuf>) {
+        let actions = self.app.as_mut().unwrap().files_dropped(paths);
+        self.run(el, actions);
+    }
+
     fn after_event(&mut self) {
         let copy = std::mem::take(&mut self.host.borrow_mut().copy);
         if copy && let Some(src) = self.app.as_ref().and_then(|a| a.clip.clone()) {
@@ -833,6 +867,11 @@ impl ApplicationHandler<UserEvent> for Shell {
         if self.app.is_none() || self.exiting {
             return;
         }
+        let (dropped, event) = self.dropped.feed(event);
+        if let Some(paths) = dropped {
+            self.files_dropped(el, paths);
+        }
+        let Some(event) = event else { return };
         match event {
             WindowEvent::CloseRequested => {
                 self.exiting = true;
@@ -933,10 +972,6 @@ impl ApplicationHandler<UserEvent> for Shell {
                 self.update_cursor();
             }
             WindowEvent::KeyboardInput { event, .. } => self.key(el, &event),
-            WindowEvent::DroppedFile(path) => {
-                let actions = self.app.as_mut().unwrap().files_dropped(vec![path]);
-                self.run(el, actions);
-            }
             _ => {}
         }
         self.after_event();
@@ -989,6 +1024,12 @@ impl ApplicationHandler<UserEvent> for Shell {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if let Some(paths) = self.dropped.take()
+            && self.app.is_some()
+            && !self.exiting
+        {
+            self.files_dropped(el, paths);
+        }
         self.timers(el);
     }
 }
@@ -1076,6 +1117,7 @@ pub fn run() -> i32 {
         notice_until: None,
         dir_due: None,
         wheel_rest: 0.0,
+        dropped: Dropped::default(),
         exiting: false,
     };
     if let Err(e) = event_loop.run_app(&mut shell) {
@@ -1086,4 +1128,39 @@ pub fn run() -> i32 {
         app.save_settings_on_exit();
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `docs/specs/batch-resize.md` AC-23: the files of one drop reach the
+    /// App together, in order, before the next event.
+    #[test]
+    fn the_files_of_one_drop_are_handed_over_together() {
+        let mut d = Dropped::default();
+        let (a, b, c) = (
+            PathBuf::from("/a.png"),
+            PathBuf::from("/b.png"),
+            PathBuf::from("/c"),
+        );
+        for p in [&a, &b, &c] {
+            let (dropped, event) = d.feed(WindowEvent::DroppedFile(p.clone()));
+            assert!(dropped.is_none() && event.is_none(), "still collecting");
+        }
+        let (dropped, event) = d.feed(WindowEvent::Focused(true));
+        assert_eq!(dropped, Some(vec![a.clone(), b.clone(), c]));
+        assert!(matches!(event, Some(WindowEvent::Focused(true))));
+        let (dropped, event) = d.feed(WindowEvent::Focused(false));
+        assert!(
+            dropped.is_none() && event.is_some(),
+            "nothing dropped since"
+        );
+
+        // The end of the event batch ends a drop too.
+        d.feed(WindowEvent::DroppedFile(b.clone()));
+        d.feed(WindowEvent::DroppedFile(a.clone()));
+        assert_eq!(d.take(), Some(vec![b, a]));
+        assert_eq!(d.take(), None);
+    }
 }
