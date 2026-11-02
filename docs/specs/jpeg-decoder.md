@@ -77,6 +77,9 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 
 <!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
+- AC-17 cannot be proven by any gate: it needs an 8-core machine, the development machine of this run has 4 cores, the CI jobs run on standard GitHub runners (`ubuntu-latest`, `windows-2025`, `macos-14`, at most 4 vCPUs), and no CI step asserts a speed ratio (`blinzel-bench jpeg-ab` and `run` only print the numbers). The only 8-core figures are the design spec's §15 (Ryzen 7 PRO 6850H, 16 threads: 3.9× full, 3.6× at 1/8, against the targets ≥ 3× and ≥ 2×), from another day. Decide via `/spec jpeg-decoder`: (a) mark AC-17 `manual: measurement on an 8-core machine` and accept a fresh `jpeg-ab` run there as `manual:` evidence, or (b) reword it for a machine a CI job has, with a ratio that job asserts (that belongs to `benchmark-gate.md`).
+  For reference, measured 2026-11-02 on the 4-core development VM (Intel Xeon @ 2.80 GHz, 4 vCPUs, 1 thread per core), `blinzel-bench jpeg-ab <corpus>/jpeg-24mp-420.jpg {scale} {threads} {rounds}` (21 rounds, 15 for 1 thread), medians: full size, 4 threads, turbo 134 ms, blinzel-jpeg 104 ms (1.28×); 1/8, 4 threads, 82 ms vs. 56 ms (1.47×); full size, 1 thread, 132 ms vs. 194 ms (0.68×, where §15 has 1.01× on the Ryzen). A second run gave 1.25× and 1.45×. These numbers do not decide AC-17, which names 8 cores.
+
 ## Evidence
 
 | AC    | Test | Status | Commit |
