@@ -138,19 +138,20 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | AC-13 | `draws_oriented_and_scaled_without_bleeding` (`crates/blinzel-app/tests/atlas.rs`, `#![cfg(windows)]`, Windows CI `cargo test --workspace --release`) | built | |
 | AC-14 | | open | |
 | AC-15 | | open | |
-| AC-16 | | open | |
+| AC-16 | `filmstrip_toggles_saves_and_lays_out_the_image_above_it`, `filmstrip_centres_the_current_tile_and_opens_clicked_ones` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 | AC-17 | `columns_rows_and_cells`, `hit_testing` (`crates/blinzel-core/src/grid.rs`) | built | |
-| AC-18 | | open | |
-| AC-19 | | open | |
+| AC-18 | `grid_keys_move_the_selection_clamped_and_scrolled_just_enough`, `grid_wheel_scrolls_a_row_per_notch_and_clicks_select`, `grid_opens_with_enter_space_or_a_double_click_and_closes_with_g_or_escape`, `an_empty_grid_opens_nothing` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
+| AC-19 | `grid_marks_with_ctrl_shift_and_ctrl_a_and_escape_clears_them` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 | AC-20 | | open | |
 | AC-21 | | open | |
 | AC-22 | | open | |
 | AC-23 | `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 
-Partial coverage without an exact test: AC-16 persistence of the setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); AC-18 the layout functions behind the keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`) — the key and mouse handling in `App` has no test.
+Supporting tests: the persistence of the filmstrip setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); the layout functions behind the grid keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`).
 
 ## Decisions
 
 - 2026-11-02: in the grid, file commands (Delete, "Open with", "Edit with") take the selected tile and commands on the shown image (copy, cut, save cutout, select all from the menu, zoom, rotation, show original) do nothing. Because the grid covers that image, and Delete recycling a file other than the one the user sees selected was the defect found in the extraction; a copy of a tile would need its probe on the UI thread.
+- 2026-11-02: the App-level tests of AC-16, AC-18 and AC-19 were green at once: the filmstrip, the grid keys and mouse and the marks already behaved as specified; the tests guard that behaviour, none of it changed.
 - 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.
 - 2026-11-02: AC-23 checks "no longer exists" with a file check per marked file when the dialog opens (on the UI thread). Because opening the dialog is not on the startup or browsing path, and the dialog's header inspection would otherwise list the missing file as unreadable instead of leaving it out.
