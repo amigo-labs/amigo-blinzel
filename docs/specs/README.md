@@ -25,7 +25,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 13 | [resident-mode](resident-mode.md) | 10 / 23 | 15 | 1 | the first CI runs of AC-06, AC-15, AC-19 and the written AC-02, AC-03, AC-04, AC-07, AC-08, AC-09, AC-11, AC-13, AC-16, AC-20 (Windows `instance.rs`, `tests/setup.rs`, `setup/mod.rs`, `run.rs`, `window.rs`, `resident.rs`) and AC-02, AC-09, AC-14, AC-17, AC-18, AC-19, AC-21 (macOS `macos/resident.rs`, `macos/shell.rs`, `macos/update.rs`); the manual check AC-23 (measurement) |
 | 14 | [screenshots](screenshots.md) | 13 / 23 | 8 | 1 | `/spec-build` |
 | 15 | [installation](installation.md) | 12 / 21 | 12 | 3 | the first Windows CI runs of AC-04, AC-05, AC-07, AC-08 and AC-09 (`setup/mod.rs`, `setup/install.rs`, `tests/setup.rs`) and the first release run of AC-18 (`release.yml`), all written; the manual checks AC-10 (setup window), AC-11 (no Direct3D), AC-21 (SmartScreen, Gatekeeper); then `/spec-check` |
-| 16 | [updates](updates.md) | 18 / 23 | 2 | 1 | `/spec-build`: AC-18..AC-21 (macOS swap, next start, rollback file moves, cleanup), then the manual check AC-23 |
+| 16 | [updates](updates.md) | 22 / 23 | 3 | 1 | the first CI runs of AC-18 (macOS `macos/update.rs`) and of the Windows and macOS tests of AC-12, AC-14, AC-15, AC-19, AC-20, AC-21 (`update.rs`, `macos/update.rs`, `macos/shell.rs`), all written; the manual check AC-23 (a published release on a clean VM); then `/spec-check` |
 | 17 | [release](release.md) | 5 / 18 | 9 | 3 | `/spec-build` |
 | 18 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 19 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
