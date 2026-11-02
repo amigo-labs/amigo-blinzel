@@ -1541,11 +1541,8 @@ define_class!(
         #[unsafe(method(rightMouseUp:))]
         fn right_mouse_up(&self, e: &NSEvent) {
             with_shell(|s| {
-                let p = s.point(e);
-                s.run(vec![Action::ShowMenu {
-                    x: p.0 as i32,
-                    y: p.1 as i32,
-                }]);
+                let actions = s.app.right_click(s.point(e));
+                s.run(actions);
             });
         }
 

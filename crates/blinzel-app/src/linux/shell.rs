@@ -934,8 +934,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                     }
                     (MouseButton::Middle, false) => self.app.as_mut().unwrap().mouse_up(),
                     (MouseButton::Right, false) => {
-                        let (x, y) = (self.cursor.0 as i32, self.cursor.1 as i32);
-                        self.run(el, vec![Action::ShowMenu { x, y }]);
+                        let actions = self.app.as_mut().unwrap().right_click(self.cursor);
+                        self.run(el, actions);
                     }
                     (MouseButton::Back, true) => {
                         let actions = self.app.as_mut().unwrap().command(Cmd::Prev);

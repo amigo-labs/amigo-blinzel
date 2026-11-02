@@ -365,7 +365,11 @@ fn handle(
             }
             done
         }
-        WM_RBUTTONUP | WM_CONTEXTMENU => {
+        WM_RBUTTONUP => {
+            actions.extend(app.right_click(point_from_lparam(lp)));
+            done
+        }
+        WM_CONTEXTMENU => {
             let mut pt = POINT::default();
             unsafe {
                 let _ = GetCursorPos(&mut pt);
