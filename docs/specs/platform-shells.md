@@ -62,7 +62,7 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 - Linux (`src/linux/`): `shell.rs` (winit `with_decorations(false)`, `drag_resize_window`, `drag_window`, `EDGE = 6.0`, `rfd::FileDialog`, `trash::delete`, `arboard` with `wayland-data-control`, `notify::recommended_watcher` = inotify, `WindowEvent::DroppedFile`), `instance.rs` (`hand_off`, `listen`), `gpu.rs` (wgpu with Vulkan and GL ES). The self-drawn menu is `blinzel_ui::popup`.
 - macOS (`src/macos/shell.rs`): `NSWindow` with `FullSizeContentView`, `setTitlebarAppearsTransparent(true)`, hidden title, `CAMetalLayer` as the layer of a layer-hosting view; `build_menu_bar` + `menuNeedsUpdate:`; `NSOpenPanel` / `NSSavePanel`; `NSFileManager trashItemAtURL`; `NSPasteboardTypePNG`; `notify` (FSEvents); `application:openURLs:`; `registerForDraggedTypes` with file URLs, `performDragOperation:`. `Chrome { system_buttons: true }` moves ☰ to the right.
 - Golden tests: `crates/blinzel-app/tests/warp_golden.rs` (`#![cfg(all(windows, feature = "turbojpeg"))]`), `wgpu_golden.rs` (`cfg(all(unix, not(target_os = "macos"), …))`), `metal_golden.rs` (`cfg(all(target_os = "macos", …))`); test fns `ycc_subsamplings_with_tile_seams`, `all_orientations_minified`, `zoom_crop_gray_and_alpha`, `heavy_minification_uses_box_filter`, `overlay_shapes_and_text_render`, `colour_transform_lut`. On mismatch both images go to `target/<backend>-golden/`. `BLINZEL_REQUIRE_GPU=1` (Linux and macOS jobs) turns a missing adapter into a failure; WARP always exists.
-- Smoke tests in `.github/workflows/ci.yml`: Linux "Linux viewer smoke test" (Xvfb, `timeout 120`), macOS "App bundle and smoke test (window, first frame)" (`perl -e 'alarm 120'`, `codesign --verify`), Windows "Startup smoke test (window, first frame)" — the last one is `continue-on-error: true`.
+- Smoke tests in `.github/workflows/ci.yml`: Linux "Linux viewer smoke test" (Xvfb, `timeout 120`), macOS "App bundle and smoke test (window, first frame)" (`perl -e 'alarm 120'`, `codesign --verify`), Windows "Startup smoke test (window, first frame)".
 
 ## Edge cases
 
@@ -81,8 +81,8 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 |      | open   |        |
-| AC-02 |      | open   |        |
+| AC-01 | `windows_11_24h2_and_newer_are_supported`, `the_build_number_is_the_real_one` (`crates/blinzel-app/src/platform/os.rs`), `an_unsupported_windows_refuses_the_install_with_2` (`crates/blinzel-app/src/setup/mod.rs`), CI: Windows — written, not run yet | open |        |
+| AC-02 | `the_executable_embeds_its_application_manifest` (`crates/blinzel-app/tests/manifest.rs`), CI: Windows — written, not run yet | open |        |
 | AC-03 |      | open   |        |
 | AC-04 |      | open   |        |
 | AC-05 |      | open   |        |
@@ -90,7 +90,7 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 | AC-07 | `restores_on_an_existing_monitor_only` (`crates/blinzel-app/tests/placement.rs`), Windows CI job | built |        |
 | AC-08 |      | open   |        |
 | AC-09 | `warp_golden.rs`: `ycc_subsamplings_with_tile_seams`, `all_orientations_minified`, `zoom_crop_gray_and_alpha`, `heavy_minification_uses_box_filter`, `overlay_shapes_and_text_render`, `colour_transform_lut`, Windows CI job | built |        |
-| AC-10 | CI step "Startup smoke test (window, first frame)" exists but is `continue-on-error`, so it asserts nothing | open |        |
+| AC-10 | CI step "Startup smoke test (window, first frame)" of the Windows job, no longer `continue-on-error` — not run yet | open |        |
 | AC-11 | `the_edges_resize_the_plain_window_only`, `a_press_resizes_moves_or_goes_to_the_app` (`crates/blinzel-app/src/linux/shell.rs`); `a_double_click_below_the_caption_strip_toggles_full_screen` (`crates/blinzel-ui/src/app_viewing_tests.rs`, the App answers none on the strip) | built |        |
 | AC-12 | `keyboard_skips_separators_and_disabled_items`, `mouse_opens_submenus_and_chooses`, `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), Linux CI job | built |        |
 | AC-13 |      | open   |        |
@@ -112,3 +112,6 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 - AC-14's trash call moved into `recycle`; its test trashes a temporary file through the real freedesktop trash, finds it in `trash::os_limited::list` and purges it, so no test file stays in the developer's trash. A refusal is a file that does not exist. The test went red with `std::fs::remove_file` instead of the trash and with the list told on a refusal. Wayland's clipboard has no test (no compositor in CI); X11's is the Xvfb test.
 - AC-15: both shells' notify watchers were the same code; they are now one function, `watch::folder` (`crates/blinzel-app/src/watch.rs`), so one test covers inotify (Linux) and FSEvents (macOS job). It went red with the callback dropped and with the access filter removed.
 - AC-16 held before this spec was built: the tests of `docs/specs/browsing.md` AC-15 check exactly its clauses. The exit code 0 of the second launch went red in `tests/startup.rs` when `run` returned 3 instead.
+- AC-01's threshold moved into `os::supported` and the setup's refusal into `setup::refuse_install` (message unless silent, exit code 2), so both are tested without an old Windows. `the_build_number_is_the_real_one` reads the runner's build through `RtlGetVersion`: the unit-test executable has no manifest, so a shimmed API would say 9200. The viewer's exit code 1 is `run::fatal`'s, which every fatal start error shares; it has no test of its own (a message box would wait for a click). These tests only compile on Windows; their first Windows CI run is their proof.
+- AC-02 is checked on the built `blinzel.exe`: link.exe stores the manifest as an `RT_MANIFEST` resource in plain UTF-8, so the test looks for the five declarations in the executable's bytes (values, not formatting, since the linker may rewrite the XML). Its first Windows CI run is its proof.
+- AC-10: the Windows startup smoke step was `continue-on-error`, so it asserted nothing; it now fails the job. Its last informative run (CI run 41491320340, 2026-11-02) wrote the startup JSON and exited with 0, so the step is expected to stay green. Its first CI run without `continue-on-error` is the proof.

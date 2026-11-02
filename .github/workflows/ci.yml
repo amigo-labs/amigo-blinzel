@@ -135,7 +135,6 @@ jobs:
           Get-Content bench-app-windows.json
           exit $p.ExitCode
       - name: Startup smoke test (window, first frame)
-        continue-on-error: true
         timeout-minutes: 2
         shell: pwsh
         run: |
