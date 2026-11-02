@@ -1044,6 +1044,23 @@ pub fn restart_requested() -> bool {
     RESTART.with(|r| r.get())
 }
 
+/// The `--resident` start's warm-up (`docs/specs/resident-mode.md` AC-20):
+/// `warm` runs while the cloaked window is shown once (the first present
+/// of a never visible window costs extra in DWM), as a tool window so the
+/// taskbar adds no button; then it hides, with its style back.
+pub fn warm_hidden(hwnd: HWND, warm: impl FnOnce()) {
+    let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    unsafe {
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as isize);
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+    }
+    warm();
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_HIDE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+    }
+}
+
 /// Brings a hidden resident window back: shown cloaked, uncloaked with the
 /// first frame of the file just opened (or right away with the hint), then
 /// activated. A visible window is only activated.
@@ -1623,5 +1640,27 @@ mod tests {
             96,
             client,
         )
+    }
+
+    /// `docs/specs/resident-mode.md` AC-20 (the window): the `--resident`
+    /// warm-up runs in the cloaked window shown as a tool window (no
+    /// taskbar button), which then hides with its style back.
+    #[test]
+    fn the_resident_warm_up_runs_in_a_hidden_tool_window() {
+        let hwnd = cloaked_window(w!("blinzel-test-warm-up"));
+        let style = || unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+        let before = style();
+        let mut during = None;
+        warm_hidden(hwnd, || {
+            let tool = style() & WS_EX_TOOLWINDOW.0 as isize != 0;
+            let shown = unsafe { IsWindowVisible(hwnd) }.as_bool();
+            during = Some((tool, shown, cloaked(hwnd)));
+        });
+        assert_eq!(during, Some((true, true, true)), "tool window, cloaked");
+        assert!(!unsafe { IsWindowVisible(hwnd) }.as_bool(), "hidden after");
+        assert_eq!(style(), before);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
     }
 }

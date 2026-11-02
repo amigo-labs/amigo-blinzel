@@ -505,21 +505,11 @@ pub fn run() -> i32 {
         // Nothing to show. This version starts fine (see update::on_start);
         // the hint frame warms the renderer and text pipeline.
         update::on_first_frame();
-        // Shown once while cloaked (never on screen): the first present of a
-        // window that was never visible costs extra in DWM. As a tool window
-        // meanwhile, so the taskbar does not add a button.
-        let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
-        unsafe {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as isize);
-            let _ = ShowWindow(hwnd, SW_SHOWNA);
-        }
-        #[cfg(feature = "turbojpeg")]
-        window::with_app(|a| a.warm_up(cpu.performance));
-        run_actions(hwnd, window::with_app(|a| a.render()).unwrap_or_default());
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_HIDE);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
-        }
+        window::warm_hidden(hwnd, || {
+            #[cfg(feature = "turbojpeg")]
+            window::with_app(|a| a.warm_up(cpu.performance));
+            run_actions(hwnd, window::with_app(|a| a.render()).unwrap_or_default());
+        });
         blinzel_core::bufpool::global().set_max_retained(0);
         message_loop();
         return finish();
