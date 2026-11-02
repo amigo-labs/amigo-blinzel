@@ -17,7 +17,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
 | 6 | [image-formats](image-formats.md) | 16 / 24 | 4 | 0 | `/spec-build` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
-| 8 | [animations](animations.md) | 9 / 14 | 0 | 1 | `/spec-build` (open: AC-05, AC-06, AC-08, AC-13); the manual check AC-14 (playback smoothness) |
+| 8 | [animations](animations.md) | 13 / 14 | 0 | 1 | the manual check AC-14 (playback smoothness); then `/spec-check` |
 | 9 | [color-management](color-management.md) | 10 / 19 | 3 | 2 | `/spec-build` |
 | 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | `/spec-check` round 3 (round 2's blockers fixed: tile tags, Linux multi-file drops, mutation-proof tests); the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design) |
 | 11 | [localization](localization.md) | 7 / 17 | 1 | 0 | `/spec-build` |
