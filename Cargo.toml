@@ -92,7 +92,7 @@ debug = "line-tables-only"
 [profile.release.package.turbojpeg-sys]
 debug = false
 
-# JPEG XL: optimized for size (see docs/PLAN.md, JPEG XL gate).
+# JPEG XL: optimized for size (see docs/specs/blinzel.md, JPEG XL gate).
 [profile.release.package.jxl-bitstream]
 opt-level = "s"
 

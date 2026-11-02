@@ -1,7 +1,7 @@
 name: Website
 
 # Builds website/dist and deploys it to Cloudflare Workers (static assets)
-# when the secrets exist (docs/PLAN.md, section 14). Not needed while
+# when the secrets exist (docs/SECRETS.md). Not needed while
 # Cloudflare Workers Builds deploys the repository itself (wrangler.toml).
 #   secret CLOUDFLARE_API_TOKEN   (Workers: edit)
 #   secret CLOUDFLARE_ACCOUNT_ID

@@ -11,7 +11,7 @@ use std::fmt;
 
 use crate::json::Json;
 
-/// Public key of the release signing key (docs/PLAN.md, section 10), the
+/// Public key of the release signing key (docs/specs/blinzel.md, section 10), the
 /// same on every platform. Until it is set, the updaters check nothing and
 /// install nothing.
 pub const RELEASE_KEY: Option<[u8; 32]> = Some([

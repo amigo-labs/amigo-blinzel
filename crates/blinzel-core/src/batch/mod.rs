@@ -1,5 +1,5 @@
 //! Batch resizing: many files in, resized copies out. Source files are
-//! never changed (docs/PLAN.md, section 7): every copy is a new file, and
+//! never changed (docs/specs/blinzel.md, section 7): every copy is a new file, and
 //! a name that already exists gets a number instead of being replaced.
 //!
 //! Per file: read, probe, decode (JPEG straight at a reduced DCT scale

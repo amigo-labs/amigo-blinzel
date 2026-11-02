@@ -4,7 +4,7 @@
 //! Finder's "Open With"), the icon, and a signature: with the identity in
 //! `$BLINZEL_MACOS_SIGN_IDENTITY` (our own self-signed certificate, so
 //! macOS keeps the screen recording permission across updates), otherwise
-//! ad hoc (`codesign -s -`). Releases are not notarized (docs/PLAN.md
+//! ad hoc (`codesign -s -`). Releases are not notarized (docs/specs/blinzel.md
 //! section 10). `lipo` and `codesign` run on macOS only; elsewhere the
 //! bundle is written without them (tests).
 //!

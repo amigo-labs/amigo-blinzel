@@ -4,3 +4,7 @@
 bench-*.json
 /website/dist
 /.playwright-mcp
+# Claude Code worktrees (project skills under .claude/skills/ stay tracked)
+/.claude/worktrees
+# Per-developer Claude Code settings (e.g. SPEC_AUTOCOMMIT)
+/.claude/settings.local.json
