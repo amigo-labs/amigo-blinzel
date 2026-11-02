@@ -34,6 +34,11 @@ fn installs_updates_and_uninstalls_in_a_sandbox() {
     );
     let uninstall = registry::get_str(&layout.uninstall, "UninstallString").unwrap();
     assert!(uninstall.ends_with("\" --uninstall"));
+    // AC-04: the entries are below HKEY_CURRENT_USER, as reg.exe sees them,
+    // and nothing went to HKEY_LOCAL_MACHINE.
+    assert!(reg_query("HKCU", &layout.uninstall).contains("9.9.9"));
+    assert!(reg_query("HKCU", &command).contains("%1"));
+    assert_eq!(reg_query("HKLM", &layout.uninstall), "");
 
     // Installing over an existing installation updates it in place.
     install::install(&layout, &src, "9.9.10", "test").unwrap();
@@ -61,8 +66,12 @@ fn installs_updates_and_uninstalls_in_a_sandbox() {
         Ok(false)
     );
 
+    // AC-07: the viewer's cache folder goes with the installation.
+    std::fs::create_dir_all(&layout.cache).unwrap();
+    std::fs::write(layout.cache.join("update.exe"), b"x").unwrap();
     install::uninstall(&layout).unwrap();
     assert!(!layout.dir.exists());
+    assert!(!layout.cache.exists());
     assert!(!layout.shortcut().exists());
     assert_eq!(layout.installed_version(), None);
     assert!(!registry::value_exists(&open_with, install::PROG_ID));
@@ -71,4 +80,17 @@ fn installs_updates_and_uninstalls_in_a_sandbox() {
 
     registry::delete_tree(&reg).unwrap();
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// What `reg query <root>\<key>` prints, or "" if the key does not exist.
+fn reg_query(root: &str, key: &str) -> String {
+    let out = std::process::Command::new("reg")
+        .args(["query", &format!(r"{root}\{key}")])
+        .output()
+        .unwrap();
+    if out.status.success() {
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    } else {
+        String::new()
+    }
 }
