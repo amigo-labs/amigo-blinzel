@@ -96,6 +96,19 @@ pub fn system_language() -> Lang {
     blinzel_i18n::negotiate(vars.iter().map(String::as_str))
 }
 
+/// Probes a file. Linux has no system decoder: the native probe is the
+/// whole answer (`docs/specs/image-formats.md` AC-24).
+fn probe(data: &[u8]) -> Result<Probe, DecodeError> {
+    decode::probe(data)
+}
+
+/// Decodes a file with the native decoders only; what they do not handle
+/// (a raw's sensor data, ICO, PSD, …) stays an error, and a raw shows its
+/// embedded previews instead.
+fn decode_with(data: &[u8], req: Request, threads: usize) -> Result<Image, DecodeError> {
+    decode::decode_with(data, req, threads)
+}
+
 impl Services for LinuxServices {
     fn wake(&self, w: Wake) {
         self.send(UserEvent::Wake(w));
@@ -114,11 +127,11 @@ impl Services for LinuxServices {
     }
 
     fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
-        decode::probe(data)
+        probe(data)
     }
 
     fn decode(&self, data: &[u8], req: Request, threads: usize) -> Result<Image, DecodeError> {
-        decode::decode_with(data, req, threads)
+        decode_with(data, req, threads)
     }
 
     fn log(&self, msg: &str) {
@@ -1207,6 +1220,46 @@ mod tests {
         assert_eq!(a, [Action::Uncloak, Action::Activate]);
         let a = handed_over(None, |_| panic!("nothing to open"));
         assert_eq!(a, [Action::Activate]);
+    }
+
+    /// `docs/specs/image-formats.md` AC-24: there is no system decoder: a
+    /// raw keeps its embedded previews, and what the native decoders do
+    /// not handle fails as not decoded natively.
+    #[test]
+    fn without_a_system_decoder_raws_keep_their_previews_and_other_files_fail() {
+        // A Fujifilm RAF pointing at a 600 × 400 JPEG (header and an empty
+        // scan) and saying 6240 × 4160 in its cropped-size record.
+        let jpeg: &[u8] = &[
+            0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8, 1, 0x90, 2, 0x58, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11,
+            1, 0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0x11, 3, 0x11, 0, 63, 0, 0xFF, 0xD9,
+        ];
+        let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+        raf.resize(200, 0);
+        raf[84..88].copy_from_slice(&200u32.to_be_bytes());
+        raf[88..92].copy_from_slice(&(jpeg.len() as u32).to_be_bytes());
+        raf[92..96].copy_from_slice(&(200 + jpeg.len() as u32).to_be_bytes());
+        raf.extend_from_slice(jpeg);
+        raf.extend([0, 0, 0, 1, 0x01, 0x11, 0, 4, 0x10, 0x40, 0x18, 0x60]);
+
+        let p = probe(&raf).unwrap();
+        assert!(p.is_raw());
+        assert_eq!((p.width, p.height), (6240, 4160));
+        let sizes: Vec<_> = p.previews.iter().map(|p| (p.width, p.height)).collect();
+        assert_eq!(sizes, [(600, 400)]);
+        let e = decode_with(&raf, Request::Full, 2).unwrap_err();
+        assert_eq!(e.to_string(), "Raw is not decoded natively");
+
+        // Recognized, but not decoded natively: probe and decode say so.
+        let ico: &[u8] = &[0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0];
+        let psd: &[u8] = b"8BPS\0\x01\0\0\0\0\0\0\0\x03\0\0\0\x10\0\0\0\x10\0\x08\0\x03";
+        // A raw without an embedded preview.
+        let orf: &[u8] = b"IIRO\x08\0\0\0\0\0\0\0\0\0\0\0";
+        for (data, name) in [(ico, "Ico"), (psd, "Psd"), (orf, "Raw")] {
+            let msg = format!("{name} is not decoded natively");
+            assert_eq!(probe(data).unwrap_err().to_string(), msg);
+            let e = decode_with(data, Request::Fit { w: 64, h: 64 }, 1).unwrap_err();
+            assert_eq!(e.to_string(), msg);
+        }
     }
 
     /// `docs/specs/browsing.md` AC-14: changes in the folder are collected
