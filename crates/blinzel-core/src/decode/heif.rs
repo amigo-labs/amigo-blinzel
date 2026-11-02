@@ -153,6 +153,17 @@ mod tests {
         }
     }
 
+    /// AC-03: the probe yields the `colr` profile, the same as the
+    /// container read for the system decoders.
+    #[test]
+    fn probe_reads_the_colour_profile() {
+        let tagged = include_bytes!("../../testdata/p3-64x48.heic");
+        let icc = crate::decode::probe(tagged).unwrap().icc.expect("profile");
+        assert!(!icc.srgb);
+        assert_eq!(Some(icc), crate::decode::avif::container_profile(tagged));
+        assert!(crate::decode::probe(RGB).unwrap().icc.is_none());
+    }
+
     #[test]
     fn alpha_is_straight() {
         let img = decode(RGBA, 1).unwrap();

@@ -432,7 +432,11 @@ fn property(kind: [u8; 4], body: &[u8]) -> Result<Prop> {
             let end = urn.iter().position(|&b| b == 0).unwrap_or(urn.len());
             Prop::AuxC(String::from_utf8_lossy(&urn[..end]).into_owned())
         }
-        b"av1C" | b"pixi" | b"pasp" | b"clli" | b"mdcv" | b"cclv" | b"amve" => Prop::Ignored,
+        // `hvcC`: HEIC's decoder configuration, essential in every HEIC;
+        // the container is read there only for the profile and EXIF.
+        b"av1C" | b"hvcC" | b"pixi" | b"pasp" | b"clli" | b"mdcv" | b"cclv" | b"amve" => {
+            Prop::Ignored
+        }
         _ => Prop::Unknown,
     })
 }
@@ -1241,6 +1245,16 @@ mod tests {
         assert!(probe.icc.is_some());
         assert!(container_profile(P3).is_some());
         assert!(container_profile(RGB420).is_none());
+    }
+
+    /// AC-03: the HEIC `colr` profile is read from the container (what WIC
+    /// and ImageIO probes use), past the HEVC item's essential `hvcC`.
+    #[test]
+    fn heic_profile_comes_from_the_container() {
+        let tagged = include_bytes!("../../testdata/p3-64x48.heic");
+        let p = container_profile(tagged).expect("profile");
+        assert!(!p.srgb);
+        assert!(container_profile(include_bytes!("../../testdata/rgb-64x48.heic")).is_none());
     }
 
     #[test]
