@@ -105,7 +105,39 @@ fn swap(installed: &Path, new: &Path, old: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::io::Read as _;
+    use std::process::Command;
+
+    use blinzel_core::update::{State, Version};
+
     use super::*;
+
+    /// An installation in a fresh temporary folder (removed by the caller).
+    fn sandbox(name: &str) -> (PathBuf, Installed) {
+        let dir = std::env::temp_dir().join(format!("blinzel-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let i = Installed(Layout::under(&dir));
+        std::fs::create_dir_all(&i.0.dir).unwrap();
+        std::fs::create_dir_all(&i.0.cache).unwrap();
+        (dir, i)
+    }
+
+    fn set_state(i: &Installed, state: &State) {
+        std::fs::write(i.state_file(), state.to_text()).unwrap();
+    }
+
+    fn state(i: &Installed) -> State {
+        State::parse(&std::fs::read_to_string(i.state_file()).unwrap_or_default())
+    }
+
+    fn read(p: &Path) -> Vec<u8> {
+        std::fs::read(p).unwrap()
+    }
+
+    fn no_restart(_: Command) {
+        panic!("restarted although nothing was rolled back");
+    }
 
     /// AC-14: the test executable is not the one `--install` placed, so
     /// it is no installation and "Check for updates" says so.
@@ -147,6 +179,113 @@ mod tests {
         assert_eq!(std::fs::read(&installed).unwrap(), b"v2");
         assert_eq!(std::fs::read(&old).unwrap(), b"v1");
         assert!(!new.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AC-19: the running process keeps the file it was started from (the
+    /// previous version), and the installed update is what the next start
+    /// runs.
+    #[test]
+    fn the_next_start_runs_the_installed_update() {
+        let (dir, i) = sandbox("next-start");
+        std::fs::write(i.0.exe(), b"v1").unwrap();
+        let mut running = std::fs::File::open(i.0.exe()).unwrap();
+        i.install(b"v2").unwrap();
+        let mut kept = Vec::new();
+        running.read_to_end(&mut kept).unwrap();
+        assert_eq!(
+            kept, b"v1",
+            "the running process keeps the previous version"
+        );
+        assert_eq!(read(&i.program()), b"v2", "the next start runs the update");
+        assert_eq!(read(&i.old()), b"v1");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AC-20: three starts of an update on trial are counted; the fourth
+    /// puts the previous executable back, keeps the failed one as
+    /// `blinzel.bad`, starts the previous one with the same arguments and
+    /// tells this process to exit.
+    #[test]
+    fn a_failing_update_is_rolled_back_on_the_fourth_start() {
+        let (dir, i) = sandbox("rollback");
+        let new = Version::parse("9.9.9").unwrap();
+        std::fs::write(i.0.exe(), b"v2").unwrap();
+        std::fs::write(i.old(), b"v1").unwrap();
+        set_state(
+            &i,
+            &State {
+                pending: Some(new),
+                ..State::default()
+            },
+        );
+        for n in 1..=3 {
+            assert!(!selfupdate::start(&i, new, [], no_restart));
+            assert_eq!(state(&i).failed_starts, n);
+            assert_eq!(
+                (read(&i.0.exe()), read(&i.old())),
+                (b"v2".into(), b"v1".into())
+            );
+        }
+        let args = ["photo.jpg", "--resident"].map(OsString::from);
+        let mut restarted = None;
+        assert!(selfupdate::start(&i, new, args.clone(), |c| restarted = Some(c)));
+        let c = restarted.expect("the previous version is started");
+        assert_eq!(c.get_program(), i.program());
+        assert_eq!(c.get_args().collect::<Vec<_>>(), args);
+        assert_eq!(read(&i.0.exe()), b"v1");
+        assert_eq!(read(&i.bad()), b"v2");
+        assert!(!i.old().exists());
+        assert_eq!(state(&i), State::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AC-20: with no previous executable to restore, the trial ends and
+    /// this version keeps running.
+    #[test]
+    fn without_a_previous_executable_the_update_keeps_running() {
+        let (dir, i) = sandbox("no-previous");
+        let new = Version::parse("9.9.9").unwrap();
+        std::fs::write(i.0.exe(), b"v2").unwrap();
+        set_state(
+            &i,
+            &State {
+                pending: Some(new),
+                failed_starts: 3,
+                ..State::default()
+            },
+        );
+        assert!(!selfupdate::start(&i, new, [], no_restart));
+        assert_eq!(read(&i.0.exe()), b"v2");
+        assert_eq!(state(&i), State::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AC-21: while an update is on trial `blinzel.old` stays; a start
+    /// with no update on trial deletes it and `blinzel.bad`.
+    #[test]
+    fn a_start_without_a_trial_deletes_the_previous_copies() {
+        let (dir, i) = sandbox("forget");
+        let new = Version::parse("9.9.9").unwrap();
+        std::fs::write(i.0.exe(), b"v2").unwrap();
+        std::fs::write(i.old(), b"v1").unwrap();
+        std::fs::write(i.bad(), b"v0").unwrap();
+        set_state(
+            &i,
+            &State {
+                pending: Some(new),
+                ..State::default()
+            },
+        );
+        assert!(!selfupdate::start(&i, new, [], no_restart));
+        assert!(
+            i.old().exists() && i.bad().exists(),
+            "kept during the trial"
+        );
+        set_state(&i, &State::default());
+        assert!(!selfupdate::start(&i, new, [], no_restart));
+        assert!(!i.old().exists() && !i.bad().exists());
+        assert_eq!(read(&i.0.exe()), b"v2");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

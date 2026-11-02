@@ -11,7 +11,9 @@
 //! again. Only an installed copy updates itself; the platform says what
 //! that is and how a download is put in place ([`Installation`]).
 
+use std::ffi::OsString;
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use blinzel_core::update::{self as core, Found, StartAction, State, Version};
@@ -80,16 +82,37 @@ pub fn on_start(i: Option<impl Installation>) -> bool {
     let Some(i) = i else {
         return false;
     };
-    let mut state = load_state(&i);
+    start(
+        &i,
+        running_version(),
+        std::env::args_os().skip(1),
+        |mut c| {
+            let _ = c.spawn();
+        },
+    )
+}
+
+/// The start of `running` from installation `i`: counts a start of an
+/// update on trial, rolls a failed update back (AC-20) and drops the
+/// previous version once no update is on trial (AC-21). After a rollback
+/// the restored program goes to `spawn` with `args`, and `true` says this
+/// process should exit.
+pub(crate) fn start(
+    i: &impl Installation,
+    running: Version,
+    args: impl IntoIterator<Item = OsString>,
+    spawn: impl FnOnce(Command),
+) -> bool {
+    let mut state = load_state(i);
     let before = state.clone();
-    if core::on_start(&mut state, running_version()) == StartAction::Rollback {
+    if core::on_start(&mut state, running) == StartAction::Rollback {
         state.pending = None;
         state.failed_starts = 0;
         if i.rollback() {
-            save_state(&i, &state);
-            let _ = std::process::Command::new(i.program())
-                .args(std::env::args_os().skip(1))
-                .spawn();
+            save_state(i, &state);
+            let mut restart = Command::new(i.program());
+            restart.args(args);
+            spawn(restart);
             return true;
         }
         // Nothing to roll back to: keep going with this version.
@@ -98,7 +121,7 @@ pub fn on_start(i: Option<impl Installation>) -> bool {
         i.forget_previous();
     }
     if state != before {
-        save_state(&i, &state);
+        save_state(i, &state);
     }
     false
 }
