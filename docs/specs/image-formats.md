@@ -64,7 +64,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 
 - **Entry points** (`crates/blinzel-core/src/decode/mod.rs`): `probe(&[u8]) -> Result<Probe>`, `decode(&[u8], Request) -> Result<Image>` (one thread), `decode_with(&[u8], Request, threads)`, `decode_preview(data, &EmbeddedPreview, full, Request)`, `guard` (`catch_unwind` around every probe and decode), `MAX_PIXELS = 1 << 30`. `Request::{Full, Fit { w, h }, Region(PixelRect)}`: only JPEG decodes smaller for `Fit`; other formats decode fully, and `Region` crops a full decode to BGRA (`crop_to_bgra`). `DecodeError::{Unsupported(Format), Corrupt(String), TooLarge { width, height }, Panicked(String)}`; only `Unsupported` sends a file to the system decoder.
 - **`Probe`**: `format`, stored (not oriented) `width`/`height`, `orientation`, `previews: Vec<EmbeddedPreview>` (largest first), `icc: Option<Profile>`; `is_raw()` = TIFF or raw with previews.
-- **Detection** (`crates/blinzel-core/src/format.rs`): also `GIF87a`; HEIF brands `heix`, `hevc`, `hevx`, `heim`, `heis`, `mif1`, `msf1`; AVIF brand `avis`; the JPEG XL container `\0\0\0\x0cJXL \r\n\x87\n`; BigTIFF `II+\0`/`MM\0+`; raws `IIRO`/`IIRS` (ORF), `IIU\0` (RW2), `FUJIFILMCCD-RAW` (RAF); JPEG XR `II\xbc\x01`/`II\xbc\x00`; ICO/CUR `00 00 01 00`/`00 00 02 00`; `DDS `, `8BPS`, `qoif`. Only the major brand of `ftyp` is checked.
+- **Detection** (`crates/blinzel-core/src/format.rs`): also `GIF87a`; HEIF brands `heix`, `hevc`, `hevx`, `heim`, `heis`, `mif1`, `msf1`; AVIF brand `avis`; the JPEG XL container `\0\0\0\x0cJXL \r\n\x87\n`; BigTIFF `II+\0`/`MM\0+`; raws `IIRO`/`IIRS` (ORF), `IIU\0` (RW2), `FUJIFILMCCD-RAW` (RAF); JPEG XR `II\xbc\x01`/`II\xbc\x00`; ICO/CUR `00 00 01 00`/`00 00 02 00`; `DDS `, `8BPS`, `qoif`. The major brand of `ftyp` decides, except `mif1`/`msf1`: with `avif`/`avis` and no HEVC brand among the compatible brands inside the box it is AVIF.
 - **Native decoders and outputs:**
 
   | Format | Code | Output | Declined (→ system decoder) |
@@ -91,7 +91,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | Scenario | Expected behavior |
 | -------- | ----------------- |
 | JPEG file named `.png` | Detected and decoded as JPEG |
-| AVIF whose `ftyp` major brand is `mif1` (AVIF only as a compatible brand) | Detected as HEIF, so `rav1d` never sees it: with `heic` zune-heic rejects it, then the system decoder (Windows: WIC, macOS: ImageIO) or an error (Linux) |
+| AVIF whose `ftyp` major brand is `mif1` (AVIF only as a compatible brand) | Detected and decoded as AVIF (`mif1_major_brand_with_avif_compatible_is_avif`) |
 | GIF whose logical screen is 0 × 0 | `gif::decode` would use the frame's extent, but the probe rejects the zero size first, so the viewer shows an error |
 | Interlaced PNG | Decoded through a full-frame buffer instead of row by row (no test with an interlaced file) |
 | CMYK JPEG (Adobe, inverted) | libjpeg-turbo decodes CMYK, converted to BGRA (only the conversion is tested) |

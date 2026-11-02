@@ -1182,6 +1182,19 @@ mod tests {
         }
     }
 
+    /// An AVIF that names `avif` only as a compatible brand (major brand
+    /// `mif1`) is still an AVIF, not a HEIC (docs/specs/image-formats.md).
+    #[test]
+    fn mif1_major_brand_with_avif_compatible_is_avif() {
+        let mut data = RGB420.to_vec();
+        data[8..12].copy_from_slice(b"mif1");
+        let probe = crate::decode::probe(&data).unwrap();
+        assert_eq!(probe.format, Format::Avif);
+        assert_eq!((probe.width, probe.height), (64, 48));
+        let img = crate::decode::decode(&data, crate::decode::Request::Full).unwrap();
+        assert_close(pixel(&img, 20, 40), source(20, 40));
+    }
+
     #[test]
     fn alpha_plane() {
         let img = decode(RGBA, 2).unwrap();

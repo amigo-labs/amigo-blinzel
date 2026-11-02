@@ -47,8 +47,21 @@ pub fn detect(d: &[u8]) -> Format {
     } else if starts(b"RIFF") && d.len() >= 12 && &d[8..12] == b"WEBP" {
         Format::WebP
     } else if d.len() >= 12 && &d[4..8] == b"ftyp" {
+        // A generic `mif1`/`msf1` major brand: the compatible brands after
+        // the minor version (inside the box) say whether it is AVIF.
+        let size = u32::from_be_bytes([d[0], d[1], d[2], d[3]]) as usize;
+        let compatible = d.get(16..size.min(d.len())).unwrap_or_default();
+        let has = |brands: &[&[u8; 4]]| {
+            compatible
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|b| brands.contains(&b))
+        };
+        let heic: &[&[u8; 4]] = &[b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis"];
         match &d[8..12] {
             b"avif" | b"avis" => Format::Avif,
+            b"mif1" | b"msf1" if has(&[b"avif", b"avis"]) && !has(heic) => Format::Avif,
             b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"mif1" | b"msf1" => {
                 Format::Heif
             }
@@ -112,6 +125,11 @@ mod tests {
         assert_eq!(detect(b"\0\0\0\x18ftypheic\0\0\0\0"), Format::Heif);
         assert_eq!(detect(b"\0\0\0\x18ftypavif\0\0\0\0"), Format::Avif);
         assert_eq!(detect(b"\0\0\0\x18ftypcrx \0\0\0\0"), Format::Raw);
+        // A `mif1` major brand is decided by the compatible brands.
+        assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1avif"), Format::Avif);
+        assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1heic"), Format::Heif);
+        // Brands after the end of the `ftyp` box do not count.
+        assert_eq!(detect(b"\0\0\0\x14ftypmif1\0\0\0\0mif1avif"), Format::Heif);
         assert_eq!(detect(b"II*\0\x08\0\0\0"), Format::Tiff);
         assert_eq!(detect(&[0xFF, 0x0A, 0, 0]), Format::Jxl);
         assert_eq!(detect(b"hello"), Format::Unknown);
