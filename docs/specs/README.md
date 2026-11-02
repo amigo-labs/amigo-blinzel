@@ -18,7 +18,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 6 | [image-formats](image-formats.md) | 21 / 24 | 4 | 0 | the first Windows CI run of AC-21, AC-22 (`wic.rs`) and macOS CI run of AC-23 (`macos/imageio.rs`), all written; then `/spec-check` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 16 / 17 | 0 | 1 | the manual check AC-17 (speed factor on an 8-core machine, `blinzel-bench jpeg-ab`), then `/spec-check` |
 | 8 | [animations](animations.md) | 13 / 14 | 0 | 1 | the manual check AC-14 (playback smoothness); then `/spec-check` |
-| 9 | [color-management](color-management.md) | 14 / 19 | 3 | 2 | `/spec-build` for AC-03's macOS ImageIO clause (`macos/imageio.rs`), AC-11 (Windows `color.rs`, `run.rs`), AC-19 (Windows `run.rs`); the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
+| 9 | [color-management](color-management.md) | 15 / 19 | 3 | 2 | the first CI runs of AC-03's macOS ImageIO clause (`macos/imageio.rs`) and AC-11's Windows half (`color.rs`), both written; the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
 | 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | `/spec-check` round 3 (round 2's blockers fixed: tile tags, Linux multi-file drops, mutation-proof tests); the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design) |
 | 11 | [localization](localization.md) | 7 / 17 | 1 | 0 | `/spec-build` |
 | 12 | [platform-shells](platform-shells.md) | 8 / 24 | 11 | 5 | `/spec-build` |
