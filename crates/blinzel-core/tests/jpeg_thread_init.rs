@@ -41,6 +41,10 @@ fn decode(data: &[u8], threads: usize) -> usize {
     blinzel_jpeg::decode_planes(data, 8, &mut planes, threads).unwrap()
 }
 
+/// The helper threads a decode starts, from the threads its scan used and
+/// the file's scans.
+type Helpers = fn(usize, usize) -> usize;
+
 /// Scans in the file (SOS markers; entropy data stuffs every 0xFF).
 fn scans(data: &[u8]) -> usize {
     data.windows(2).filter(|w| *w == [0xFF, 0xDA]).count()
@@ -82,7 +86,7 @@ fn every_helper_thread_runs_the_first_registered_init() {
     // scan used: pass A, synchronization of neighbours, bands; with
     // restart markers no synchronization, with dense ones no pass A; a
     // thread per progressive scan, then the IDCT bands.
-    let cases: [(&str, &[u8], usize, fn(usize, usize) -> usize); 5] = [
+    let cases: [(&str, &[u8], usize, Helpers); 5] = [
         ("sequential", &sequential, 4, |t, _| 3 * t - 1),
         ("gray", &gray, 4, |t, _| 3 * t - 1),
         ("sparse restart", &restart, 4, |t, _| 2 * t),
@@ -107,5 +111,9 @@ fn every_helper_thread_runs_the_first_registered_init() {
             calls.len()
         );
     }
-    assert_eq!(SECOND.load(Ordering::Relaxed), 0, "a second registration ran");
+    assert_eq!(
+        SECOND.load(Ordering::Relaxed),
+        0,
+        "a second registration ran"
+    );
 }
