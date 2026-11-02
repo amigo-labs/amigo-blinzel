@@ -354,3 +354,118 @@ fn r_and_l_turn_the_view_and_drop_selection_zoom_pan_and_crop() {
     assert_eq!(h.app.user_rotation(), Orientation::NORMAL);
     assert_eq!(h.layout().unwrap().content, (w, ht));
 }
+
+// --------------------------------------------------------- window sizing
+
+/// The `FitWindow` requests in `a`: client size and `grow_only`.
+fn fits(a: &[Action]) -> Vec<((u32, u32), bool)> {
+    a.iter()
+        .filter_map(|a| match a {
+            Action::FitWindow { client, grow_only } => Some((*client, *grow_only)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A JPEG of `w` × `h` in the images' folder (it decodes at a reduced
+/// size for the screen).
+fn write_jpeg(h: &Harness, name: &str, w: u32, ht: u32) {
+    let opts = blinzel_core::decode::jpeg::EncodeOptions {
+        quality: 90,
+        subsampling: 420,
+        ..Default::default()
+    };
+    let rgb = blinzel_core::testimg::rgb(w, ht);
+    h.write_file(
+        name,
+        &blinzel_core::decode::jpeg::encode_rgb(&rgb, w, ht, opts).unwrap(),
+    );
+}
+
+/// Nothing open yet, view mode `m`.
+fn in_mode(m: ViewMode) -> Harness {
+    let mut s = Settings::default();
+    s.view.mode = m;
+    Harness::with_settings(s)
+}
+
+/// AC-05: "fit window to image".
+#[test]
+fn the_window_takes_each_images_size_once_per_image_and_rotation() {
+    let mut h = in_mode(ViewMode::FitWindowToImage);
+    h.write_png("a.png", 64, 48);
+    // Larger than the 1920 × 1080 screen box: shown first from a smaller
+    // stage, then from the full resolution once zoomed in.
+    write_jpeg(&h, "b.jpg", 2400, 1800);
+    h.write_png("c.png", 30, 90);
+    // No resize before the decoded image brings the size.
+    let a = h.app.open(h.images.join("a.png"));
+    assert_eq!(fits(&a), []);
+    assert_eq!(fits(&h.pump()), [((64, 48), false)]);
+
+    // Once per image: a later, sharper result of the same image does not
+    // resize again.
+    h.clear_actions();
+    let a = h.key(Right);
+    assert_eq!(fits(&a), [((2400, 1800), false)]);
+    let id = h.app.current.as_ref().unwrap().cache_id;
+    assert!(!h.app.has_stage(id, Stage::Full));
+    h.wheel((400.0, 300.0), 120 * 8);
+    h.wait_for(|h| h.app.has_stage(id, Stage::Full));
+    assert_eq!(fits(h.actions()), [((2400, 1800), false)], "only once");
+
+    // Rotating: the turned size, again once per rotation.
+    h.key(Digit(0));
+    let a = h.key(Right);
+    assert_eq!(fits(&a), [((30, 90), false)]);
+    assert_eq!(fits(&h.key(Letter('R'))), [((90, 30), false)]);
+    assert_eq!(fits(&h.key(Letter('L'))), [((30, 90), false)]);
+    // Switching the view mode and the filmstrip refit it.
+    assert_eq!(fits(&h.key(Digit(1))), [((30, 90), false)]);
+    let strip = strip_height(1.0) as u32;
+    assert_eq!(fits(&h.key(Letter('T'))), [((30, 90 + strip), false)]);
+    assert_eq!(fits(&h.key(Letter('T'))), [((30, 90), false)]);
+
+    // Cutting fits the window to the crop, also after switching the
+    // mode; returning to the original fits the whole image again.
+    h.open("a.png");
+    let crop = cut(&mut h);
+    let crop_size = ((crop.w, crop.h), false);
+    assert_eq!(fits(&h.actions()[h.actions().len() - 1..]), [crop_size]);
+    assert_eq!(fits(&h.key(Digit(1))), [crop_size]);
+    assert_eq!(fits(&h.key(Escape)), [((64, 48), false)]);
+
+    // Never while maximized or full screen.
+    for (maximized, fullscreen) in [(true, false), (false, true)] {
+        h.app.maximized = maximized;
+        h.app.fullscreen = fullscreen;
+        assert_eq!(fits(&h.key(Letter('R'))), [], "rotated");
+        assert_eq!(fits(&h.key(Right)), [], "next image");
+        assert_eq!(fits(&h.key(Digit(1))), [], "mode");
+        h.key(Left);
+    }
+    h.app.maximized = false;
+    h.app.fullscreen = false;
+    // Never in "100 %".
+    h.key(Digit(3));
+    h.clear_actions();
+    h.key(Letter('R'));
+    h.key(Right);
+    h.key(Letter('T'));
+    h.open("b.jpg");
+    assert_eq!(fits(h.actions()), [], "100 %");
+}
+
+/// AC-05: "fit image to window" only lets the window grow.
+#[test]
+fn in_fit_image_to_window_the_window_may_grow_for_each_image() {
+    let mut h = in_mode(ViewMode::FitImageToWindow);
+    h.write_png("a.png", 64, 48);
+    h.write_png("b.png", 1600, 1200);
+    h.open("a.png");
+    assert_eq!(fits(h.actions()), [((64, 48), true)]);
+    assert_eq!(fits(&h.key(Right)), [((1600, 1200), true)]);
+    assert_eq!(fits(&h.key(Letter('R'))), [((1200, 1600), true)]);
+    let strip = strip_height(1.0) as u32;
+    assert_eq!(fits(&h.key(Letter('T'))), [((1200, 1600 + strip), true)]);
+}
