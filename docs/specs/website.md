@@ -88,12 +88,12 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 | AC-04 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-05 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-06 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
-| AC-07 | `builds_the_site`, `expands_placeholders` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
+| AC-07 | `missing_reports_show_the_pending_notice`, `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-08 | `builds_the_site` (charts and published report), `table_lists_every_viewer_with_median_and_p95` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-09 | `time_charts_list_the_fastest_first`, `burst_chart_lists_the_highest_share_first`, `charts_highlight_no_viewer` (`crates/blinzel-site/src/main.rs`), `charts_sort_without_highlight` (`charts.rs`), Linux CI | built | |
 | AC-10 | `charts_without_values_read_not_measured` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-11 | `machine_block_labels_every_entry` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
-| AC-12 | `expands_placeholders` (`main.rs`), `charts_sort_without_highlight` (`charts.rs`), Linux CI | built | |
+| AC-12 | `bad_placeholders_fail_the_build`, `expands_placeholders` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-13 | `pages_need_title_and_description` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-14 | `invalid_race_report_fails_naming_the_file` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-15 | `download_placeholders_resolve_to_latest_release` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
@@ -111,3 +111,4 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 - 2026-11-02: The two browser scripts are tested without a browser: `tests/scripts.rs` runs `site.js` and `lang.js` in Node (`tests/browser.js`, its `vm` module with a stand-in `navigator`, `document` and `location`) against the download button of the generated start pages. Node is no Cargo dependency; the hooks already need it and every GitHub runner has it, so a missing `node` fails the test instead of skipping it.
 - 2026-11-02: AC-16 found a defect: `site.js` took every X11 user agent for Linux, so a BSD desktop got the Linux archive instead of the download section. It now matches only "Linux" (ChromeOS says "CrOS", which made the separate ChromeOS check redundant, so it went). AC-17 was already met; its test went red when `lang.js` compared the whole language or kept its case, or the root page lost its script.
 - 2026-11-02: The extracted chart test checked the table only for its raw-data link, the key-repeat order not at all and "no highlight" only by the absence of one class name. AC-08 to AC-11 got tests with the real page strings (`main.rs`, a four-viewer report with an escaped name, unmeasured cold starts, no key presses and an unknown machine key); each went red when the sort order, the seconds format, the separator, the `presses > 0` filter, a bar's class or fill, the "not measured" fallback, the p95 cell, the name escaping or a machine label was broken.
+- 2026-11-02: AC-12 found a defect: without its report, `{{race:<unknown kind>}}` showed the "still to come" notice and the build succeeded, so a typo would surface only on the day the measurement is published. The generator now checks the kind against `charts::KINDS` first. AC-07's new test counts one notice per race placeholder of the fragments and checks that no absent report is published; AC-13's test also covers a missing or misspelled title and headers not on the first two lines.

@@ -376,6 +376,44 @@ mod tests {
         assert!(expand("{{version", Lang::De, &races).is_err());
     }
 
+    /// Without a report every one of its placeholders shows the "still to
+    /// come" notice and the report is not published.
+    #[test]
+    fn missing_reports_show_the_pending_notice() {
+        let tmp = fresh_site("pending");
+        let count = |lang: Lang, prefix: &str| {
+            let src = fs::read_to_string(tmp.join("src").join(lang.code()).join("index.html"));
+            src.unwrap().matches(&format!("{{{{{prefix}:")).count()
+        };
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let html = fs::read_to_string(dist.join(lang.code()).join("index.html")).unwrap();
+            let want = count(lang, "race") + count(lang, "race-macos");
+            assert!(want >= 12, "{}: {want} race placeholders", lang.code());
+            assert_eq!(
+                html.matches(lang.t("pending")).count(),
+                want,
+                "{}",
+                lang.code()
+            );
+        }
+        assert!(!dist.join("race.json").exists() && !dist.join("race-macos.json").exists());
+        fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let html = fs::read_to_string(dist.join(lang.code()).join("index.html")).unwrap();
+            let want = count(lang, "race-macos");
+            assert_eq!(
+                html.matches(lang.t("pending")).count(),
+                want,
+                "{}",
+                lang.code()
+            );
+        }
+        assert!(dist.join("race.json").is_file() && !dist.join("race-macos.json").exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
     /// A page with an unknown placeholder, an unknown race chart kind (with
     /// or without the report) or an unclosed `{{` stops the build.
     #[test]
@@ -637,6 +675,23 @@ mod tests {
         )
         .unwrap();
         assert!(read_page(&tmp, Lang::En, "index").is_err());
+        // Without the title, or with the headers not on the first two lines.
+        for text in [
+            "<!-- description: A viewer -->\n<p>x</p>\n",
+            "<!-- titel: Home -->\n<!-- description: A viewer -->\n<p>x</p>\n",
+            "\n<!-- title: Home -->\n<!-- description: A viewer -->\n<p>x</p>\n",
+            "<!-- title: Home -->\n\n<!-- description: A viewer -->\n<p>x</p>\n",
+            "<p>x</p>\n",
+        ] {
+            fs::write(tmp.join("en/index.html"), text).unwrap();
+            let Err(e) = read_page(&tmp, Lang::En, "index") else {
+                panic!("read: {text}");
+            };
+            assert!(
+                e.contains("index.html") && e.contains("missing <!--"),
+                "{e}"
+            );
+        }
         let _ = fs::remove_dir_all(&tmp);
     }
 
