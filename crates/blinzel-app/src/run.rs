@@ -8,7 +8,7 @@
 //!
 //! The window becomes visible (uncloaked) with the first image on it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::channel;
 
@@ -78,6 +78,25 @@ pub fn parse_args() -> Args {
 /// measuring the first frame (`docs/specs/startup.md` AC-10).
 fn may_hand_off(args: &Args) -> bool {
     !args.exit_after_first_frame
+}
+
+/// Hands a launch over to a running instance (`docs/specs/resident-mode.md`
+/// AC-07, AC-08): `target` picks it from "Open images in the same window"
+/// and resident mode ([`instance::target`]), `send` hands it the file or,
+/// without one (Start menu), asks a resident instance to show its window.
+/// `Some(0)`: it took over, and the launch exits with code 0.
+fn hand_off<W>(
+    file: Option<&Path>,
+    single_instance: bool,
+    resident: bool,
+    target: impl FnOnce(bool, bool) -> Option<W>,
+    send: impl FnOnce(W, Option<&Path>) -> bool,
+) -> Option<i32> {
+    if file.is_none() && !resident {
+        return None;
+    }
+    let target = target(single_instance, resident)?;
+    send(target, file).then_some(0)
 }
 
 /// What a `--resident` start (the sign-in entry) does before any window
@@ -243,16 +262,18 @@ pub fn run() -> i32 {
             return 0;
         }
     } else if may_hand_off(&args)
-        && let Some(target) = instance::target(settings.single_instance, settings.resident)
+        && let Some(code) = hand_off(
+            args.file.as_deref(),
+            settings.single_instance,
+            settings.resident,
+            instance::target,
+            |target, file| match file {
+                Some(file) => instance::hand_off(target, file),
+                None => instance::show(target),
+            },
+        )
     {
-        let handed_off = match &args.file {
-            Some(file) => instance::hand_off(target, file),
-            // Start menu: a resident instance shows its window.
-            None => settings.resident && instance::show(target),
-        };
-        if handed_off {
-            return 0;
-        }
+        return code;
     }
     let file = args.file.clone().filter(|_| !args.resident);
     timing::mark("instance_checked");
@@ -610,10 +631,59 @@ fn decode_workers(performance: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        Args, ResidentStart, decode_workers, io_threads, language_from_names, may_hand_off,
-        report_path, resident_start, uncloak_fallback,
+        Args, ResidentStart, decode_workers, hand_off, io_threads, language_from_names,
+        may_hand_off, report_path, resident_start, uncloak_fallback,
     };
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    /// `docs/specs/resident-mode.md` AC-07, AC-08: a file goes to the
+    /// instance `target` picks (`instance::pick` has its rules), a launch
+    /// without one only shows a resident instance, and a launch that handed
+    /// over exits with code 0.
+    #[test]
+    fn a_launch_hands_its_file_or_a_show_request_over_and_exits_with_0() {
+        let file = Path::new(r"C:\Bilder\a.jpg");
+        let sent = std::cell::RefCell::new(Vec::new());
+        let send = |ok: bool| {
+            let sent = &sent;
+            move |w: u8, f: Option<&Path>| {
+                sent.borrow_mut().push((w, f.map(Path::to_path_buf)));
+                ok
+            }
+        };
+        let to = |w: u8| {
+            move |single: bool, resident: bool| Some(w + 10 * (single as u8 + 2 * resident as u8))
+        };
+        // A file: to the target for both settings, which took over.
+        assert_eq!(
+            hand_off(Some(file), true, false, to(1), send(true)),
+            Some(0)
+        );
+        assert_eq!(
+            hand_off(Some(file), false, true, to(1), send(true)),
+            Some(0)
+        );
+        assert_eq!(
+            sent.take(),
+            [(11, Some(file.into())), (21, Some(file.into()))]
+        );
+        // Refused or hung: the launch opens its own window.
+        assert_eq!(hand_off(Some(file), true, false, to(1), send(false)), None);
+        sent.take();
+        // No target: nothing is sent.
+        assert_eq!(
+            hand_off(Some(file), false, false, |_, _| None::<u8>, send(true)),
+            None
+        );
+        assert!(sent.take().is_empty());
+        // Without a file: "show", only in resident mode.
+        assert_eq!(hand_off(None, false, true, to(2), send(true)), Some(0));
+        assert_eq!(sent.take(), [(22, None)]);
+        let no_lookup =
+            |_: bool, _: bool| -> Option<u8> { panic!("no lookup without resident mode") };
+        assert_eq!(hand_off(None, true, false, no_lookup, send(true)), None);
+        assert!(sent.take().is_empty());
+    }
 
     /// `docs/specs/resident-mode.md` AC-19: a `--resident` start with
     /// resident mode off removes the sign-in value and exits; with it on,

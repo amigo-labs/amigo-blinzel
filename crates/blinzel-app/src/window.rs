@@ -889,11 +889,10 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
         },
         Action::Wake { opened } => wake(hwnd, opened),
         Action::Close => {
-            // One hidden instance is enough (several windows with "open in
-            // the same window" off). A hidden window closed by someone
-            // else (e.g. taskkill) exits.
-            let hide = with_app(|a| a.settings.resident && !a.hidden).unwrap_or(false)
-                && instance::hidden(Some(hwnd)).is_none();
+            let state = with_app(|a| (a.settings.resident, a.hidden));
+            let hide = state.is_some_and(|(resident, hidden)| {
+                close_hides(resident, hidden, || instance::hidden(Some(hwnd)).is_some())
+            });
             if hide {
                 hide_window(hwnd);
             } else {
@@ -1009,6 +1008,15 @@ fn exit(hwnd: HWND) {
     unsafe {
         let _ = DestroyWindow(hwnd);
     }
+}
+
+/// Whether closing the window hides it instead of ending the process
+/// (`docs/specs/resident-mode.md` AC-03, AC-04, AC-11): in resident mode,
+/// unless it is hidden already (someone else closed it, e.g. taskkill) or
+/// `other_hidden` finds another hidden instance (several windows with
+/// "Open images in the same window" off): one is enough.
+fn close_hides(resident: bool, hidden: bool, other_hidden: impl FnOnce() -> bool) -> bool {
+    resident && !hidden && !other_hidden()
 }
 
 /// Resident mode: the window goes away, the process stays warm. An
@@ -1451,8 +1459,120 @@ mod tests {
     /// slow file).
     #[test]
     fn a_window_whose_image_does_not_come_becomes_visible_after_400_ms() {
+        let hwnd = cloaked_window(w!("BlinzelUncloakTest"));
+        let mut app = warp_app(hwnd);
+        app.cloaked = true;
+        let actions = app.open(test_image());
+        APP.with(|cell| *cell.borrow_mut() = Some(app));
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+        run_actions(hwnd, actions);
+
+        start_uncloak_timer(hwnd, UNCLOAK_FALLBACK_MS);
+        let after = pump_while_cloaked(hwnd);
+        assert!(!cloaked(hwnd), "still invisible after {after:?}");
+        assert!(
+            after >= Duration::from_millis(350),
+            "visible after {after:?} already"
+        );
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert_eq!(with_app(|a| a.cloaked), Some(false));
+        drop(APP.with(|cell| cell.borrow_mut().take()));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// `docs/specs/resident-mode.md` AC-09 (the shell half): a hidden
+    /// window woken with a file is shown without activation and stays
+    /// cloaked until its image comes, 400 ms at the latest; woken without
+    /// one it is visible at once with the hint. A visible window is only
+    /// activated.
+    #[test]
+    fn a_woken_window_is_shown_cloaked_until_its_image_or_400_ms() {
+        let hwnd = cloaked_window(w!("BlinzelWakeTest"));
+        let mut app = warp_app(hwnd);
+        app.hide();
+        let mut actions = app.open(test_image());
+        actions.push(Action::Wake { opened: true });
+        APP.with(|cell| *cell.borrow_mut() = Some(app));
+        run_actions(hwnd, actions);
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool(), "shown");
+        assert!(cloaked(hwnd), "invisible until the first frame");
+        assert_eq!(with_app(|a| a.activate_on_uncloak), Some(true));
+        let after = pump_while_cloaked(hwnd);
+        assert!(!cloaked(hwnd), "still invisible after {after:?}");
+        assert!(
+            after >= Duration::from_millis(350),
+            "visible after {after:?}"
+        );
+        assert_eq!(
+            with_app(|a| a.activate_on_uncloak),
+            Some(false),
+            "activated"
+        );
+
+        // Hidden again, woken without a file: visible with the hint at once.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        set_cloak(hwnd, true);
+        with_app(|a| a.hide());
+        run_actions(hwnd, vec![Action::Wake { opened: false }]);
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert!(!cloaked(hwnd), "visible at once");
+        // Awake already: only activated.
+        assert_eq!(wake(hwnd, false), [Action::Activate]);
+        drop(APP.with(|cell| cell.borrow_mut().take()));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// `docs/specs/resident-mode.md` AC-03, AC-04, AC-11: closing hides the
+    /// window only in resident mode, only while it is visible and only
+    /// while no other instance is hidden; else the process ends.
+    #[test]
+    fn closing_hides_a_resident_window_unless_another_one_is_hidden() {
+        assert!(close_hides(true, false, || false));
+        assert!(!close_hides(true, false, || true), "another one is hidden");
+        assert!(
+            !close_hides(false, false, || panic!("no lookup")),
+            "not resident"
+        );
+        assert!(
+            !close_hides(true, true, || panic!("no lookup")),
+            "closed while hidden"
+        );
+    }
+
+    /// The test image the loader decodes but cannot show (no device).
+    fn test_image() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../blinzel-core/testdata/rgb420-64x48.avif")
+    }
+
+    /// Pumps messages while `hwnd` is cloaked, for 2 s at most; returns
+    /// how long.
+    fn pump_while_cloaked(hwnd: HWND) -> Duration {
+        let start = Instant::now();
+        let mut msg = MSG::default();
+        while cloaked(hwnd) && start.elapsed() < Duration::from_secs(2) {
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        start.elapsed()
+    }
+
+    /// A cloaked, never shown 480 × 360 window of a new class with our
+    /// window procedure.
+    fn cloaked_window(class: windows::core::PCWSTR) -> HWND {
         let instance = unsafe { GetModuleHandleW(None) }.unwrap().into();
-        let class = w!("BlinzelUncloakTest");
         let wc = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: instance,
@@ -1478,6 +1598,12 @@ mod tests {
         }
         .unwrap();
         set_cloak(hwnd, true);
+        hwnd
+    }
+
+    /// An App on a WARP device for `hwnd`, as `run.rs` builds it once
+    /// Direct3D is up.
+    fn warp_app(hwnd: HWND) -> App {
         let mut cr = RECT::default();
         unsafe {
             let _ = GetClientRect(hwnd, &mut cr);
@@ -1486,7 +1612,6 @@ mod tests {
             (cr.right - cr.left).max(1) as u32,
             (cr.bottom - cr.top).max(1) as u32,
         );
-        // As `run.rs` builds the App once Direct3D is up.
         let gfx = Gfx::create(true).expect("WARP device");
         let device = Arc::new(D3dDevice::new(&gfx));
         let renderer = Renderer::new(&gfx.device).unwrap();
@@ -1494,7 +1619,7 @@ mod tests {
         let services = Arc::new(WinServices::default());
         let loader = Loader::new(services.clone(), 1, 2, 2);
         let color = blinzel_ui::color::ColorManager::new(false, crate::color::build_lut);
-        let mut app = App::new(
+        App::new(
             WinHost { hwnd },
             device,
             D3dCanvas::new(gfx, renderer, swap),
@@ -1504,40 +1629,6 @@ mod tests {
             color,
             96,
             client,
-        );
-        app.cloaked = true;
-        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../blinzel-core/testdata/rgb420-64x48.avif");
-        let actions = app.open(file);
-        APP.with(|cell| *cell.borrow_mut() = Some(app));
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_SHOWNA);
-        }
-        run_actions(hwnd, actions);
-
-        let start = Instant::now();
-        start_uncloak_timer(hwnd, UNCLOAK_FALLBACK_MS);
-        let mut msg = MSG::default();
-        while cloaked(hwnd) && start.elapsed() < Duration::from_secs(2) {
-            unsafe {
-                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let after = start.elapsed();
-        assert!(!cloaked(hwnd), "still invisible after {after:?}");
-        assert!(
-            after >= Duration::from_millis(350),
-            "visible after {after:?} already"
-        );
-        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
-        assert_eq!(with_app(|a| a.cloaked), Some(false));
-        drop(APP.with(|cell| cell.borrow_mut().take()));
-        unsafe {
-            let _ = DestroyWindow(hwnd);
-        }
+        )
     }
 }
