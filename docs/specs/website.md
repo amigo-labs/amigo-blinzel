@@ -97,8 +97,8 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 | AC-13 | `pages_need_title_and_description` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-14 | `invalid_race_report_fails_naming_the_file` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-15 | `download_placeholders_resolve_to_latest_release` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
-| AC-16 | — (`website/src/site.js`, no browser test) | open | |
-| AC-17 | — (`website/src/lang.js`, no browser test) | open | |
+| AC-16 | `download_button_offers_the_visitors_platform` (`crates/blinzel-site/tests/scripts.rs`, Linux CI) | built | |
+| AC-17 | `site_root_sends_the_browser_to_its_language` (`crates/blinzel-site/tests/scripts.rs`, Linux CI) | built | |
 | AC-18 | `sitemap_lists_every_page_and_robots_names_it` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-19 | manual | open | |
 | AC-20 | manual | open | |
@@ -108,3 +108,5 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 
 - 2026-11-02: Extracted from the code. The design spec's separate pages (features, comparison, benchmarks, methodology, download, changelog) are sections of the start page; the changelog is the GitHub releases page, not a page generated from `CHANGELOG.md`.
 - 2026-11-02: AC-03, AC-14, AC-15 and AC-18 were already met by the code, so their new tests were green at once; each was proven by breaking the code on purpose (footer link, language switch URL, the file name in the JSON error, two download file names, the `Sitemap:` line, one language and one page in the sitemap), which turned it red.
+- 2026-11-02: The two browser scripts are tested without a browser: `tests/scripts.rs` runs `site.js` and `lang.js` in Node (`tests/browser.js`, its `vm` module with a stand-in `navigator`, `document` and `location`) against the download button of the generated start pages. Node is no Cargo dependency; the hooks already need it and every GitHub runner has it, so a missing `node` fails the test instead of skipping it.
+- 2026-11-02: AC-16 found a defect: `site.js` took every X11 user agent for Linux, so a BSD desktop got the Linux archive instead of the download section. It now matches only "Linux" (ChromeOS says "CrOS", which made the separate ChromeOS check redundant, so it went). AC-17 was already met; its test went red when `lang.js` compared the whole language or kept its case, or the root page lost its script.
