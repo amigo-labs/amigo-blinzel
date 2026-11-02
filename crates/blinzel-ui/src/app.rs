@@ -1407,8 +1407,10 @@ impl<B: Backend> App<B> {
         None
     }
 
-    /// Double click: opens a grid item; on the filmstrip it does nothing.
-    /// `None` leaves it to the window (full screen).
+    /// Double click: opens a grid item; on the filmstrip it does nothing;
+    /// below the caption strip (anywhere in full screen) it enters or
+    /// leaves full screen. `None` leaves it to the window: the caption
+    /// strip and its buttons (maximize).
     pub fn double_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         if self.browse.grid.is_some() {
@@ -1417,7 +1419,13 @@ impl<B: Backend> App<B> {
                 None => vec![],
             });
         }
-        (self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale)).then(Vec::new)
+        if self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale) {
+            return Some(vec![]);
+        }
+        if !self.fullscreen && p.1 < self.chrome().caption_height() {
+            return None;
+        }
+        Some(vec![Action::ToggleFullscreen])
     }
 
     fn open_from_grid(&mut self, i: usize) -> Vec<Action> {
