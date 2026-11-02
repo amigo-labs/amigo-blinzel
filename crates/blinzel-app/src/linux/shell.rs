@@ -995,14 +995,7 @@ impl ApplicationHandler<UserEvent> for Shell {
                 app.on_color_target(monitor, target);
                 vec![]
             }
-            UserEvent::Open(file) => {
-                let mut a = match file {
-                    Some(f) => app.open(f),
-                    None => vec![],
-                };
-                a.push(Action::Activate);
-                a
-            }
+            UserEvent::Open(file) => handed_over(file, |f| app.open(f)),
             UserEvent::Notice(text) => {
                 app.show_notice(text);
                 self.notice_until = Some(Instant::now() + NOTICE);
@@ -1032,6 +1025,21 @@ impl ApplicationHandler<UserEvent> for Shell {
 }
 
 /// Runs the viewer; returns the process exit code.
+/// Whether this launch takes part in "Open images in the same window": it
+/// hands over to a running window or listens for later launches. Not while
+/// measuring the first frame.
+fn same_window(settings: &Settings, args: &Args) -> bool {
+    settings.single_instance && !args.exit_after_first_frame
+}
+
+/// What a later launch's hand-over does: the window opens its file, if it
+/// sent one, and comes to the foreground.
+fn handed_over(file: Option<PathBuf>, open: impl FnOnce(PathBuf) -> Vec<Action>) -> Vec<Action> {
+    let mut a = file.map(open).unwrap_or_default();
+    a.push(Action::Activate);
+    a
+}
+
 pub fn run() -> i32 {
     timing::init(0);
     timing::mark("main");
@@ -1049,10 +1057,7 @@ pub fn run() -> i32 {
     if super::update::on_start() {
         return 0;
     }
-    if settings.single_instance
-        && !args.exit_after_first_frame
-        && super::instance::hand_off(args.file.as_deref())
-    {
+    if same_window(&settings, &args) && super::instance::hand_off(args.file.as_deref()) {
         return 0;
     }
     let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
@@ -1066,7 +1071,7 @@ pub fn run() -> i32 {
     let services = Arc::new(LinuxServices {
         proxy: Mutex::new(proxy.clone()),
     });
-    if settings.single_instance && !args.exit_after_first_frame {
+    if same_window(&settings, &args) {
         let p = Mutex::new(proxy.clone());
         super::instance::listen(move |file| {
             let _ = p.lock().unwrap().send_event(UserEvent::Open(file));
@@ -1159,6 +1164,36 @@ mod tests {
         d.feed(WindowEvent::DroppedFile(a.clone()));
         assert_eq!(d.take(), Some(vec![b, a]));
         assert_eq!(d.take(), None);
+    }
+
+    /// `docs/specs/browsing.md` AC-15: on by default, off opens every
+    /// launch in its own window.
+    #[test]
+    fn same_window_follows_the_setting() {
+        let mut settings = Settings::default();
+        let args = Args::default();
+        assert!(same_window(&settings, &args), "on by default");
+        settings.single_instance = false;
+        assert!(!same_window(&settings, &args));
+        let measuring = Args {
+            exit_after_first_frame: true,
+            ..Args::default()
+        };
+        assert!(!same_window(&Settings::default(), &measuring));
+    }
+
+    /// `docs/specs/browsing.md` AC-15: the running window shows the handed
+    /// file and comes to the foreground; without a file it only comes up.
+    #[test]
+    fn a_handed_over_file_opens_and_the_window_comes_to_the_front() {
+        let file = PathBuf::from("/pics/a.png");
+        let a = handed_over(Some(file.clone()), |f| {
+            assert_eq!(f, file);
+            vec![Action::Uncloak]
+        });
+        assert_eq!(a, [Action::Uncloak, Action::Activate]);
+        let a = handed_over(None, |_| panic!("nothing to open"));
+        assert_eq!(a, [Action::Activate]);
     }
 
     /// `docs/specs/browsing.md` AC-14: changes in the folder are collected
