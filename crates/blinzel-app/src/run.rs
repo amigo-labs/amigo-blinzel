@@ -236,8 +236,8 @@ pub fn run() -> i32 {
     if let Some(mode) = setup::mode(&raw, &exe) {
         return setup::run(mode);
     }
-    if !crate::platform::os::is_supported() {
-        return fatal(tr(Msg::ErrorOs));
+    if let Some(text) = crate::platform::os::refusal(crate::platform::os::build_number()) {
+        return fatal(text);
     }
     // A freshly updated version that keeps failing hands over to the
     // previous one.

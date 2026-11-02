@@ -53,6 +53,12 @@ pub fn is_supported() -> bool {
     supported(build_number())
 }
 
+/// The localized message with which the viewer and the setup refuse to run
+/// on Windows build `build`, or `None` where it is supported.
+pub fn refusal(build: u32) -> Option<&'static str> {
+    (!supported(build)).then(|| blinzel_i18n::tr(blinzel_i18n::Msg::ErrorOs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
