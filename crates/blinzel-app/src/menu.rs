@@ -9,7 +9,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS,
     MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW, SM_MENUDROPALIGNMENT,
     SetForegroundWindow, SetMenuDefaultItem, TPM_BOTTOMALIGN, TPM_LAYOUTRTL, TPM_LEFTALIGN,
-    TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenuEx, WM_NULL,
+    TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS,
+    TrackPopupMenuEx, WM_NULL,
 };
 use windows::core::{PCSTR, PCWSTR, w};
 
@@ -68,22 +69,8 @@ fn build(entries: &[MenuItem]) -> Option<HMENU> {
 pub fn show(hwnd: HWND, x: i32, y: i32, state: &MenuState) -> Option<Cmd> {
     enable_dark_menus(hwnd);
     let menu = build(&items(state))?;
-    // Right-to-left: mirrored items, opening leftwards from (x, y).
-    let direction = if blinzel_i18n::is_rtl() {
-        TPM_LAYOUTRTL | TPM_RIGHTALIGN
-    } else {
-        TPM_LEFTALIGN
-    };
-    let id = unsafe {
-        TrackPopupMenuEx(
-            menu,
-            (TPM_RETURNCMD | TPM_RIGHTBUTTON | direction | TPM_TOPALIGN).0,
-            x,
-            y,
-            hwnd,
-            None,
-        )
-    };
+    let id =
+        unsafe { TrackPopupMenuEx(menu, menu_flags(blinzel_i18n::is_rtl()).0, x, y, hwnd, None) };
     unsafe {
         let _ = DestroyMenu(menu);
     }
@@ -94,33 +81,46 @@ pub fn show(hwnd: HWND, x: i32, y: i32, state: &MenuState) -> Option<Cmd> {
 pub fn show_tray(hwnd: HWND, x: i32, y: i32) -> Option<Cmd> {
     enable_dark_menus(hwnd);
     let menu = build(&tray_items())?;
-    let horizontal = if unsafe { GetSystemMetrics(SM_MENUDROPALIGNMENT) } != 0 {
-        TPM_RIGHTALIGN
-    } else {
-        TPM_LEFTALIGN
-    };
-    let rtl = if blinzel_i18n::is_rtl() {
-        TPM_LAYOUTRTL
-    } else {
-        Default::default()
-    };
+    let drop_right = unsafe { GetSystemMetrics(SM_MENUDROPALIGNMENT) } != 0;
+    let flags = tray_flags(blinzel_i18n::is_rtl(), drop_right);
     let id = unsafe {
         let _ = SetMenuDefaultItem(menu, Cmd::ShowWindow.id(), 0);
         // Otherwise the menu stays open when the user clicks elsewhere.
         let _ = SetForegroundWindow(hwnd);
-        let id = TrackPopupMenuEx(
-            menu,
-            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | horizontal | rtl).0,
-            x,
-            y,
-            hwnd,
-            None,
-        );
+        let id = TrackPopupMenuEx(menu, flags.0, x, y, hwnd, None);
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         id
     };
     Cmd::from_id(id.0 as u32)
+}
+
+/// The window menu's `TrackPopupMenuEx` flags: below the point, opening
+/// rightwards; right to left mirrored and opening leftwards.
+fn menu_flags(rtl: bool) -> TRACK_POPUP_MENU_FLAGS {
+    let direction = if rtl {
+        TPM_LAYOUTRTL | TPM_RIGHTALIGN
+    } else {
+        TPM_LEFTALIGN
+    };
+    TPM_RETURNCMD | TPM_RIGHTBUTTON | direction | TPM_TOPALIGN
+}
+
+/// The tray menu's flags: above the point, towards the side the system
+/// drops menus to (`drop_right`: `SM_MENUDROPALIGNMENT`); right to left
+/// mirrored and opening leftwards.
+fn tray_flags(rtl: bool, drop_right: bool) -> TRACK_POPUP_MENU_FLAGS {
+    let horizontal = if rtl || drop_right {
+        TPM_RIGHTALIGN
+    } else {
+        TPM_LEFTALIGN
+    };
+    let mirrored = if rtl {
+        TPM_LAYOUTRTL
+    } else {
+        Default::default()
+    };
+    TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | horizontal | mirrored
 }
 
 /// Undocumented but stable since Windows 10 1903 (used by Explorer,
@@ -147,4 +147,36 @@ fn enable_dark_menus(hwnd: HWND) {
             flush();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has(flags: TRACK_POPUP_MENU_FLAGS, flag: TRACK_POPUP_MENU_FLAGS) -> bool {
+        flags.0 & flag.0 == flag.0
+    }
+
+    /// `docs/specs/localization.md` AC-16: right to left, the window menu
+    /// and the tray menu are mirrored and open leftwards from the point.
+    #[test]
+    fn right_to_left_menus_are_mirrored_and_open_leftwards() {
+        let rtl = [
+            menu_flags(true),
+            tray_flags(true, false),
+            tray_flags(true, true),
+        ];
+        for flags in rtl {
+            assert!(has(flags, TPM_LAYOUTRTL), "{flags:?}");
+            assert!(has(flags, TPM_RIGHTALIGN), "{flags:?}");
+            assert!(has(flags, TPM_RETURNCMD), "{flags:?}");
+        }
+        for flags in [menu_flags(false), tray_flags(false, false)] {
+            assert!(!has(flags, TPM_LAYOUTRTL), "{flags:?}");
+            assert!(!has(flags, TPM_RIGHTALIGN), "{flags:?}");
+        }
+        // Left to right, the tray menu follows the system's drop side.
+        let flags = tray_flags(false, true);
+        assert!(has(flags, TPM_RIGHTALIGN) && !has(flags, TPM_LAYOUTRTL));
+    }
 }
