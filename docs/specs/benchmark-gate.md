@@ -81,14 +81,14 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 | ----- | ---- | ------ | ------ |
 | AC-01 | `corpus_lists_every_file_at_its_size`, `corpus_is_identical_on_every_run_and_keeps_existing_files` (`crates/blinzel-bench/src/main.rs`) | built | |
 | AC-02 | `corpus_lists_every_file_at_its_size`, `corpus_is_identical_on_every_run_and_keeps_existing_files` (`crates/blinzel-bench/src/main.rs`) | built | |
-| AC-03 | — (CI step `Library vs. own code benchmarks` runs it; groups not asserted) | open | |
+| AC-03 | `every_candidate_runs_once_untimed_then_9_or_3_times`, `a_result_line_shows_group_candidate_file_median_min_and_rate` (`crates/blinzel-bench/src/main.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-04 | CI step `Library vs. own code benchmarks` (`run … --check`, Windows job) | built | |
 | AC-05 | CI step `Library vs. own code benchmarks` (Windows job); `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) for the decision | built | |
 | AC-06 | `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) | built | |
 | AC-07 | `run_without_a_corpus_says_to_write_it_and_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
-| AC-08 | — (`write_json` untested; `stats` in `crates/blinzel-core/src/timing.rs` covers only the `stats` object) | open | |
+| AC-08 | `json_has_the_machine_and_one_result_per_line` (`crates/blinzel-bench/src/main.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-09 | — (`reads_fields` in `crates/blinzel-bench/src/compare.rs` covers only reading the fields; CI step `Compare with x86-64-v3` runs it) | open | |
-| AC-10 | — | open | |
+| AC-10 | `each_level_runs_in_a_child_with_only_its_variable`, `the_factor_is_against_the_lowest_level` (`crates/blinzel-bench/src/simd.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-11 | — | open | |
 | AC-12 | — | open | |
 | AC-13 | — | open | |
@@ -104,3 +104,6 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 - 2026-11-02: Extracted from the code. The only automated gate is the JPEG one (byte identity of blinzel-jpeg and libjpeg-turbo ahead of zune-jpeg); all other comparisons print numbers for a person to judge.
 - 2026-11-02: The corpus is a table (`corpus_files`) written by `write_corpus(dir, large, shrink)`; the tests write it with every side divided by 40, because the full corpus takes minutes in a test build. The behavior existed, so the tests were green at once; each was checked by breaking the code on purpose (no `exists` check, quality 85, a time-dependent pixel) and goes red.
 - 2026-11-02: The CLI tests in `tests/cli.rs` run the real binary (`CARGO_BIN_EXE_blinzel-bench`), because the exit status is set in `main`. The usage now lists `jpeg-ab`, `--keep-cache`, `--from` and `--keep` too; the usage test was red before that.
+- 2026-11-02: `jpeg-header` was timed over 10× the runs of every other candidate (90, 30 with `--quick`); it now gets 9 (3) like the rest, as AC-03 says. A header parse takes microseconds, so its median is noisier, and no gate reads it.
+- 2026-11-02: Every result prints the same line (`line`: group, candidate, file, median, minimum, MP/s or "-" without pixels), as AC-03 says; `natsort`, `alloc-96mb` and `simd` used to print shorter lines without file, minimum or rate. The `simd` lines append the factor against the lowest level (`  2.00x vs none`).
+- 2026-11-02: The `run` test runs the real binary on a small folder (a 2880 × 1620 JPEG named `jpeg-24mp-420.jpg` so the `simd` group runs, a PNG, the AVIF and HEIC fixtures of `blinzel-core`, a broken AVIF). It takes about 75 s in a test build, mostly the own kernels on the 12 MP image AC-10 asks for, because workspace crates are not optimized in the test profile. The JSON machine fields and the result layout are checked exactly by a unit test on `json(host, results)`.

@@ -233,6 +233,40 @@ struct Result_ {
     stats: Stats,
 }
 
+/// Megapixels per second at `median_ms`; 0 without pixels or time.
+fn mp_per_s(megapixels: f64, median_ms: f64) -> f64 {
+    if megapixels > 0.0 && median_ms > 0.0 {
+        megapixels / (median_ms / 1e3)
+    } else {
+        0.0
+    }
+}
+
+/// The printed line of one result.
+fn line(r: &Result_) -> String {
+    let v = mp_per_s(r.megapixels, r.stats.median);
+    let rate = if v > 0.0 {
+        format!("{v:.1} MP/s")
+    } else {
+        "-".to_string()
+    };
+    format!(
+        "{:<14} {:<42} {:<32} median {:>8.2} ms  min {:>8.2} ms  {rate:>12}",
+        r.group, r.candidate, r.file, r.stats.median, r.stats.min
+    )
+}
+
+/// Prints one result's line (plus `extra`) and keeps the result.
+fn record(results: &mut Vec<Result_>, r: Result_, extra: &str) {
+    println!("{}{extra}", line(&r));
+    results.push(r);
+}
+
+/// Timed runs per candidate.
+fn iterations(quick: bool) -> usize {
+    if quick { 3 } else { 9 }
+}
+
 /// Times `f` `iters` times after one warm-up run.
 fn time(iters: usize, mut f: impl FnMut()) -> Stats {
     f();
@@ -249,7 +283,7 @@ fn time(iters: usize, mut f: impl FnMut()) -> Stats {
 fn run(args: &[String]) -> Result<(), String> {
     let dir = PathBuf::from(args.first().ok_or_else(usage)?);
     let quick = flag(args, "--quick");
-    let iters = if quick { 3 } else { 9 };
+    let iters = iterations(quick);
     let mut results: Vec<Result_> = Vec::new();
     let mut files: Vec<PathBuf> = fs::read_dir(&dir)
         .map_err(|e| format!("{}: {e} (run `blinzel-bench corpus` first)", dir.display()))?
@@ -266,19 +300,14 @@ fn run(args: &[String]) -> Result<(), String> {
         let data = fs::read(path).map_err(|e| e.to_string())?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mut push = |group: &str, candidate: &str, mp: f64, stats: Stats| {
-            println!(
-                "{group:<14} {candidate:<34} {name:<32} median {:>8.2} ms  min {:>8.2} ms  {:>7.1} MP/s",
-                stats.median,
-                stats.min,
-                mp / (stats.median / 1e3)
-            );
-            results.push(Result_ {
+            let r = Result_ {
                 group: group.into(),
                 candidate: candidate.into(),
                 file: name.clone(),
                 megapixels: mp,
                 stats,
-            });
+            };
+            record(&mut results, r, "");
         };
         match ext {
             "jpg" => {
@@ -295,7 +324,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     "jpeg-header",
                     "blinzel-jpeg parse",
                     mp,
-                    time(iters * 10, || {
+                    time(iters, || {
                         std::hint::black_box(blinzel_jpeg::parse(&data).unwrap());
                     }),
                 );
@@ -488,18 +517,22 @@ fn run(args: &[String]) -> Result<(), String> {
     let names: Vec<String> = (0..10_000)
         .map(|i| format!("IMG_{:05} ({}).JPG", (i * 7919) % 10_000, i % 7))
         .collect();
-    results.push(Result_ {
-        group: "natsort".into(),
-        candidate: "SortKey + sort 10k".into(),
-        file: "-".into(),
-        megapixels: 0.0,
-        stats: time(iters, || {
-            let mut keyed: Vec<(SortKey, &String)> =
-                names.iter().map(|n| (SortKey::new(n), n)).collect();
-            keyed.sort_unstable();
-            std::hint::black_box(keyed);
-        }),
-    });
+    record(
+        &mut results,
+        Result_ {
+            group: "natsort".into(),
+            candidate: "SortKey + sort 10k".into(),
+            file: "-".into(),
+            megapixels: 0.0,
+            stats: time(iters, || {
+                let mut keyed: Vec<(SortKey, &String)> =
+                    names.iter().map(|n| (SortKey::new(n), n)).collect();
+                keyed.sort_unstable();
+                std::hint::black_box(keyed);
+            }),
+        },
+        "",
+    );
 
     // Fresh 96 MB buffer (page faults) vs. a recycled one.
     let len = 6000 * 4000 * 4;
@@ -508,36 +541,38 @@ fn run(args: &[String]) -> Result<(), String> {
             b[i] = 1;
         }
     };
-    results.push(Result_ {
-        group: "alloc-96mb".into(),
-        candidate: "fresh Vec + touch".into(),
-        file: "-".into(),
-        megapixels: 24.0,
-        stats: time(iters, || {
-            let mut v = vec![0u8; len];
-            touch(&mut v);
-            std::hint::black_box(v);
-        }),
-    });
+    record(
+        &mut results,
+        Result_ {
+            group: "alloc-96mb".into(),
+            candidate: "fresh Vec + touch".into(),
+            file: "-".into(),
+            megapixels: 24.0,
+            stats: time(iters, || {
+                let mut v = vec![0u8; len];
+                touch(&mut v);
+                std::hint::black_box(v);
+            }),
+        },
+        "",
+    );
     bufpool::global().set_max_retained(1 << 30);
-    results.push(Result_ {
-        group: "alloc-96mb".into(),
-        candidate: "BufPool + touch".into(),
-        file: "-".into(),
-        megapixels: 24.0,
-        stats: time(iters, || {
-            // Dropping returns the buffer to the pool for the next round.
-            let mut b = PoolBuf::new(len);
-            touch(&mut b);
-            std::hint::black_box(&b);
-        }),
-    });
-    for r in results.iter().filter(|r| r.file == "-") {
-        println!(
-            "{:<14} {:<34} median {:>8.3} ms",
-            r.group, r.candidate, r.stats.median
-        );
-    }
+    record(
+        &mut results,
+        Result_ {
+            group: "alloc-96mb".into(),
+            candidate: "BufPool + touch".into(),
+            file: "-".into(),
+            megapixels: 24.0,
+            stats: time(iters, || {
+                // Dropping returns the buffer to the pool for the next round.
+                let mut b = PoolBuf::new(len);
+                touch(&mut b);
+                std::hint::black_box(&b);
+            }),
+        },
+        "",
+    );
 
     if let Some(out) = option(args, "--json") {
         write_json(Path::new(out), &results)?;
@@ -727,39 +762,64 @@ fn png_crate_decode(data: &[u8], rgba: bool) -> Vec<u8> {
     buf
 }
 
+/// The machine a run measured.
+struct Host {
+    os: String,
+    arch: String,
+    logical_cpus: usize,
+    cpu: String,
+    cpu_features: Vec<&'static str>,
+    build_features: Vec<&'static str>,
+}
+
+impl Host {
+    fn this() -> Host {
+        Host {
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            logical_cpus: std::thread::available_parallelism().map_or(1, |n| n.get()),
+            cpu: blinzel_core::kernels::cpu_name(),
+            cpu_features: blinzel_core::kernels::cpu_features(),
+            build_features: blinzel_core::kernels::build_features(),
+        }
+    }
+}
+
 fn write_json(path: &Path, results: &[Result_]) -> Result<(), String> {
-    let cpus = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1);
+    fs::write(path, json(&Host::this(), results)).map_err(|e| e.to_string())
+}
+
+/// The machine, then one result object per line (`compare` reads it line
+/// by line).
+fn json(host: &Host, results: &[Result_]) -> String {
     let items: Vec<String> = results
         .iter()
         .map(|r| {
-            let mps = if r.megapixels > 0.0 { r.megapixels / (r.stats.median / 1e3) } else { 0.0 };
             format!(
                 "    {{\"group\": {}, \"candidate\": {}, \"file\": {}, \"megapixels\": {}, \"mp_per_s\": {}, \"stats\": {}}}",
                 json_str(&r.group),
                 json_str(&r.candidate),
                 json_str(&r.file),
                 json_num(r.megapixels),
-                json_num(mps),
+                json_num(mp_per_s(r.megapixels, r.stats.median)),
                 r.stats.json()
             )
         })
         .collect();
-    let list = |v: Vec<&str>| {
-        let v: Vec<String> = v.into_iter().map(json_str).collect();
+    let list = |v: &[&str]| {
+        let v: Vec<String> = v.iter().map(|s| json_str(s)).collect();
         format!("[{}]", v.join(", "))
     };
-    let json = format!(
-        "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {cpus},\n  \"cpu\": {}, \"cpu_features\": {}, \"build_features\": {},\n  \"results\": [\n{}\n  ]\n}}\n",
-        json_str(std::env::consts::OS),
-        json_str(std::env::consts::ARCH),
-        json_str(&blinzel_core::kernels::cpu_name()),
-        list(blinzel_core::kernels::cpu_features()),
-        list(blinzel_core::kernels::build_features()),
+    format!(
+        "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {},\n  \"cpu\": {}, \"cpu_features\": {}, \"build_features\": {},\n  \"results\": [\n{}\n  ]\n}}\n",
+        json_str(&host.os),
+        json_str(&host.arch),
+        host.logical_cpus,
+        json_str(&host.cpu),
+        list(&host.cpu_features),
+        list(&host.build_features),
         items.join(",\n")
-    );
-    fs::write(path, json).map_err(|e| e.to_string())
+    )
 }
 
 #[cfg(test)]
@@ -870,6 +930,100 @@ mod tests {
         for d in [a, b, l] {
             let _ = fs::remove_dir_all(d);
         }
+    }
+
+    /// AC-03: one untimed warm-up, then 9 timed runs (3 with `--quick`).
+    #[test]
+    fn every_candidate_runs_once_untimed_then_9_or_3_times() {
+        assert_eq!((iterations(false), iterations(true)), (9, 3));
+        for iters in [3, 9] {
+            let mut calls = 0;
+            let s = time(iters, || calls += 1);
+            assert_eq!((calls, s.n), (iters + 1, iters));
+        }
+    }
+
+    fn result(group: &str, file: &str, mp: f64, s: Stats) -> Result_ {
+        Result_ {
+            group: group.into(),
+            candidate: "cand \"x\"".into(),
+            file: file.into(),
+            megapixels: mp,
+            stats: s,
+        }
+    }
+
+    /// AC-03: group, candidate, file, median, minimum, MP/s.
+    #[test]
+    fn a_result_line_shows_group_candidate_file_median_min_and_rate() {
+        let l = line(&result("jpeg-full", "a.jpg", 24.0, stats(100.0, 200.0)));
+        let words: Vec<&str> = l.split_whitespace().collect();
+        assert_eq!(
+            words,
+            [
+                "jpeg-full",
+                "cand",
+                "\"x\"",
+                "a.jpg",
+                "median",
+                "200.00",
+                "ms",
+                "min",
+                "100.00",
+                "ms",
+                "120.0",
+                "MP/s"
+            ]
+        );
+        let l = line(&result("natsort", "-", 0.0, stats(1.0, 2.0)));
+        assert!(l.ends_with("ms             -"), "{l}");
+        assert!(!l.contains("MP/s"), "{l}");
+    }
+
+    /// AC-08: the machine, then one result per line with its stats.
+    #[test]
+    fn json_has_the_machine_and_one_result_per_line() {
+        let host = Host {
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            logical_cpus: 4,
+            cpu: "Test CPU".into(),
+            cpu_features: vec!["sse4.2", "avx2"],
+            build_features: vec![],
+        };
+        let mut a = stats(1.5, 2.0);
+        a.p99 = 3.0;
+        a.mean = 2.25;
+        a.n = 9;
+        let j = json(
+            &host,
+            &[
+                result("png", "p.png", 12.0, a),
+                result("natsort", "-", 0.0, a),
+            ],
+        );
+        let lines: Vec<&str> = j.lines().collect();
+        assert_eq!(lines[0], "{");
+        assert_eq!(
+            lines[1],
+            r#"  "os": "linux", "arch": "x86_64", "logical_cpus": 4,"#
+        );
+        assert_eq!(
+            lines[2],
+            r#"  "cpu": "Test CPU", "cpu_features": ["sse4.2", "avx2"], "build_features": [],"#
+        );
+        assert_eq!(lines[3], r#"  "results": ["#);
+        assert_eq!(
+            lines[4],
+            r#"    {"group": "png", "candidate": "cand \"x\"", "file": "p.png", "megapixels": 12.000, "mp_per_s": 6000.000, "stats": {"min_ms": 1.500, "median_ms": 2.000, "p99_ms": 3.000, "mean_ms": 2.250, "n": 9}},"#
+        );
+        assert!(
+            lines[5].starts_with(r#"    {"group": "natsort", "#)
+                && lines[5].contains(r#""megapixels": 0.000, "mp_per_s": 0.000,"#),
+            "{}",
+            lines[5]
+        );
+        assert_eq!(&lines[6..], ["  ]", "}"]);
     }
 
     #[test]
