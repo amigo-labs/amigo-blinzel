@@ -171,6 +171,8 @@ pub fn probe(data: &[u8]) -> Result<Probe> {
 }
 
 fn probe_inner(data: &[u8]) -> Result<Probe> {
+    #[cfg(test)]
+    tests::panic_if_injected(data);
     let format = format::detect(data);
     let (width, height, orientation, previews, icc) = match format {
         Format::Jpeg => {
@@ -267,6 +269,8 @@ pub fn decode_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
 }
 
 fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
+    #[cfg(test)]
+    tests::panic_if_injected(data);
     match format::detect(data) {
         Format::Jpeg => decode_jpeg(data, req, threads, cfg!(feature = "turbojpeg")),
         Format::Png => finish(png::decode(data)?, req),
@@ -418,10 +422,32 @@ pub fn guard<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
 mod tests {
     use super::*;
 
+    /// Fault injection: probing or decoding these bytes panics where the
+    /// decoders run, inside the guard (docs/specs/image-formats.md, Decisions).
+    const PANICS: &[u8] = b"blinzel test: the decoder panics";
+
+    pub(super) fn panic_if_injected(data: &[u8]) {
+        if data == PANICS {
+            panic!("injected decoder panic");
+        }
+    }
+
     #[test]
     fn panics_are_contained() {
         let r: Result<()> = guard(|| panic!("boom"));
         assert_eq!(r, Err(DecodeError::Panicked("boom".into())));
+    }
+
+    #[test]
+    fn a_panicking_probe_or_decode_reports_decoder_crashed() {
+        let crashed = Err(DecodeError::Panicked("injected decoder panic".into()));
+        assert_eq!(probe(PANICS).map(|_| ()), crashed);
+        assert_eq!(decode(PANICS, Request::Full).map(|_| ()), crashed);
+        assert_eq!(decode_with(PANICS, Request::Full, 4).map(|_| ()), crashed);
+        assert_eq!(
+            DecodeError::Panicked("injected decoder panic".into()).to_string(),
+            "decoder crashed: injected decoder panic"
+        );
     }
 
     #[test]
