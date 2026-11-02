@@ -28,9 +28,9 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 16 | [updates](updates.md) | 22 / 23 | 3 | 1 | the first CI runs of AC-18 (macOS `macos/update.rs`) and of the Windows and macOS tests of AC-12, AC-14, AC-15, AC-19, AC-20, AC-21 (`update.rs`, `macos/update.rs`, `macos/shell.rs`), all written; the manual check AC-23 (a published release on a clean VM); then `/spec-check` |
 | 17 | [release](release.md) | 10 / 18 | 9 | 3 | the first release run of AC-04, AC-05, AC-06, AC-07 and AC-15 (`release.yml`, `blinzel-release check-release`), all written; the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`); then `/spec-check` |
 | 18 | [benchmark-gate](benchmark-gate.md) | 17 / 19 | 6 | 0 | the first Windows CI runs of AC-18 and AC-19 (`crates/blinzel-app/src/bench.rs`, written); then `/spec-check` |
-| 19 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
+| 19 | [competitive-benchmark](competitive-benchmark.md) | 11 / 17 | 3 | 5 | the first macOS and Windows CI runs of AC-13 (`viewers_macos.rs`, `viewers.rs`) and of the end-to-end half of AC-11 (`tests/cli.rs`), all written; the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
 | 20 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **265 / 410** | | | |
+| | **Total** | **271 / 410** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
