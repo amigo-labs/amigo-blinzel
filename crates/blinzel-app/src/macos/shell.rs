@@ -707,23 +707,9 @@ impl Shell {
     fn after_event(&mut self) {
         let copy = std::mem::take(&mut self.host.borrow_mut().copy);
         if copy && let Some(src) = self.app.clip.clone() {
-            let services = self.services.clone();
-            let _ = std::thread::Builder::new()
-                .name("blinzel-copy".into())
-                .spawn(move || {
-                    let r = src.pixels(&*services).and_then(|(px, w, h)| {
-                        blinzel_core::batch::encode::encode(
-                            &px,
-                            w,
-                            h,
-                            blinzel_core::batch::encode::Codec::Png,
-                            &Default::default(),
-                            None,
-                            None,
-                        )
-                    });
-                    post(UserEvent::Clipboard(r));
-                });
+            let _ = blinzel_ui::app::copy_in_background(self.services.clone(), src, |r| {
+                post(UserEvent::Clipboard(clip_png(r)))
+            });
         }
         self.schedule_tick();
     }
@@ -1238,6 +1224,20 @@ fn menu_bar_trees(state: &MenuState) -> (Vec<MenuItem>, Vec<MenuItem>) {
     app_menu.push(MenuItem::Separator);
     app_menu.extend(quit);
     (tidy(app_menu), tidy(rest))
+}
+
+/// A copy's pixels as the PNG the pasteboard gets (on the copy's thread).
+fn clip_png(pixels: Result<(Vec<u8>, u32, u32), String>) -> Result<Vec<u8>, String> {
+    let (px, w, h) = pixels?;
+    blinzel_core::batch::encode::encode(
+        &px,
+        w,
+        h,
+        blinzel_core::batch::encode::Codec::Png,
+        &Default::default(),
+        None,
+        None,
+    )
 }
 
 /// Puts PNG data on the general pasteboard.
@@ -1844,4 +1844,74 @@ pub fn run() -> i32 {
     });
     app.run();
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinzel_core::geom::{Orientation, PixelRect};
+    use blinzel_ui::app::ClipSource;
+
+    /// `docs/specs/selection-and-export.md` AC-11: a copy is decoded and
+    /// encoded as PNG on its own thread, then lands on the general
+    /// pasteboard as `public.png`.
+    #[test]
+    fn a_copy_lands_on_the_general_pasteboard_as_png() {
+        let dir = std::env::temp_dir().join(format!("blinzel-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (w, h) = (16u32, 12u32);
+        let bgra: Vec<u8> = blinzel_core::testimg::rgb(w, h)
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let path = dir.join("a.png");
+        let file = blinzel_core::export::encode_png_bgra(&bgra, w, h).unwrap();
+        std::fs::write(&path, file).unwrap();
+        // A region of an EXIF-rotated (90° clockwise) image.
+        let clip = ClipSource {
+            path,
+            stored_rect: PixelRect::new(2, 1, 9, 7),
+            orientation: Orientation::from_exif(6),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        blinzel_ui::app::copy_in_background(Arc::new(MacServices), clip.clone(), move |r| {
+            let name = std::thread::current().name().map(str::to_string);
+            tx.send((name, clip_png(r))).unwrap();
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+        let (name, encoded) = rx.recv().unwrap();
+        assert_eq!(name.as_deref(), Some("blinzel-copy"));
+        let encoded = encoded.unwrap();
+        assert!(put_png(&encoded));
+
+        // SAFETY: a constant type name.
+        let ty = unsafe { NSPasteboardTypePNG };
+        assert_eq!(ty.to_string(), "public.png");
+        let got = NSPasteboard::generalPasteboard()
+            .dataForType(ty)
+            .expect("a PNG on the general pasteboard")
+            .to_vec();
+        assert_eq!(got, encoded);
+        let mut reader = png::Decoder::new(std::io::Cursor::new(got))
+            .read_info()
+            .expect("a PNG");
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        let (px, pw, ph) = clip.pixels(&MacServices).unwrap();
+        assert_eq!((pw, ph), (7, 9), "turned upright");
+        assert_eq!((info.width, info.height), (pw, ph));
+        assert_eq!(info.color_type, png::ColorType::Rgb, "opaque");
+        let rgb: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect();
+        assert_eq!(&buf[..info.buffer_size()], &rgb[..]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
