@@ -400,6 +400,11 @@ impl Shell {
         let (Some(app), Some(window)) = (self.app.as_mut(), self.window.clone()) else {
             return vec![];
         };
+        if ends_process(&a) {
+            self.exiting = true;
+            el.exit();
+            return vec![];
+        }
         match a {
             Action::ShowMenu { x, y } => {
                 app.open_menu((x as f64, y as f64));
@@ -512,11 +517,8 @@ impl Shell {
                 window.set_visible(true);
                 vec![]
             }
-            Action::Close | Action::Exit | Action::Quit => {
-                self.exiting = true;
-                el.exit();
-                vec![]
-            }
+            // Ended above.
+            Action::Close | Action::Exit | Action::Quit => vec![],
             Action::OpenWith(file) => {
                 open_with(&file);
                 vec![]
@@ -939,10 +941,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         let Some(event) = event else { return };
         match event {
-            WindowEvent::CloseRequested => {
-                self.exiting = true;
-                el.exit();
-            }
+            WindowEvent::CloseRequested => self.run(el, vec![Action::Close]),
             WindowEvent::Resized(size) => {
                 let app = self.app.as_mut().unwrap();
                 app.maximized = self.window.as_ref().is_some_and(|w| w.is_maximized());
@@ -1205,9 +1204,28 @@ pub fn run() -> i32 {
     app.exit_code()
 }
 
+/// Whether `a` ends the process. Every way of closing the window does
+/// (close button, menu "Exit"), in resident mode too: the Linux shell has
+/// no tray to hide the window in (`docs/specs/resident-mode.md` AC-01).
+fn ends_process(a: &Action) -> bool {
+    matches!(a, Action::Close | Action::Exit | Action::Quit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/resident-mode.md` AC-01: on Linux closing the window
+    /// ends the process even with resident mode on in the settings.
+    #[test]
+    fn closing_the_window_always_ends_the_process() {
+        const { assert!(!blinzel_ui::menu::RESIDENT) };
+        for a in [Action::Close, Action::Exit, Action::Quit] {
+            assert!(ends_process(&a), "{a:?}");
+        }
+        assert!(!ends_process(&Action::Wake { opened: false }));
+        assert!(!ends_process(&Action::Minimize));
+    }
 
     /// `docs/specs/localization.md` AC-10: the UI language from the
     /// environment, in the order the variables are read.
