@@ -280,6 +280,13 @@ impl State {
         }
         out
     }
+
+    /// An update was installed while `running` kept running (resident
+    /// mode): a hiding window hands over to it
+    /// (`docs/specs/resident-mode.md` AC-21).
+    pub fn restart_pending(&self, running: Version) -> bool {
+        self.pending.is_some_and(|p| p != running)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -318,6 +325,30 @@ pub fn on_first_frame(state: &mut State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/resident-mode.md` AC-21: only an installed version other
+    /// than the running one takes over.
+    #[test]
+    fn restart_pending_only_for_another_installed_version() {
+        let v = |s| Version::parse(s).unwrap();
+        let state = |pending| State {
+            pending,
+            ..State::default()
+        };
+        assert!(
+            !state(None).restart_pending(v("1.3.0")),
+            "nothing installed"
+        );
+        assert!(
+            !state(Some(v("1.3.0"))).restart_pending(v("1.3.0")),
+            "running"
+        );
+        assert!(state(Some(v("1.4.0"))).restart_pending(v("1.3.0")));
+        assert!(
+            state(Some(v("1.2.0"))).restart_pending(v("1.3.0")),
+            "a rollback"
+        );
+    }
 
     #[test]
     fn versions_parse_and_order() {
