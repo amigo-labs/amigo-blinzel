@@ -236,6 +236,26 @@ fn in_order<T>(
 mod tests {
     use super::*;
 
+    /// An icon with one opaque red 2×2 entry, stored as a 32-bit bitmap:
+    /// the header, the bitmap info with the height doubled for the mask,
+    /// the BGRA rows bottom-up, then the empty AND mask.
+    fn tiny_icon() -> Vec<u8> {
+        let mut dib = Vec::new();
+        for v in [40u32, 2, 4] {
+            dib.extend(v.to_le_bytes());
+        }
+        dib.extend(1u16.to_le_bytes());
+        dib.extend(32u16.to_le_bytes());
+        dib.extend([0; 24]);
+        dib.extend([0u8, 0, 255, 255].repeat(4));
+        dib.extend([0; 8]);
+        let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
+        ico.extend((dib.len() as u32).to_le_bytes());
+        ico.extend(22u32.to_le_bytes());
+        ico.extend(dib);
+        ico
+    }
+
     const HEIC: &[u8] = include_bytes!("../../../blinzel-core/testdata/rgb-64x48.heic");
 
     /// A 1 × 1 image whose width tells the decoders apart.
@@ -313,15 +333,7 @@ mod tests {
         );
 
         // A PNG decodes natively (RGBA), not through ImageIO (BGRA).
-        // One half-transparent pixel keeps the PNG RGBA: Windows reads only
-        // 32-bit RGBA PNGs inside an icon (an opaque one would be RGB).
-        let red = [
-            [0u8, 0, 255, 255],
-            [0, 0, 255, 255],
-            [0, 0, 255, 255],
-            [0, 0, 255, 128],
-        ]
-        .concat();
+        let red = [[0u8, 0, 255, 255]; 4].concat();
         let png = blinzel_core::export::encode_png_bgra(&red, 2, 2).unwrap();
         let img = decode_any_with(&png, Request::Full, 1).unwrap();
         assert_eq!(
@@ -329,11 +341,9 @@ mod tests {
             (2, 2, PackedFormat::Rgba8)
         );
 
-        // An icon holding that PNG: native refuses it, ImageIO reads it.
-        let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
-        ico.extend((png.len() as u32).to_le_bytes());
-        ico.extend(22u32.to_le_bytes());
-        ico.extend(&png);
+        // An icon with one 2×2 32-bit bitmap: native refuses it, ImageIO
+        // reads it (a PNG entry this small is refused by ImageIO too).
+        let ico = tiny_icon();
         assert!(matches!(
             blinzel_core::decode::decode(&ico, Request::Full),
             Err(DecodeError::Unsupported(Format::Ico))

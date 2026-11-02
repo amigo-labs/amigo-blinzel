@@ -386,6 +386,26 @@ mod tests {
     use super::*;
     use blinzel_core::format::Format;
 
+    /// An icon with one opaque red 2×2 entry, stored as a 32-bit bitmap:
+    /// the header, the bitmap info with the height doubled for the mask,
+    /// the BGRA rows bottom-up, then the empty AND mask.
+    fn tiny_icon() -> Vec<u8> {
+        let mut dib = Vec::new();
+        for v in [40u32, 2, 4] {
+            dib.extend(v.to_le_bytes());
+        }
+        dib.extend(1u16.to_le_bytes());
+        dib.extend(32u16.to_le_bytes());
+        dib.extend([0; 24]);
+        dib.extend([0u8, 0, 255, 255].repeat(4));
+        dib.extend([0; 8]);
+        let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
+        ico.extend((dib.len() as u32).to_le_bytes());
+        ico.extend(22u32.to_le_bytes());
+        ico.extend(dib);
+        ico
+    }
+
     /// An uncompressed 8-bit RGB TIFF of 4 × 4 pixels in `strips` strips
     /// (1, 2 or 4).
     fn tiff(strips: u32) -> Vec<u8> {
@@ -541,21 +561,9 @@ mod tests {
             Err(DecodeError::Corrupt("wic".into()))
         );
 
-        // A real file only WIC reads: an icon holding a PNG.
-        // One half-transparent pixel keeps the PNG RGBA: Windows reads only
-        // 32-bit RGBA PNGs inside an icon (an opaque one would be RGB).
-        let red = [
-            [0u8, 0, 255, 255],
-            [0, 0, 255, 255],
-            [0, 0, 255, 255],
-            [0, 0, 255, 128],
-        ]
-        .concat();
-        let png = blinzel_core::export::encode_png_bgra(&red, 2, 2).unwrap();
-        let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
-        ico.extend((png.len() as u32).to_le_bytes());
-        ico.extend(22u32.to_le_bytes());
-        ico.extend(&png);
+        // A real file only WIC reads: an icon with one 2×2 32-bit bitmap
+        // (a PNG entry this small is refused by the system decoders).
+        let ico = tiny_icon();
         assert!(matches!(
             blinzel_core::decode::decode(&ico, Request::Full),
             Err(DecodeError::Unsupported(Format::Ico))
