@@ -98,11 +98,16 @@ This spec records what the code does today.
 | AC-11 | — | open | |
 | AC-12 | — | open | |
 | AC-13 | `reads_the_x11_display_profile` (`crates/blinzel-app/src/linux/color.rs`), CI: Linux, step with `BLINZEL_X11_TEST` (returns early without it) | built | |
-| AC-14 | — | open | |
+| AC-14 | `reads_the_x11_display_profile` (`crates/blinzel-app/src/linux/color.rs`), CI: Linux, step with `BLINZEL_X11_TEST` (returns early without it) | built | |
 | AC-15 | — | open | |
-| AC-16 | — | open | |
-| AC-17 | — (`caches_per_profile_and_skips_srgb` covers only `ColorManager::set_enabled(false)`, not the setting or the menu) | open | |
-| AC-18 | — | open | |
+| AC-16 | `a_new_monitor_retargets_and_redraws` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux | built | |
+| AC-17 | `the_setting_switches_conversion_on_the_next_frame` (`crates/blinzel-ui/src/app_color_tests.rs`), `menu_settings_offers_each_platforms_entries`, `each_check_item_is_checked_when_its_setting_is_on` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux | built | |
+| AC-18 | `a_failed_build_is_not_retried_until_the_target_changes` (`crates/blinzel-ui/src/color.rs`), `no_transform_for_grey_cmyk_or_broken_profiles` (`crates/blinzel-app/src/lcms.rs`), CI: Linux, macOS | built | |
 | AC-19 | — | open | |
 
 ## Decisions
+
+- AC-14, AC-16, AC-17, AC-18 describe behavior the code already had (the spec was extracted), so their tests were green at once; each was proven by breaking the code once (Wayland check, the forced re-check, `set_enabled` in the toggle, caching a failed build, Little CMS falling back to sRGB) and seeing the test go red.
+- The harness's colour engine builds an identity LUT instead of none, and the fake canvas records whether a frame drew an image through a LUT: App tests can see conversion without a real colour engine; the engine's own output is proven by AC-07, AC-08.
+- AC-14 is checked inside the X11 test: both change the process environment, and the X11 one needs a published profile for the Wayland check to mean anything (without an X server the target is sRGB anyway).
+- AC-18 proves the "cannot build" cases against Little CMS; the Windows Color System's refusal of such profiles has no test of its own (AC-08's test file covers only RGB profiles).

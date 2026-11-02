@@ -112,6 +112,12 @@ mod tests {
         let got = display_target(id).expect("profile");
         assert_eq!(&got.bytes[..], &p3[..]);
         assert!(display_target(id ^ 1).is_none());
+        // AC-14: under Wayland the target is sRGB, whatever X11 publishes.
+        for (wayland, profile) in [("wayland-0", false), ("", true)] {
+            // SAFETY: as above.
+            unsafe { std::env::set_var("WAYLAND_DISPLAY", wayland) };
+            assert_eq!(display_target(id).is_some(), profile, "{wayland:?}");
+        }
         conn.delete_property(root, atom).unwrap();
         conn.sync().unwrap();
         assert!(display_target(id).is_none());
