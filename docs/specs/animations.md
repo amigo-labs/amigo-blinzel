@@ -83,10 +83,10 @@ This spec records what the code does today (reverse engineered on 2026-11-02).
 | AC-04 | `single_frames_budgets_and_plays` (`gif.rs`), `plays_animations`, `decodes_lossless_stills` (`webp.rs`), `lossless_round_trips` (`jxl.rs`), all in `crates/blinzel-core/src/decode/` | built | |
 | AC-05 | | open | |
 | AC-06 | partial: `single_frames_budgets_and_plays` (`gif.rs`) and `plays_animations` (`webp.rs`) check the cut with a small budget; nothing checks the 256 MB the viewer passes, nor JPEG XL | open | |
-| AC-07 | | open | |
+| AC-07 | `only_the_current_gif_decodes_its_animation_behind_its_still` (`crates/blinzel-ui/src/app_animation_tests.rs`) | built | |
 | AC-08 | | open | |
-| AC-09 | | open | |
-| AC-10 | | open | |
+| AC-09 | `each_frame_stays_for_its_delay_and_the_last_play_holds_the_last_frame`, `an_animation_without_a_loop_limit_repeats_until_the_image_changes` (`crates/blinzel-ui/src/app_animation_tests.rs`) | built | |
+| AC-10 | `leaving_an_animation_stops_and_drops_it_and_coming_back_plays_it_anew` (`crates/blinzel-ui/src/app_animation_tests.rs`) | built | |
 | AC-11 | `a_decode_error_after_two_frames_plays_them_with_the_files_loop_count`, `a_decode_error_before_the_second_frame_leaves_a_still`, `a_panicking_decoder_plays_the_frames_so_far_and_the_viewer_goes_on` (`crates/blinzel-ui/src/app_animation_tests.rs`), `frames_carry_the_loop_count_up_to_a_decode_error` (`crates/blinzel-core/src/decode/gif.rs`) | built | |
 | AC-12 | `a_failed_upload_plays_the_frames_uploaded_so_far_with_the_files_loop_count` (`crates/blinzel-ui/src/app_animation_tests.rs`) | built | |
 | AC-13 | | open | |
@@ -98,4 +98,6 @@ This spec records what the code does today (reverse engineered on 2026-11-02).
 - 2026-11-02: Both defects fixed, AC-11 and the panic edge case revised to match: the loop count travels with every frame (`AnimFrame::plays`, a new public field of `blinzel-core`), because a decode error or a panic leaves no `AnimInfo` to read it from; the loader runs the stream inside `decode::guard`. Red runs: `a_decode_error_after_two_frames_…` played `None` (for ever) instead of `Some(2)`; `a_panicking_decoder_…` failed with "the loader did not get idle" (the worker thread was gone).
 - 2026-11-02: The panic is injected by a test-only seam in the loader (`loader::PANICS_ON_THIRD_FRAME`, `cfg(test)`): the sink panics on a file of that name, which unwinds through the decoder like a decoder bug; `blinzel-core`'s own `cfg(test)` is not active in `blinzel-ui`'s tests.
 - 2026-11-02: The App tests write their GIFs with a small hand-made encoder in the testkit (`testkit::gif`) instead of taking `gif` as a dev-dependency of `blinzel-ui`.
-- 2026-11-02: Green at once, the behavior already existed: AC-11's "fails before the second frame" half and AC-12 (an upload failure stops the sink, the decoder returns its `AnimInfo` with the loop count).
+- 2026-11-02: Green at once, the behavior already existed: AC-11's "fails before the second frame" half and AC-12 (an upload failure stops the sink, the decoder returns its `AnimInfo` with the loop count). Each test was checked by breaking the code once (the two-frame minimum, `return true` after a failed upload): it went red.
+- 2026-11-02: AC-07, AC-09 and AC-10 were green at once (extracted behavior). Each test went red with the code broken on purpose: the Anim job at priority 0, neighbours given an Anim job, the timer ignoring the delay, no hold after the last play, an endless loop played once, no `drop_animations` or no `kill_timer` on navigation. The tests drive `Timer::Anim` by calling `App::on_anim_timer`, as a shell does when the timer fires.
+- 2026-11-02: AC-09's 10 ms floor (`schedule_frame`) cannot be reached through a file: all three decoders give at least 20 ms (`min_delay_ms`), so the tests prove the delays files give.
