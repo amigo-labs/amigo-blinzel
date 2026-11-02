@@ -96,7 +96,7 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 | AC-13 | `one_thread_and_regions_decode_with_libjpeg_turbo` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
 | AC-14 | `files_blinzel_jpeg_declines_go_to_libjpeg_turbo` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
 | AC-15 | `without_libjpeg_turbo_blinzel_jpeg_decodes_alone` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
-| AC-16 | — | open | |
+| AC-16 | `every_helper_thread_runs_the_first_registered_init` (`crates/blinzel-core/tests/jpeg_thread_init.rs`), CI: Linux | built | |
 | AC-17 | — (`blinzel-bench run` and `jpeg-ab` measure but assert no speed ratio) | open | |
 
 ## Decisions
@@ -106,3 +106,4 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 - 2026-11-02: The JPEG choice is one function, `decode_jpeg(data, req, threads, turbo)`, and `decode_inner` passes `cfg!(feature = "turbojpeg")` as `turbo`. AC-15 is tested through `turbo = false` in the default build, because no gate or CI job builds without the feature and the test files come from libjpeg-turbo's encoder; `cargo check -p blinzel-core --no-default-features` stays green.
 - 2026-11-02: Which decoder ran shows in the result, not in a hook: libjpeg-turbo scales in eighths (3/8 for at least 401 of 1600 pixels), blinzel-jpeg rounds up to 1/2; and libjpeg-turbo's cropped region differs in its pixels from a crop of blinzel-jpeg's full image (the tests assert that difference, so they cannot pass by accident).
 - 2026-11-02: AC-13 to AC-15 already held; their tests were green at once and went red with the thread condition, the region exclusion, the libjpeg-turbo fallback or the YCbCr check of `own_jpeg::decode` disabled. The over-the-limit case of AC-14 checks the outcome (libjpeg-turbo's `TooLarge`): a file over 2^30 pixels that blinzel-jpeg could otherwise decode would need a gigabyte of output, so the header-only file is declined by blinzel-jpeg for missing tables as well.
+- 2026-11-02: AC-16 already held; its test was green at once. It lives in a test binary of its own because the hook is process-wide. It counts the init calls per decode against the helper threads the decoder starts (pass A, synchronization, bands; per progressive scan, IDCT bands), each on a thread of its own and never the caller's. It went red with the call removed from any one of the five spawn sites, and with a later registration replacing the first.
