@@ -74,8 +74,9 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | Scenario | Expected behavior |
 | -------- | ----------------- |
 | Windows: the file given on the command line does not exist or cannot be read | No job is queued and the file is not opened: the window shows the "open" hint at once, without an error message |
-| Linux: the file does not exist, or the first image fails to decode | The window stays invisible (no 400 ms fallback on Linux), the process keeps running |
-| macOS: the first image fails to decode at launch | The window stays transparent (the 400 ms timer exists only for waking a hidden resident window) |
+| Linux: the file does not exist, or the first image fails to decode | The window becomes visible with the error message as soon as it is drawn: the App uncloaks the window once no image is coming (nothing open, or the current image failed), on every platform |
+| macOS: the first image fails to decode at launch | The same: the window is shown with the error message (the 400 ms timer exists only for waking a hidden resident window) |
+| Linux, macOS: the first image is slow to decode | The window stays invisible until its first image is presented; there is no timer (only a missing or failed image would never arrive) |
 | Windows: Direct3D device creation fails | Message box "Direct3D 11: …", exit code 1 |
 | Linux: no display | `amigo-blinzel: no display (…)` on stderr, exit code 1 |
 | `--exit-after-first-frame` with an undecodable file | No image is ever presented, so the process never exits (the Linux and macOS CI steps kill it after 120 s) |
@@ -95,7 +96,7 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | ----- | ---- | ------ | ------ |
 | AC-01 | | open | |
 | AC-02 | | open | |
-| AC-03 | | open | |
+| AC-03 | `without_a_file_the_window_shows_the_open_hint_at_once` (`crates/blinzel-ui/src/app_startup_tests.rs`; every shell uncovers the window on `Action::Uncloak`) | built | |
 | AC-04 | | open | |
 | AC-05 | `tracks_the_reference_renderer`, `straight_alpha_blends_over_the_background`, `applies_the_colour_transform_to_the_image_only`, `fast_path_matches_the_general_path` (`crates/blinzel-core/src/preview.rs`; Linux, macOS, Windows) | built | |
 | AC-06 | manual: visual check on Windows 11 pending (`blinzel.md` §13, the GDI → Direct3D transition) | open | |
@@ -109,3 +110,5 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | AC-14 | | open | |
 
 ## Decisions
+
+- **No image coming uncloaks the window in the App, not by a timer in each shell.** The defect "Linux and macOS never show the window for a missing or broken first file" is fixed in `App::render`: when the window is cloaked and not hidden (resident) and no image will come (nothing open, or the current image failed), the frame with the hint or the error asks for `Action::Uncloak`, so all three shells get it at once instead of after 400 ms. Tests: `a_missing_first_file_shows_the_window_with_its_error`, `a_broken_first_file_shows_the_window_with_its_error` (red before the fix), `the_window_stays_cloaked_while_the_first_image_decodes`, `a_hidden_resident_window_is_not_shown_by_a_frame` (`crates/blinzel-ui/src/app_startup_tests.rs`). The Windows 400 ms timer stays for slow files.

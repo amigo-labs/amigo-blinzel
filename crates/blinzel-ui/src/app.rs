@@ -1177,8 +1177,16 @@ impl<B: Backend> App<B> {
         // After the first frame: checking the remembered colour target
         // loads the ICM subsystem.
         self.verify_color_target();
+        // No image will come (nothing open, or it failed): the hint or the
+        // error is what there is to show (`docs/specs/startup.md`).
+        let nothing_to_wait_for = !self.hidden
+            && !showed_image
+            && self
+                .current
+                .as_ref()
+                .is_none_or(|c| self.failed.contains_key(&c.cache_id));
         let mut actions = Vec::new();
-        if showed_image && self.cloaked {
+        if (showed_image || nothing_to_wait_for) && self.cloaked {
             actions.push(Action::Uncloak);
         }
         if showed_image && !self.first_image_shown {
@@ -2525,6 +2533,10 @@ mod viewing_tests;
 #[cfg(test)]
 #[path = "app_browsing_tests.rs"]
 mod browsing_tests;
+
+#[cfg(test)]
+#[path = "app_startup_tests.rs"]
+mod startup_tests;
 
 /// The command a navigation key gives in the single-image view;
 /// right-to-left languages page leftwards.

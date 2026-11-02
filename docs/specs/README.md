@@ -48,7 +48,6 @@ Behavior the code has today that contradicts the design or is plainly wrong. Eac
 | ------ | ---- |
 | Animation decoding (GIF, WebP, JPEG XL) runs without `catch_unwind`: a panic ends that worker thread (AGENTS.md §9) | [animations](animations.md) |
 | A decode error in the middle of an animation drops its loop count: the frames so far loop for ever | [animations](animations.md) |
-| Linux (missing or broken first file) and macOS (broken first file) never show the window: there is no 400 ms fallback at a cold start | [startup](startup.md) |
 | `--exit-after-first-frame` with an undecodable file never exits, and the Windows CI step has no timeout | [startup](startup.md) |
 | The thumbnail cache key lowercases the path on every platform: `A.jpg` and `a.jpg` share an entry on Linux and macOS | [thumbnails](thumbnails.md) |
 | An AVIF whose `ftyp` major brand is `mif1` is taken for HEIF and never decoded by rav1d | [image-formats](image-formats.md) |
