@@ -376,3 +376,11 @@ fn colour_transform_lut() {
         );
     }
 }
+
+/// `docs/specs/browsing.md` AC-13: wgpu reports no video memory, so the
+/// texture budget is 1 GiB.
+#[test]
+fn the_texture_budget_is_one_gib() {
+    let Some(gpu) = setup() else { return };
+    assert_eq!(WgpuDevice::new(gpu).texture_budget(), 1 << 30);
+}
