@@ -90,6 +90,10 @@ mod tests {
         assert_eq!(Rule::EastSlavic.category(11), Category::Many);
         assert_eq!(Rule::EastSlavic.category(23), Category::Few);
         assert_eq!(Rule::EastSlavic.category(13), Category::Many);
+        assert_eq!(Rule::EastSlavic.category(12), Category::Many);
+        assert_eq!(Rule::EastSlavic.category(14), Category::Many);
+        assert_eq!(Rule::EastSlavic.category(22), Category::Few);
+        assert_eq!(Rule::EastSlavic.category(24), Category::Few);
         assert_eq!(Rule::Polish.category(1), Category::One);
         assert_eq!(Rule::Polish.category(22), Category::Few);
         assert_eq!(Rule::Polish.category(21), Category::Many);
