@@ -217,10 +217,13 @@ pub fn run() -> i32 {
     // rotating disks.
     let cpu = threads::cpu_info();
     let drive = file.as_deref().map(io::drive_info).unwrap_or_default();
-    let io_threads = if drive.seek_penalty { 1 } else { 2 };
-    let cpu_threads = cpu.performance.clamp(2, 6);
     let services = Arc::new(WinServices::default());
-    let loader = Loader::new(services.clone(), io_threads, cpu_threads, cpu.performance);
+    let loader = Loader::new(
+        services.clone(),
+        io_threads(drive.seek_penalty),
+        decode_workers(cpu.performance),
+        cpu.performance,
+    );
     let (hmonitor, monitor, work) = monitor_under_cursor();
     // The display's colour target as remembered from the last start (see
     // color); Windows is asked again after the first frame.
@@ -538,5 +541,38 @@ fn message_loop() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+    }
+}
+
+/// Files read in parallel: one on a drive with a seek penalty (parallel
+/// reads only add seeks), else two (`docs/specs/browsing.md` AC-18).
+fn io_threads(seek_penalty: bool) -> usize {
+    if seek_penalty { 1 } else { 2 }
+}
+
+/// Decode workers: the logical processors of the most performant
+/// efficiency class, at least 2 and at most 6 (what the prefetch window can
+/// use; `docs/specs/browsing.md` AC-18).
+fn decode_workers(performance: usize) -> usize {
+    performance.clamp(2, 6)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_workers, io_threads};
+
+    #[test]
+    fn io_threads_read_one_file_at_a_time_on_a_rotating_disk() {
+        assert_eq!(io_threads(true), 1);
+        assert_eq!(io_threads(false), 2);
+    }
+
+    #[test]
+    fn decode_workers_are_the_performance_cores_from_2_to_6() {
+        assert_eq!(decode_workers(1), 2);
+        assert_eq!(decode_workers(2), 2);
+        assert_eq!(decode_workers(4), 4);
+        assert_eq!(decode_workers(6), 6);
+        assert_eq!(decode_workers(16), 6);
     }
 }

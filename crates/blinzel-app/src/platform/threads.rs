@@ -52,12 +52,18 @@ pub fn cpu_info() -> CpuInfo {
         classes.push(unsafe { info.Anonymous.CpuSet.EfficiencyClass });
         off += info.Size as usize;
     }
-    let best = classes.iter().copied().max().unwrap_or(0);
-    let performance = classes.iter().filter(|&&c| c == best).count().max(1);
     CpuInfo {
         logical,
-        performance,
+        performance: performance(&classes),
     }
+}
+
+/// Logical processors of the highest efficiency class among `classes` (one
+/// entry per logical processor; a higher class is more performant), at
+/// least 1.
+fn performance(classes: &[u8]) -> usize {
+    let best = classes.iter().copied().max().unwrap_or(0);
+    classes.iter().filter(|&&c| c == best).count().max(1)
 }
 
 /// How a thread should be scheduled.
@@ -71,15 +77,9 @@ pub enum Kind {
 }
 
 pub fn tune_current_thread(kind: Kind) {
+    let (priority, throttle) = scheduling(kind);
     unsafe {
         let thread = GetCurrentThread();
-        let (priority, throttle) = match kind {
-            Kind::Latency => (THREAD_PRIORITY_ABOVE_NORMAL, 0),
-            Kind::Background => (
-                THREAD_PRIORITY_BELOW_NORMAL,
-                THREAD_POWER_THROTTLING_EXECUTION_SPEED,
-            ),
-        };
         let _ = SetThreadPriority(thread, priority);
         let state = THREAD_POWER_THROTTLING_STATE {
             Version: 1,
@@ -92,5 +92,65 @@ pub fn tune_current_thread(kind: Kind) {
             std::ptr::from_ref(&state).cast(),
             std::mem::size_of::<THREAD_POWER_THROTTLING_STATE>() as u32,
         );
+    }
+}
+
+/// The priority and the power-throttling state (`StateMask` for
+/// `THREAD_POWER_THROTTLING_EXECUTION_SPEED`) a thread of `kind` gets.
+fn scheduling(kind: Kind) -> (THREAD_PRIORITY, u32) {
+    match kind {
+        Kind::Latency => (THREAD_PRIORITY_ABOVE_NORMAL, 0),
+        Kind::Background => (
+            THREAD_PRIORITY_BELOW_NORMAL,
+            THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Kind, performance, scheduling, tune_current_thread};
+    use windows::Win32::System::Threading::{
+        GetCurrentThread, GetThreadPriority, THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+        THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_BELOW_NORMAL,
+    };
+
+    #[test]
+    fn performance_counts_the_most_performant_efficiency_class() {
+        // Hybrid: 8 E-cores (class 0), 4 P-cores with SMT (class 1).
+        let hybrid: Vec<u8> = [0; 8].into_iter().chain([1; 8]).collect();
+        assert_eq!(performance(&hybrid), 8);
+        assert_eq!(performance(&[1, 1, 0, 0, 0, 0]), 2);
+        // Not hybrid: every processor is in the same class.
+        assert_eq!(performance(&[0; 12]), 12);
+        assert_eq!(performance(&[]), 1);
+    }
+
+    #[test]
+    fn scheduling_keeps_latency_threads_above_normal_and_unthrottled() {
+        assert_eq!(scheduling(Kind::Latency), (THREAD_PRIORITY_ABOVE_NORMAL, 0));
+        assert_eq!(
+            scheduling(Kind::Background),
+            (
+                THREAD_PRIORITY_BELOW_NORMAL,
+                THREAD_POWER_THROTTLING_EXECUTION_SPEED
+            )
+        );
+    }
+
+    #[test]
+    fn tune_current_thread_sets_the_priority() {
+        let priority = |kind: Kind| {
+            std::thread::spawn(move || {
+                tune_current_thread(kind);
+                // SAFETY: the pseudo handle of the calling thread needs no
+                // closing and is valid while it runs.
+                unsafe { GetThreadPriority(GetCurrentThread()) }
+            })
+            .join()
+            .unwrap()
+        };
+        assert_eq!(priority(Kind::Latency), THREAD_PRIORITY_ABOVE_NORMAL.0);
+        assert_eq!(priority(Kind::Background), THREAD_PRIORITY_BELOW_NORMAL.0);
     }
 }
