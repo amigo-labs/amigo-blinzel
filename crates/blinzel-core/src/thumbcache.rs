@@ -33,8 +33,15 @@ pub struct Key {
 impl Key {
     pub fn new(path: &Path, size: u64, mtime: u64) -> Key {
         let mut h = Fnv::new();
-        // Windows paths are case-insensitive.
-        h.write(path.to_string_lossy().to_lowercase().as_bytes());
+        let path = path.to_string_lossy();
+        // Windows paths are case-insensitive; Linux and macOS ones are
+        // case-sensitive (a case-insensitive APFS volume only costs a
+        // second entry for a file opened under another spelling).
+        if cfg!(windows) {
+            h.write(path.to_lowercase().as_bytes());
+        } else {
+            h.write(path.as_bytes());
+        }
         Key {
             path_hash: h.finish(),
             size,
@@ -353,13 +360,24 @@ mod tests {
             // Lossy (JPEG) where available, but close.
             assert!(crate::cpuref::psnr(&got.bgra, &t.bgra) > 30.0);
         }
-        // Reopened: from the index file; the key is case-insensitive.
+        // Reopened: from the index file; on Windows the key is
+        // case-insensitive.
         let c = ThumbCache::open(&dir, 1 << 30).unwrap();
-        let same = Key::new(Path::new(r"c:\bilder\a.JPG"), 1234, 99);
-        assert!(c.get(&same).is_some());
+        assert!(c.get(&key).is_some());
+        let other_case = Key::new(Path::new(r"c:\bilder\a.JPG"), 1234, 99);
+        assert_eq!(c.get(&other_case).is_some(), cfg!(windows));
         // A changed file misses.
         assert!(c.get(&Key { mtime: 100, ..key }).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows paths are case-insensitive; on Linux and macOS `A.jpg` and
+    /// `a.jpg` are two files with two entries.
+    #[test]
+    fn the_key_folds_case_only_on_windows() {
+        let upper = Key::new(Path::new("/photos/A.jpg"), 1234, 99);
+        let lower = Key::new(Path::new("/photos/a.jpg"), 1234, 99);
+        assert_eq!(upper == lower, cfg!(windows));
     }
 
     #[test]

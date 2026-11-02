@@ -44,9 +44,7 @@ Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, 
 
 Behavior the code has today that contradicts the design or is plainly wrong. Each is recorded as an edge case in its spec; `/spec-build` turns it into a red test first.
 
-| Defect | Spec |
-| ------ | ---- |
-| The thumbnail cache key lowercases the path on every platform: `A.jpg` and `a.jpg` share an entry on Linux and macOS | [thumbnails](thumbnails.md) |
+None open.
 
 ## Backlog
 
