@@ -101,7 +101,11 @@ mod tests {
         let info = reader.next_frame(&mut buf).unwrap();
         assert_eq!((info.width, info.height), (w, h));
         assert_eq!(info.color_type, png::ColorType::Rgba);
-        assert_eq!(&buf[..info.buffer_size()], &rgba(&bgra)[..]);
+        let want: Vec<u8> = bgra
+            .chunks(4)
+            .flat_map(|p| [p[2], p[1], p[0], p[3]])
+            .collect();
+        assert_eq!(&buf[..info.buffer_size()], &want[..]);
         drop(clipboard);
     }
 }
