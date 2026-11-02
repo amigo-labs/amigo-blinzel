@@ -134,18 +134,18 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 | AC-03 | `an_opened_file_shows_before_its_folder_is_listed_and_keys_wait_for_the_listing` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `filters_sorts_and_navigates` (`crates/blinzel-core/src/filelist.rs`, the case-insensitive `index_of`) | built | |
 | AC-04 | `navigation_keys_step_jump_wrap_and_pan_a_zoomed_image` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
 | AC-05 | `filters_sorts_and_navigates` (`crates/blinzel-core/src/filelist.rs`, `offset` wraps both ways and by 7 steps) | built | |
-| AC-06 | | open | |
-| AC-07 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`) covers only the cap of `prefetch_ahead` at 32 | open | |
+| AC-06 | `the_neighbours_are_wanted_in_browsing_direction_four_ahead_and_two_behind`, `neighbours_are_read_most_urgent_first_once_and_failed_ones_are_skipped` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
+| AC-07 | `the_settings_file_sets_how_many_are_prepared_ahead_and_behind` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `tolerates_garbage`, `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply` (`crates/blinzel-core/src/settings.rs`, the cap at 32 and unreadable values) | built | |
 | AC-08 | `runs_by_priority`, `replacing_wanted_drops_and_reprioritizes`, `running_jobs_get_cancelled`, `completed_jobs_are_not_repeated_until_forgotten`, `classes_are_independent` (`crates/blinzel-core/src/sched.rs`) | built | |
 | AC-09 | | open | |
-| AC-10 | | open | |
+| AC-10 | `zooming_past_the_screen_stage_prepares_the_full_resolution`, `actual_size_prepares_everything_at_full_resolution` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
 | AC-11 | `tiles_cover_the_image_with_borders` (`crates/blinzel-ui/src/gfx.rs`); `ycc_subsamplings_with_tile_seams` (`crates/blinzel-app/tests/wgpu_golden.rs`, lavapipe, Linux CI with `BLINZEL_REQUIRE_GPU=1`; also `warp_golden.rs` in Windows CI and `metal_golden.rs` in macOS CI) | built | |
 | AC-12 | `evicts_least_recently_used_except_kept` (`crates/blinzel-core/src/cache.rs`) | built | |
 | AC-13 | | open | |
 | AC-14 | `a_changed_folder_is_listed_again_and_the_current_image_stays`, `after_the_current_file_left_the_folder_next_and_previous_go_on_from_its_place`, `the_current_file_rewritten_in_place_is_loaded_anew`, `a_change_during_the_listing_is_listed_afterwards` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `folder_changes_settle_for_150_ms_before_relisting` (`crates/blinzel-app/src/linux/shell.rs`) | built | |
 | AC-15 | | open | |
 | AC-16 | `decodes_requests` (`crates/blinzel-app/src/instance.rs`, `cfg(windows)`, Windows CI `cargo test --workspace --release`) | built | |
-| AC-17 | `remove_and_placeholders` (`crates/blinzel-core/src/filelist.rs`) covers only recognizing a placeholder; skipping it in prefetch is untested | open | |
+| AC-17 | `cloud_placeholders_are_not_read_ahead_but_load_when_navigated_to` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `remove_and_placeholders` (`crates/blinzel-core/src/filelist.rs`); both also run in the Windows CI job (`cargo test --workspace --release`) | built | |
 | AC-18 | | open | |
 | AC-19 | `panics_are_contained` (`crates/blinzel-core/src/decode/mod.rs`) | built | |
 | AC-20 | | open | |
@@ -157,3 +157,5 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 - No shipped language is right to left (`shipped_languages_are_left_to_right`), so AC-04's swap is tested on `nav_cmd`, the key-to-command mapping `App::key` calls with `blinzel_i18n::is_rtl()`.
 - The three defects of the extraction are fixed with a red test each (AC-14): when the current file leaves the folder, Next and Previous go on from where its name sorts (`App::current_left`), only for a file that was in the list, so a file whose extension the list does not keep still has no neighbours; a current file whose cache id changed in the new listing is loaded anew; a change during a listing lists the folder once more after it.
 - AC-14's 150 ms settle lives in the shells: the Linux test checks `DIR_SETTLE`; the macOS `DIR_SETTLE` and the Windows `DirWatcher` sleep are the same 150 ms without a test of their own.
+- AC-06, AC-07, AC-10 and AC-17 held before their tests were written: the tests read what `App` wants prepared (`App::wanted_jobs`, split from `update_wanted` for that) and what the loader read, and each went red when the code under it was broken on purpose (priorities, previews, direction, the 1.05 threshold, the full-resolution neighbours, skipping placeholders and failed files).
+- AC-17 is proven by the App test with the attributes the Windows listing reports; Linux and macOS never report placeholders. The test runs in the Linux and the Windows CI job.

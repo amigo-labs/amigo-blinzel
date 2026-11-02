@@ -477,6 +477,19 @@ impl Harness {
         self.write_file(name, &png(w, h))
     }
 
+    /// A JPEG of `w` × `h` with the test pattern; above the 1920 × 1080
+    /// screen box it decodes at a reduced size for the screen.
+    pub fn write_jpeg(&self, name: &str, w: u32, h: u32) -> PathBuf {
+        let opts = blinzel_core::decode::jpeg::EncodeOptions {
+            quality: 90,
+            subsampling: 420,
+            ..Default::default()
+        };
+        let rgb = blinzel_core::testimg::rgb(w, h);
+        let data = blinzel_core::decode::jpeg::encode_rgb(&rgb, w, h, opts).unwrap();
+        self.write_file(name, &data)
+    }
+
     /// Any file in the images' folder (e.g. a broken image).
     pub fn write_file(&self, name: &str, data: &[u8]) -> PathBuf {
         let p = self.images.join(name);
@@ -865,6 +878,16 @@ impl Harness {
             .iter()
             .filter(|(t, _)| t.starts_with("blinzel-thumb"))
             .map(|(_, p)| p.clone())
+            .collect()
+    }
+
+    /// Files the prefetch pipeline read, in order.
+    pub fn view_reads(&self) -> Vec<String> {
+        let reads = self.app.services.reads.lock().unwrap();
+        reads
+            .iter()
+            .filter(|(t, _)| t.starts_with("blinzel-io"))
+            .filter_map(|(_, p)| Some(p.file_name()?.to_string_lossy().into_owned()))
             .collect()
     }
 

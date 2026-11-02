@@ -723,10 +723,16 @@ impl<B: Backend> App<B> {
     /// Tells the loader what to prepare: the current image first, then
     /// neighbours in browsing direction.
     pub fn update_wanted(&mut self) {
+        let jobs = self.wanted_jobs();
+        self.loader.set_wanted(jobs);
+    }
+
+    /// What to prepare, most urgent first: the current image, then its
+    /// neighbours in browsing direction that are not prepared or failed.
+    fn wanted_jobs(&self) -> Vec<Job> {
         let mut jobs = Vec::new();
         let Some(cur) = &self.current else {
-            self.loader.set_wanted(jobs);
-            return;
+            return jobs;
         };
         let stage = self.current_stage_needed();
         if !self.has_texture(cur.cache_id, stage) && !self.failed.contains_key(&cur.cache_id) {
@@ -806,7 +812,7 @@ impl<B: Backend> App<B> {
                 }
             }
         }
-        self.loader.set_wanted(jobs);
+        jobs
     }
 
     /// Drains finished loads into the texture cache.
