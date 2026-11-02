@@ -629,23 +629,26 @@ impl Shell {
     /// first frame of the file just `opened` (or at once without one). A
     /// visible window is activated.
     fn wake(&mut self, opened: bool) -> Vec<Action> {
-        if !self.app.wake(opened) {
+        let Waking::Show { alpha, uncloak } = waking(self.app.wake(opened), opened) else {
             self.show();
             return vec![];
-        }
+        };
         super::resident::set_in_dock(MainThreadMarker::from(&*self.window), true);
-        self.window.setAlphaValue(0.0);
+        self.window.setAlphaValue(alpha);
         self.window.orderFront(None);
-        if opened {
-            let ns = Duration::from_millis(400).as_nanos() as i64;
-            let _ = DispatchQueue::main().after(DispatchTime::NOW.time(ns), || {
-                deliver(UserEvent::UncloakDue)
-            });
-            vec![]
-        } else {
-            let mut more = self.app.render();
-            more.push(Action::Uncloak);
-            more
+        match uncloak {
+            Uncloak::FirstFrame { at_latest } => {
+                let ns = at_latest.as_nanos() as i64;
+                let _ = DispatchQueue::main().after(DispatchTime::NOW.time(ns), || {
+                    deliver(UserEvent::UncloakDue)
+                });
+                vec![]
+            }
+            Uncloak::Now => {
+                let mut more = self.app.render();
+                more.push(Action::Uncloak);
+                more
+            }
         }
     }
 
@@ -1743,6 +1746,48 @@ fn create_shell(mtm: MainThreadMarker) -> Result<(), String> {
     Ok(())
 }
 
+/// What waking the window does (`docs/specs/resident-mode.md` AC-09).
+#[derive(Debug, PartialEq)]
+enum Waking {
+    /// The window was visible: it is only activated.
+    Activate,
+    /// The window was hidden: back in the Dock, shown with `alpha` (0,
+    /// invisible) and without activation (`orderFront`), and visible when
+    /// `uncloak` says; `Action::Uncloak` then takes the foreground.
+    Show { alpha: f64, uncloak: Uncloak },
+}
+
+/// When a woken window becomes visible.
+#[derive(Debug, PartialEq)]
+enum Uncloak {
+    /// With the first frame of the file just opened, `at_latest` after
+    /// the wake (`UserEvent::UncloakDue`).
+    FirstFrame { at_latest: Duration },
+    /// At once, with the empty-start hint.
+    Now,
+}
+
+/// A file's first frame may take this long before a woken window shows.
+const UNCLOAK_AT_LATEST: Duration = Duration::from_millis(400);
+
+/// A window that `was_hidden` woken, with the file just `opened` or not.
+fn waking(was_hidden: bool, opened: bool) -> Waking {
+    if !was_hidden {
+        return Waking::Activate;
+    }
+    let uncloak = if opened {
+        Uncloak::FirstFrame {
+            at_latest: UNCLOAK_AT_LATEST,
+        }
+    } else {
+        Uncloak::Now
+    };
+    Waking::Show {
+        alpha: 0.0,
+        uncloak,
+    }
+}
+
 /// The Dock icon clicked (`applicationShouldHandleReopen:`): the window
 /// wakes without a file (`docs/specs/resident-mode.md` AC-14).
 const REOPEN: Action = Action::Wake { opened: false };
@@ -1892,6 +1937,32 @@ mod tests {
             }
         );
         assert_eq!(resident_start(true), ResidentStart::Run);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-09 (the macOS shell): a hidden
+    /// window wakes invisible (alpha 0, shown without activation) and
+    /// becomes visible with its file's first frame, after 400 ms at the
+    /// latest, or at once without a file; a visible one is only activated.
+    #[test]
+    fn a_woken_window_is_shown_transparent_until_its_image_or_400_ms() {
+        assert_eq!(
+            waking(true, true),
+            Waking::Show {
+                alpha: 0.0,
+                uncloak: Uncloak::FirstFrame {
+                    at_latest: Duration::from_millis(400)
+                }
+            }
+        );
+        assert_eq!(
+            waking(true, false),
+            Waking::Show {
+                alpha: 0.0,
+                uncloak: Uncloak::Now
+            }
+        );
+        assert_eq!(waking(false, true), Waking::Activate);
+        assert_eq!(waking(false, false), Waking::Activate);
     }
 
     /// `docs/specs/resident-mode.md` AC-14: the Dock icon wakes the hidden
