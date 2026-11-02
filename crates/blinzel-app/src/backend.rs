@@ -3,6 +3,7 @@
 //! messages to wake the UI thread.
 
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +25,7 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, GetMonitorInfoW, HMONITOR, InvalidateRect, MONITOR_DEFAULTTONEAREST,
     MONITORINFO, MonitorFromWindow,
 };
+use windows::Win32::System::Time::TIME_ZONE_INFORMATION;
 use windows::Win32::UI::WindowsAndMessaging::{
     KillTimer, PostMessageW, SetTimer, SetWindowTextW, WM_APP,
 };
@@ -307,6 +309,42 @@ pub fn monitor_rect(hwnd: HWND, work: bool) -> Option<windows::Win32::Foundation
     }
 }
 
+/// Seconds the clock of time zone `tz` (`None`: the system's) was ahead of
+/// UTC at `t`, with the summer or winter time in force at that moment.
+fn utc_offset_in(tz: Option<&TIME_ZONE_INFORMATION>, t: std::time::SystemTime) -> i32 {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{
+        FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+    };
+    // FILETIME ticks (100 ns since 1601) of the Unix epoch.
+    const EPOCH: i64 = 116_444_736_000_000_000;
+    let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) else {
+        return 0;
+    };
+    let ticks = EPOCH + (d.as_nanos() / 100) as i64;
+    let ft = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let (mut utc, mut local, mut out) = (
+        SYSTEMTIME::default(),
+        SYSTEMTIME::default(),
+        FILETIME::default(),
+    );
+    // SAFETY: every pointer is to a live local or to `tz`.
+    let ok = unsafe {
+        FileTimeToSystemTime(&ft, &mut utc).is_ok()
+            && SystemTimeToTzSpecificLocalTime(tz.map(ptr::from_ref), &utc, &mut local).is_ok()
+            && SystemTimeToFileTime(&local, &mut out).is_ok()
+    };
+    if !ok {
+        return 0;
+    }
+    let local_ticks = ((out.dwHighDateTime as i64) << 32) | out.dwLowDateTime as i64;
+    // Whole seconds: SYSTEMTIME drops the sub-millisecond part.
+    ((local_ticks - ticks) as f64 / 10_000_000.0).round() as i32
+}
+
 // ---------------------------------------------------------------- services
 
 /// What background threads use: files, WIC, window messages.
@@ -421,36 +459,7 @@ impl Services for WinServices {
     /// The time zone's offset at `t` itself (summer or winter time then,
     /// not now).
     fn utc_offset(&self, t: std::time::SystemTime) -> i32 {
-        use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
-        use windows::Win32::System::Time::{
-            FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
-        };
-        // FILETIME ticks (100 ns since 1601) of the Unix epoch.
-        const EPOCH: i64 = 116_444_736_000_000_000;
-        let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) else {
-            return 0;
-        };
-        let ticks = EPOCH + (d.as_nanos() / 100) as i64;
-        let ft = FILETIME {
-            dwLowDateTime: ticks as u32,
-            dwHighDateTime: (ticks >> 32) as u32,
-        };
-        let (mut utc, mut local, mut out) = (
-            SYSTEMTIME::default(),
-            SYSTEMTIME::default(),
-            FILETIME::default(),
-        );
-        let ok = unsafe {
-            FileTimeToSystemTime(&ft, &mut utc).is_ok()
-                && SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_ok()
-                && SystemTimeToFileTime(&local, &mut out).is_ok()
-        };
-        if !ok {
-            return 0;
-        }
-        let local_ticks = ((out.dwHighDateTime as i64) << 32) | out.dwLowDateTime as i64;
-        // Whole seconds: SYSTEMTIME drops the sub-millisecond part.
-        ((local_ticks - ticks) as f64 / 10_000_000.0).round() as i32
+        utc_offset_in(None, t)
     }
 
     fn wants_early_image(&self) -> bool {
@@ -488,5 +497,60 @@ impl Services for WinServices {
         if !self.post(first_frame::WM_FIRST_FRAME, ptr as isize) {
             drop(unsafe { Box::from_raw(ptr) });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use windows::Win32::Foundation::SYSTEMTIME;
+    use windows::Win32::System::SystemServices::TIME_ZONE_ID_DAYLIGHT;
+    use windows::Win32::System::Time::GetTimeZoneInformation;
+
+    fn at(secs: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    /// Central European Time: UTC+1, and UTC+2 from the last Sunday in
+    /// March, 2:00, to the last Sunday in October, 3:00.
+    fn cet() -> TIME_ZONE_INFORMATION {
+        let last_sunday = |month, hour| SYSTEMTIME {
+            wMonth: month,
+            wDayOfWeek: 0,
+            wDay: 5,
+            wHour: hour,
+            ..Default::default()
+        };
+        TIME_ZONE_INFORMATION {
+            Bias: -60,
+            StandardDate: last_sunday(10, 3),
+            DaylightDate: last_sunday(3, 2),
+            DaylightBias: -60,
+            ..Default::default()
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-13: the offset of the moment
+    /// itself, summer or winter time, in the system's time zone.
+    #[test]
+    fn file_dates_are_local_time_with_the_offset_of_their_moment() {
+        let cet = cet();
+        // 2025-01-15 12:00 UTC and 2025-07-01 12:00 UTC.
+        assert_eq!(utc_offset_in(Some(&cet), at(1_736_942_400)), 3600, "winter");
+        assert_eq!(utc_offset_in(Some(&cet), at(1_751_371_200)), 7200, "summer");
+
+        // The services use the system's zone: now, its current bias.
+        let mut tz = TIME_ZONE_INFORMATION::default();
+        // SAFETY: `tz` is a live local.
+        let id = unsafe { GetTimeZoneInformation(&mut tz) };
+        let bias = tz.Bias
+            + if id == TIME_ZONE_ID_DAYLIGHT {
+                tz.DaylightBias
+            } else {
+                tz.StandardBias
+            };
+        let now = SystemTime::now();
+        assert_eq!(WinServices::default().utc_offset(now), -bias * 60);
     }
 }
