@@ -626,11 +626,12 @@ fn compare_planes(
     Ok(())
 }
 
-/// Whether zune-jpeg beats libjpeg-turbo: in the median and in the best
-/// run. An unoptimized build is slower in every run; a noisy neighbour on
-/// the CI runner raises the median of one file but not its minimum.
+/// Whether zune-jpeg beats libjpeg-turbo: strictly faster in the median and
+/// in the best run, so a tie is no win. An unoptimized build is slower in
+/// every run; a noisy neighbour on the CI runner raises the median of one
+/// file but not its minimum.
 fn zune_wins(turbo: &Stats, zune: &Stats) -> bool {
-    turbo.median >= zune.median && turbo.min >= zune.min
+    turbo.median > zune.median && turbo.min > zune.min
 }
 
 /// The shipped JPEG path (libjpeg-turbo to YCbCr planes) must beat
@@ -1116,6 +1117,24 @@ mod tests {
         assert!(!zune_wins(&stats(118.5, 120.1), &stats(169.3, 170.7)));
         // Unoptimized C: slower in every run.
         assert!(zune_wins(&stats(230.0, 236.0), &stats(158.7, 163.4)));
+    }
+
+    /// AC-05, AC-06: a tie is no win; zune-jpeg has to be strictly faster
+    /// in both the median and the minimum.
+    #[test]
+    fn a_tie_in_the_median_or_the_minimum_is_no_win() {
+        // stats(min, median): a lower zune-jpeg median, an equal minimum.
+        assert!(!zune_wins(&stats(150.0, 170.0), &stats(150.0, 160.0)));
+        // Equal medians, a lower zune-jpeg minimum.
+        assert!(!zune_wins(&stats(160.0, 170.0), &stats(150.0, 170.0)));
+        assert!(!zune_wins(&stats(150.0, 170.0), &stats(150.0, 170.0)));
+        let results = [
+            jpeg_full("turbojpeg YCbCr planes", "a.jpg", stats(150.0, 170.0)),
+            jpeg_full("zune-jpeg RGBA", "a.jpg", stats(150.0, 160.0)),
+            jpeg_full("turbojpeg YCbCr planes", "b.jpg", stats(160.0, 170.0)),
+            jpeg_full("zune-jpeg RGBA", "b.jpg", stats(150.0, 170.0)),
+        ];
+        assert!(check(&results, &[]).is_ok());
     }
 
     fn jpeg_full(candidate: &str, file: &str, stats: Stats) -> Result_ {
