@@ -124,6 +124,13 @@ fn writes_settings_on_exit(hidden: bool, hidden_keeps_file: bool) -> bool {
     !(hidden && hidden_keeps_file)
 }
 
+/// Where the menu opens below its `button`: the button's outer corner,
+/// the right one in right-to-left languages (the menu opens leftwards).
+fn menu_corner(button: Rect, rtl: bool) -> (f64, f64) {
+    let x = if rtl { button.right() } else { button.x };
+    (x, button.bottom())
+}
+
 /// `file` in the configured editor, or the question for one first.
 fn edit_action(editor: Option<&str>, file: PathBuf) -> Action {
     match editor {
@@ -1266,17 +1273,17 @@ impl<B: Backend> App<B> {
         Rect::new(l.crop_origin.0, l.crop_origin.1, l.content.0, l.content.1)
     }
 
-    /// The menu below its button: from the button's outer corner, which is
-    /// the right one in right-to-left languages (the menu opens leftwards).
+    /// The menu below its button.
     fn menu_at_button(&self) -> Action {
         let r = self.chrome().rect(Button::Menu);
-        let x = if blinzel_i18n::is_rtl() {
-            r.right()
-        } else {
-            r.x
-        };
-        let (x, y) = self.host.to_screen((x, r.bottom()));
+        let (x, y) = self.host.to_screen(menu_corner(r, blinzel_i18n::is_rtl()));
         Action::ShowMenu { x, y }
+    }
+
+    /// A right click at client point `p`: the menu opens there.
+    pub fn right_click(&self, p: (f64, f64)) -> Vec<Action> {
+        let (x, y) = self.host.to_screen(p);
+        vec![Action::ShowMenu { x, y }]
     }
 
     /// Opens the menu drawn by the UI at client point `at` (see
