@@ -52,6 +52,13 @@ const ANIM_UPDATE: std::time::Duration = std::time::Duration::from_millis(200);
 #[cfg(test)]
 pub(crate) const PANICS_ON_THIRD_FRAME: &str = "panics-on-third-frame";
 
+/// Fault injection for tests: each frame of the animation of a file whose
+/// name starts with this takes [`SLOW_FRAME`] longer, like a large one.
+#[cfg(test)]
+pub(crate) const SLOW_FRAMES: &str = "slow-frames";
+#[cfg(test)]
+pub(crate) const SLOW_FRAME: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Texture/job key: the file's cache id with the stage in the low bits.
 pub fn key(cache_id: u64, stage: Stage) -> Key {
     (cache_id & !3) | stage as u64
@@ -507,13 +514,15 @@ fn animation_stage<D: Device, S: Services>(
             }
             let Some(d) = &device else { return false };
             #[cfg(test)]
-            if frames.len() == 2
-                && job
-                    .path
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with(PANICS_ON_THIRD_FRAME))
             {
-                panic!("injected animation decoder panic");
+                let name = job.path.file_name().map(|n| n.to_string_lossy());
+                let named = |p: &str| name.as_ref().is_some_and(|n| n.starts_with(p));
+                if frames.len() == 2 && named(PANICS_ON_THIRD_FRAME) {
+                    panic!("injected animation decoder panic");
+                }
+                if named(SLOW_FRAMES) {
+                    std::thread::sleep(SLOW_FRAME);
+                }
             }
             let tu = Instant::now();
             // Out of GPU memory: play the frames uploaded so far.

@@ -195,3 +195,82 @@ fn the_viewer_decodes_only_the_frames_within_256_mb() {
     // The still and the 64 frames that fit; the 65th was not decoded.
     assert_eq!(uploads(&h), 1 + 64);
 }
+
+/// Calls [`App::on_loaded`] (without pumping, so no other result is taken)
+/// until `done` holds.
+fn take_results_until(h: &mut Harness, done: impl Fn(&Harness) -> bool) {
+    let t = std::time::Instant::now();
+    while !done(h) {
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(30),
+            "waited in vain"
+        );
+        h.app.on_loaded();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn playback_starts_while_decoding_and_holds_the_last_frame_received_until_more_arrive() {
+    let mut h = Harness::new();
+    let name = format!("{}.gif", loader::SLOW_FRAMES);
+    let path = h.write_file(&name, &gif(64, 48, &frames(12), Some(0)));
+    h.app.open(path);
+    take_results_until(&mut h, |h| anim(h).is_some());
+    // The first delivery: frames so far, more to come; it plays at once.
+    let (n, plays, complete) = anim(&h).unwrap();
+    assert!(
+        (2..12).contains(&n) && !complete,
+        "{n} frames, complete {complete}"
+    );
+    assert_eq!(plays, None);
+    assert_eq!((shown_frame(&h), anim_timer(&h)), (Some(0), Some(50)));
+    for i in 1..n {
+        h.app.on_anim_timer();
+        assert_eq!((shown_frame(&h), anim_timer(&h)), (Some(i), Some(50)));
+    }
+    // At the last frame received so far it holds, without a timer.
+    h.app.on_anim_timer();
+    assert_eq!((shown_frame(&h), anim_timer(&h)), (Some(n - 1), None));
+    // More frames: it goes on with the next one.
+    take_results_until(&mut h, |h| anim(h).is_some_and(|a| a.0 > n));
+    assert_eq!((shown_frame(&h), anim_timer(&h)), (Some(n), Some(50)));
+    h.pump();
+    assert_eq!(anim(&h), Some((12, None, true)));
+}
+
+#[test]
+fn the_frames_so_far_go_to_the_window_at_most_every_200_ms() {
+    let h = Harness::new();
+    let name = format!("{}.gif", loader::SLOW_FRAMES);
+    let path = h.write_file(&name, &gif(64, 48, &frames(12), Some(1)));
+    // The loader alone, without the App taking its results.
+    h.app.loader.set_wanted(vec![Job {
+        path,
+        cache_id: 0x1000,
+        stage: Stage::Anim,
+        with_preview: false,
+        priority: 0,
+    }]);
+    let mut got: Vec<(usize, Option<u32>, bool, f64)> = Vec::new();
+    while got.last().is_none_or(|g| !g.2) {
+        let l = h
+            .app
+            .loader
+            .results
+            .recv_timeout(std::time::Duration::from_secs(30));
+        let l = l.expect("the animation was delivered");
+        let a = l.animation.unwrap();
+        got.push((a.frames.len(), a.plays, a.complete, l.decode_ms));
+    }
+    // 12 frames of at least 50 ms: the first two, then more at least
+    // 200 ms apart (decode time at sending), then all with the loop count.
+    let (last, partial) = got.split_last().unwrap();
+    assert_eq!((last.0, last.1, last.2), (12, Some(2), true), "{got:?}");
+    assert!(partial.len() >= 2, "{got:?}");
+    assert_eq!(partial[0].0, 2, "{got:?}");
+    for w in partial.windows(2) {
+        assert!(w[1].0 > w[0].0 && w[1].3 - w[0].3 >= 200.0, "{got:?}");
+    }
+    assert!(partial.iter().all(|p| p.1.is_none() && !p.2), "{got:?}");
+}
