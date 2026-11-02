@@ -336,3 +336,22 @@ fn thumb_grid(
     let _ = std::fs::remove_dir_all(&dir);
     Ok(Stats::of(&runs).unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{bench, run};
+
+    /// `docs/specs/startup.md` AC-14: a folder without images fails with
+    /// "no images in <dir>" and exit code 1 (WARP, so it runs on any
+    /// Windows machine).
+    #[test]
+    fn a_folder_without_images_fails_with_exit_code_1() {
+        let dir = std::env::temp_dir().join(format!("blinzel-bench-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.txt"), b"not an image").unwrap();
+        let e = bench(&dir, true).unwrap_err();
+        assert_eq!(e, format!("no images in {}", dir.display()));
+        assert_eq!(run(&dir, true, None), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
