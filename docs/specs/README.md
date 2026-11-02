@@ -13,7 +13,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 1 | [selection-and-export](selection-and-export.md) | 18 / 22 | 2 | 2 | the first CI runs of AC-09 (Windows, `clipboard.rs`) and AC-11 (macOS, `macos/shell.rs`); the manual checks AC-04 (visual design), AC-15 (save dialog); then `/spec-check` |
 | 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements), then `/spec-check` |
 | 3 | [startup](startup.md) | 3 / 14 | 6 | 3 | `/spec-build` |
-| 4 | [browsing](browsing.md) | 8 / 21 | 3 | 1 | `/spec-build` |
+| 4 | [browsing](browsing.md) | 17 / 21 | 3 | 1 | `/spec-build` for AC-13 (the budgets of the three platforms), AC-15 (same window), AC-18 (Windows threads); the manual check AC-21 (measurement) |
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
 | 6 | [image-formats](image-formats.md) | 16 / 24 | 4 | 0 | `/spec-build` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
@@ -30,7 +30,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 18 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 19 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
 | 20 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **207 / 410** | | | |
+| | **Total** | **216 / 410** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
