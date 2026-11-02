@@ -2377,6 +2377,19 @@ impl<S: Services> blinzel_core::batch::run::Source for BatchSource<S> {
     }
 }
 
+/// Decodes a copy's pixels ([`ClipSource::pixels`]) at once on a thread of
+/// its own, `blinzel-copy`, and hands them to `done` there: for the shells
+/// whose clipboard cannot ask for them later (Linux, macOS).
+pub fn copy_in_background<S: Services>(
+    services: Arc<S>,
+    clip: ClipSource,
+    done: impl FnOnce(Result<(Vec<u8>, u32, u32), String>) + Send + 'static,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("blinzel-copy".into())
+        .spawn(move || done(clip.pixels(&*services)))
+}
+
 /// Saves the cutout ([`save_cutout`]) on a thread of its own,
 /// `blinzel-save`, and hands the notice text to `done` there: the UI
 /// thread never waits for the file.

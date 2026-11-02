@@ -208,6 +208,40 @@ fn clip_pixels_are_the_files_region_in_the_orientation_shown() {
     );
 }
 
+/// AC-10, AC-11: the Linux and macOS shells hand a copy to
+/// `copy_in_background`, which decodes it at once on a thread of its own.
+#[test]
+fn a_copy_is_decoded_right_away_on_its_own_thread() {
+    let mut h = Harness::with_images(&["a.png"]);
+    select(&mut h, (8.0, 6.0), (40.0, 30.0));
+    h.ctrl(Letter('C'));
+    let clip = h.app.clip.clone().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ui = std::thread::current().id();
+    copy_in_background(h.app.services.clone(), clip.clone(), move |r| {
+        let t = std::thread::current();
+        tx.send((r, t.id() != ui, t.name().map(str::to_string)))
+            .unwrap();
+    })
+    .unwrap()
+    .join()
+    .unwrap();
+    let (r, elsewhere, name) = rx.recv().unwrap();
+    assert!(elsewhere, "not on the UI thread");
+    assert_eq!(name.as_deref(), Some("blinzel-copy"));
+    let (px, w, ht) = r.unwrap();
+    assert_eq!((w, ht), (clip.stored_rect.w, clip.stored_rect.h));
+    assert_eq!((px, w, ht), clip.pixels(&*h.app.services).unwrap());
+    // A region that cannot be decoded reaches `done` as an error.
+    std::fs::remove_file(h.images.join("a.png")).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    copy_in_background(h.app.services.clone(), clip, move |r| tx.send(r).unwrap())
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(rx.recv().unwrap().is_err());
+}
+
 #[test]
 fn cut_crops_the_view_to_the_selection_and_needs_one() {
     let mut h = Harness::with_images(&["a.png"]);
