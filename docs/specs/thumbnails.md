@@ -107,7 +107,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | T while the grid is open | Toggles and saves the setting; the strip appears once the grid closes |
 | Filmstrip with no current image (empty start) | Strip background only, no tiles |
 | Resident mode hides the window | Queue, handed-out requests and atlas are dropped; the cache on disk stays |
-| Batch dialog opened while tiles are marked | The dialog starts with its own (empty) list; the marks are not passed to it |
+| Batch dialog opened while tiles are marked | The dialog starts with the marked files (AC-23); files dropped onto it are added to them |
 
 ## Assumptions
 
@@ -145,7 +145,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | AC-20 | | open | |
 | AC-21 | | open | |
 | AC-22 | | open | |
-| AC-23 | | open | |
+| AC-23 | `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 
 Partial coverage without an exact test: AC-16 persistence of the setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); AC-18 the layout functions behind the keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`) — the key and mouse handling in `App` has no test.
 
@@ -153,3 +153,4 @@ Partial coverage without an exact test: AC-16 persistence of the setting by `rou
 
 - 2026-11-02: in the grid, file commands (Delete, "Open with", "Edit with") take the selected tile and commands on the shown image (copy, cut, save cutout, select all from the menu, zoom, rotation, show original) do nothing. Because the grid covers that image, and Delete recycling a file other than the one the user sees selected was the defect found in the extraction; a copy of a tile would need its probe on the UI thread.
 - 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.
+- 2026-11-02: AC-23 checks "no longer exists" with a file check per marked file when the dialog opens (on the UI thread). Because opening the dialog is not on the startup or browsing path, and the dialog's header inspection would otherwise list the missing file as unreadable instead of leaving it out.

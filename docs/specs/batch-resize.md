@@ -26,7 +26,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 ### Out of scope
 
 - A command line for batch work — because `blinzel.md` §2 keeps batch processing in the app (`blinzel-bench batch` is a developer benchmark, not a user feature)
-- Starting a batch from the grid's marked thumbnails — because the code does not connect the grid multi-selection to the dialog (the grid belongs to the thumbnails spec)
+- Marking thumbnails in the grid — because the grid and its marks belong to the thumbnails spec (`thumbnails.md` AC-19, AC-23); this spec only takes the marked files as the dialog's starting list
 - Other batch operations (convert only, rotate, rename only) — because the design spec only plans resizing
 - Comparison with `vipsthumbnail` and XnConvert in `blinzel-race` — because it is an open measurement item of `blinzel.md` §7, not app behavior
 
@@ -121,7 +121,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 | AC-19 | partial: `batch_writes_new_files_and_never_replaces` runs with a 1-byte budget (images larger than the budget still finish); the concurrency limit is untested | open | |
 | AC-20 | `cancelled_batches_skip_the_rest` (`blinzel-core/src/batch/run.rs`), `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`, Esc cancels), Linux | built | |
 | AC-21 | manual: `blinzel-bench batch` (not run in CI) | open | |
-| AC-22 | partial: `edits_make_the_job` (`blinzel-ui/src/batch_dialog.rs`) checks the defaults; Ctrl+B, the menu and the kept settings are untested | open | |
+| AC-22 | `resize_images_opens_a_modal_dialog_that_keeps_its_settings`, `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`), `edits_make_the_job` (`blinzel-ui/src/batch_dialog.rs`), Linux | built | |
 | AC-23 | partial: `dropped_files_and_folders_fill_the_list` (`blinzel-ui/src/batch_files.rs`) covers the list; the routing of drops in `App` is untested | open | |
 | AC-24 | `dropped_files_and_folders_fill_the_list` (`blinzel-ui/src/batch_files.rs`), `new_names_follow_the_pattern` (`blinzel-ui/src/batch_dialog.rs`), Linux | built | |
 | AC-25 | `dropped_files_wait_for_their_headers`, `edits_make_the_job`, `new_names_follow_the_pattern` (`blinzel-ui/src/batch_dialog.rs`), `bad_patterns_are_refused` (`blinzel-core/src/batch/naming.rs`), Linux; the empty folder and the 100000 limit are untested | built | |
@@ -132,4 +132,5 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 ## Decisions
 
 - 2026-11-02: revised AC-22: the dialog starts with the grid's marks when there are any (decision in `thumbnails.md`).
+- 2026-11-02: `resize_images_opens_a_modal_dialog_that_keeps_its_settings` was green at once: Ctrl+B, the menu, the defaults, the modality and the kept settings already worked; only the start with the grid's marks was new (red first in `resize_images_starts_with_the_marked_files_in_folder_order`).
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's ✅ markers for §7 "Batch processing" were not taken as evidence.

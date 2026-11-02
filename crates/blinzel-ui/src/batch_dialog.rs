@@ -170,6 +170,12 @@ impl BatchDialog {
         self
     }
 
+    /// The files in the list, in order (tests).
+    #[cfg(test)]
+    pub(crate) fn file_paths(&self) -> Vec<PathBuf> {
+        self.files.paths()
+    }
+
     pub fn is_running(&self) -> bool {
         self.run.as_ref().is_some_and(|r| r.summary.is_none())
     }

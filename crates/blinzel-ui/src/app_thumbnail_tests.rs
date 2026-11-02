@@ -5,6 +5,10 @@ use super::*;
 use crate::testkit::Harness;
 use Key::*;
 
+fn centre(r: Rect) -> (f64, f64) {
+    (r.x + r.w / 2.0, r.y + r.h / 2.0)
+}
+
 /// `names` in a folder, the first open, the grid open on it.
 fn grid_on(names: &[&str]) -> Harness {
     let mut h = Harness::with_images(names);
@@ -97,4 +101,83 @@ fn edit_and_open_with_in_the_grid_take_the_selected_tile() {
         [Action::ChooseEditor { then }] => assert_eq!(then.as_ref(), Some(&b)),
         a => panic!("{a:?}"),
     }
+}
+
+// ------------------------------------------------------- marks and batch
+
+#[test]
+fn resize_images_starts_with_the_marked_files_in_folder_order() {
+    let mut h = grid_on(&["a.png", "b.png", "c.png", "d.png"]);
+    for i in [3, 1, 2] {
+        let p = centre(h.grid_cell(i).unwrap());
+        h.ctrl_click(p);
+    }
+    assert_eq!(h.grid_marked(), ["b.png", "c.png", "d.png"]);
+    // Gone from the disk since it was marked.
+    std::fs::remove_file(h.images.join("c.png")).unwrap();
+    h.ctrl(Letter('B'));
+    let want = vec![h.images.join("b.png"), h.images.join("d.png")];
+    assert_eq!(h.batch_files(), Some(want.clone()));
+    h.key(Escape);
+    assert_eq!(h.batch_files(), None);
+    // The menu does the same; the marks are still there.
+    h.command(Cmd::Batch);
+    assert_eq!(h.batch_files(), Some(want));
+    h.key(Escape);
+    // Without marks the list starts empty.
+    h.key(Escape);
+    assert!(h.grid_marked().is_empty());
+    assert_eq!(h.grid_selected(), Some(2), "the grid stays open");
+    h.ctrl(Letter('B'));
+    assert_eq!(h.batch_files(), Some(vec![]));
+}
+
+#[test]
+fn resize_images_outside_the_grid_starts_empty() {
+    let mut h = grid_on(&["a.png", "b.png"]);
+    h.ctrl(Letter('A'));
+    // Closing the grid drops its marks.
+    h.key(Letter('G'));
+    h.ctrl(Letter('B'));
+    assert_eq!(h.batch_files(), Some(vec![]));
+}
+
+/// `docs/specs/batch-resize.md` AC-22: Ctrl+B or the menu opens the modal
+/// dialog with the defaults, then with the settings last used.
+#[test]
+fn resize_images_opens_a_modal_dialog_that_keeps_its_settings() {
+    use blinzel_core::batch::{Job, Output, Size};
+    let mut h = Harness::with_images(&["a.png", "b.png"]);
+    h.ctrl(Letter('B'));
+    let title = blinzel_i18n::tr(blinzel_i18n::Msg::BatchTitle);
+    assert!(h.frame().texts.iter().any(|t| t == title), "drawn");
+    assert_eq!(h.frame().images.len(), 1, "over the viewer");
+    let job = h.app.dialog.as_ref().unwrap().job().unwrap();
+    assert_eq!(job.size, Size::LongEdge(1920));
+    assert!(!job.enlarge, "don't enlarge");
+    assert_eq!(job.output, Output::Same, "format as source");
+    assert_eq!(job.quality.jpeg, 85);
+    assert!(job.keep_exif && job.keep_gps && job.keep_icc);
+    assert_eq!(job.pattern, "{name}");
+    assert_eq!(job.out_dir, Job::default().out_dir);
+    assert_eq!(job.out_dir, PathBuf::from("resized"));
+    // Modal: keys and clicks go to the dialog, not to the viewer.
+    h.key(Right);
+    h.key(Letter('G'));
+    h.drag((380.0, 285.0), (420.0, 315.0));
+    assert_eq!(h.current_name().as_deref(), Some("a.png"));
+    assert_eq!(h.grid_selected(), None);
+    assert!(h.app.selection().is_none());
+    // A new long edge, then closed and opened again from the menu.
+    h.key(Tab);
+    for _ in 0..4 {
+        h.key(Backspace);
+    }
+    h.app.text_input("1280");
+    h.key(Escape);
+    assert!(h.app.dialog.is_none());
+    h.command(Cmd::Batch);
+    let job = h.app.dialog.as_ref().unwrap().job().unwrap();
+    assert_eq!(job.size, Size::LongEdge(1280), "kept in this session");
+    assert_eq!(h.batch_files(), Some(vec![]));
 }

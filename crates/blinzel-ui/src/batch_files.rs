@@ -60,6 +60,12 @@ impl BatchFiles {
         self.rows.is_empty()
     }
 
+    /// The rows' files, in order (tests).
+    #[cfg(test)]
+    pub(crate) fn paths(&self) -> Vec<PathBuf> {
+        self.rows.iter().map(|r| r.path.clone()).collect()
+    }
+
     /// Dropped files and folders (a folder adds its images, not those of
     /// its subfolders). Returns the files that are new to the list; files
     /// already listed and non-images are left out.

@@ -20,7 +20,7 @@ The first three carry decisions of 2026-11-02 that change behavior, so they come
 | 8 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
 | 9 | [animations](animations.md) | 4 / 14 | 0 | 1 | `/spec-build` |
 | 10 | [color-management](color-management.md) | 10 / 19 | 3 | 2 | `/spec-build` |
-| 11 | [batch-resize](batch-resize.md) | 17 / 28 | 1 | 2 | `/spec-build` |
+| 11 | [batch-resize](batch-resize.md) | 18 / 28 | 1 | 2 | `/spec-build` |
 | 12 | [localization](localization.md) | 7 / 17 | 1 | 0 | `/spec-build` |
 | 13 | [platform-shells](platform-shells.md) | 8 / 24 | 11 | 5 | `/spec-build` |
 | 14 | [resident-mode](resident-mode.md) | 3 / 23 | 13 | 0 | `/spec-build` |

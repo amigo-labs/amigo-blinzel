@@ -191,7 +191,7 @@ Principle as above: source files stay unchanged. Every output is a new file; a n
   - Names are planned in advance from header and EXIF, in list order, with numbers for identical names.
   - Writing: temporary file, then via hard link to the free name, which fails instead of replacing; without hard links, rename after checking the name is free.
   - Parallel across files (one decode thread per file), limited by a memory budget.
-- **Dialog in the app** (Ctrl+B): modal panel over the viewer, the same code on all platforms (`blinzel-ui/src/batch_dialog.rs`). The file list is filled by drag and drop (Windows and Linux; on macOS a drop opens the first file, so the list cannot be filled there). Decided 2026-11-02: the files marked in the grid fill the dialog when it opens ([thumbnails.md](thumbnails.md) AC-23); not built yet.
+- **Dialog in the app** (Ctrl+B): modal panel over the viewer, the same code on all platforms (`blinzel-ui/src/batch_dialog.rs`). The file list is filled by drag and drop (Windows and Linux; on macOS a drop opens the first file, so the list cannot be filled there). Decided 2026-11-02: the files marked in the grid fill the dialog when it opens ([thumbnails.md](thumbnails.md) AC-23).
 - Behavior: [batch-resize.md](batch-resize.md). Measurements: [section 15](#batch-m9).
 
 ## 8. Localization

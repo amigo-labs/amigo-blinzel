@@ -470,6 +470,14 @@ impl Harness {
         self.record(a)
     }
 
+    /// Left click at `p` with Ctrl held.
+    pub fn ctrl_click(&mut self, p: (f64, f64)) -> Vec<Action> {
+        let a = self.app.mouse_down(p, false, true, false);
+        let a = self.record(a);
+        self.mouse_up();
+        a
+    }
+
     pub fn mouse_move(&mut self, p: (f64, f64)) {
         self.app.mouse_move(p);
         self.pump();
@@ -732,6 +740,18 @@ impl Harness {
     /// The selected tile while the grid is open.
     pub fn grid_selected(&self) -> Option<usize> {
         self.app.browse.grid.as_ref().map(|g| g.selected)
+    }
+
+    /// The marked tiles' names while the grid is open.
+    pub fn grid_marked(&self) -> Vec<String> {
+        let g = self.app.browse.grid.as_ref();
+        g.map(|g| g.marked.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// The files in the open batch dialog's list (`None`: it is closed).
+    pub fn batch_files(&self) -> Option<Vec<PathBuf>> {
+        self.app.dialog.as_ref().map(|d| d.file_paths())
     }
 
     /// Client rectangle of grid tile `i` while the grid is open.

@@ -2038,13 +2038,28 @@ impl<B: Backend> App<B> {
         })
     }
 
-    /// Opens the batch dialog with an empty list (files are dropped onto
-    /// it), keeping the last settings.
+    /// Opens the batch dialog, keeping the last settings, with the files
+    /// marked in the grid (in folder order, those still there), else an
+    /// empty list (files are dropped onto it).
     fn open_batch(&mut self) {
-        self.dialog = Some(match self.last_dialog.take() {
+        let marked: Vec<PathBuf> = match &self.browse.grid {
+            Some(g) if !g.marked.is_empty() => self
+                .list
+                .entries()
+                .iter()
+                .filter(|e| g.marked.contains(&e.name))
+                .map(|e| self.list.dir().join(&e.name))
+                .filter(|p| p.is_file())
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut d = match self.last_dialog.take() {
             Some(d) => d.reopen(),
             None => BatchDialog::new(),
-        });
+        };
+        let o = d.add(marked);
+        self.dialog = Some(d);
+        self.dialog_outcome(o);
         self.invalidate();
     }
 
