@@ -30,6 +30,10 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
     let mut canvas = vec![0u8; w * h * 4];
     let mut count = 0;
     let mut used = 0usize;
+    let plays = |dec: &gif::Decoder<&[u8]>| match dec.repeat() {
+        gif::Repeat::Infinite => None,
+        gif::Repeat::Finite(n) => Some(n as u32 + 1),
+    };
     while let Some(f) = dec.read_next_frame().map_err(err)? {
         if used + canvas.len() > budget {
             break;
@@ -57,6 +61,7 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
                 }
             }
         }
+        let (dispose, delay) = (f.dispose, f.delay);
         let mut plane = Plane::new(w as u32, h as u32, 4);
         plane.data.copy_from_slice(&canvas);
         let opaque = canvas.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
@@ -77,14 +82,15 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
                 full_height: h as u32,
                 region: None,
             },
-            delay_ms: delay_ms(f.delay),
+            delay_ms: delay_ms(delay),
+            plays: plays(&dec),
         });
         count += 1;
         used += canvas.len();
         if !more {
             break;
         }
-        match (f.dispose, before) {
+        match (dispose, before) {
             (gif::DisposalMethod::Background, _) => {
                 for row in 0..fh.min(h.saturating_sub(fy)) {
                     canvas[((fy + row) * w + fx) * 4..][..cols * 4].fill(0);
@@ -94,13 +100,9 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
             _ => {}
         }
     }
-    let plays = match dec.repeat() {
-        gif::Repeat::Infinite => None,
-        gif::Repeat::Finite(n) => Some(n as u32 + 1),
-    };
     Ok(AnimInfo {
         frames: count,
-        plays,
+        plays: plays(&dec),
     })
 }
 
@@ -302,6 +304,21 @@ mod tests {
         assert_eq!(delay_ms(0), 100);
         assert_eq!(delay_ms(1), 100);
         assert_eq!(delay_ms(7), 70);
+    }
+
+    #[test]
+    fn frames_carry_the_loop_count_up_to_a_decode_error() {
+        use gif::DisposalMethod::Keep;
+        let three = animated(&[(0, Keep, (0, 0, 4, 2)); 3], None, gif::Repeat::Finite(2));
+        // The third frame's image data cut short.
+        let cut = &three[..three.len() - 4];
+        let mut plays = Vec::new();
+        let r = stream_animation(cut, usize::MAX, &mut |f| {
+            plays.push(f.plays);
+            true
+        });
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(plays, [Some(3), Some(3)]);
     }
 
     #[test]

@@ -73,6 +73,10 @@ pub type Result<T> = std::result::Result<T, DecodeError>;
 pub struct AnimFrame {
     pub image: Image,
     pub delay_ms: u32,
+    /// How often the whole animation plays, as far as the file has said
+    /// up to this frame (`None`: for ever), so a decode error after it
+    /// keeps the loop count.
+    pub plays: Option<u32>,
 }
 
 pub struct Animation {

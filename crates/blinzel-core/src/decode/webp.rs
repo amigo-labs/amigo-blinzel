@@ -143,6 +143,10 @@ pub fn stream_animation(
             })?
     ];
     let frame_bytes = size.0 as usize * size.1 as usize * 4;
+    let plays = match dec.loop_count() {
+        LoopCount::Forever => None,
+        LoopCount::Times(n) => Some(n.get() as u32),
+    };
     let mut count = 0;
     while count < dec.num_frames() as usize && (count + 1) * frame_bytes <= budget {
         let ms = dec.read_frame(&mut buf).map_err(err)?;
@@ -150,15 +154,12 @@ pub fn stream_animation(
         let more = sink(AnimFrame {
             image: image(&buf, size, alpha),
             delay_ms: super::min_delay_ms(ms),
+            plays,
         });
         if !more {
             break;
         }
     }
-    let plays = match dec.loop_count() {
-        LoopCount::Forever => None,
-        LoopCount::Times(n) => Some(n.get() as u32),
-    };
     Ok(super::AnimInfo {
         frames: count,
         plays,
@@ -226,6 +227,14 @@ mod tests {
         assert!(!is_lossy_still(&data));
         let anim = decode_animation(&data, usize::MAX).unwrap().unwrap();
         assert_eq!(anim.plays, Some(3));
+        // Every frame carries the loop count, for a decode error after it.
+        let mut plays = Vec::new();
+        stream_animation(&data, usize::MAX, &mut |f| {
+            plays.push(f.plays);
+            true
+        })
+        .unwrap();
+        assert_eq!(plays, [Some(3), Some(3)]);
         let delays: Vec<u32> = anim.frames.iter().map(|f| f.delay_ms).collect();
         // Browsers stretch delays under 20 ms to 100 ms.
         assert_eq!(delays, [70, 100]);

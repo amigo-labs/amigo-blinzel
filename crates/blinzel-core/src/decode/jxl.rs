@@ -236,6 +236,7 @@ pub fn stream_animation(
     if count < 2 || anim.tps_numerator == 0 {
         return Ok(still);
     }
+    let plays = (anim.num_loops > 0).then_some(anim.num_loops);
     let mut done = 0;
     while done < count && (done + 1) * frame_bytes <= budget {
         let render = img.render_frame(done).map_err(err)?;
@@ -245,6 +246,7 @@ pub fn stream_animation(
         let more = sink(AnimFrame {
             image: image(&img, &render)?,
             delay_ms: super::min_delay_ms(ms.min(u32::MAX as u64) as u32),
+            plays,
         });
         if !more {
             break;
@@ -252,7 +254,7 @@ pub fn stream_animation(
     }
     Ok(super::AnimInfo {
         frames: done,
-        plays: (anim.num_loops > 0).then_some(anim.num_loops),
+        plays,
     })
 }
 
