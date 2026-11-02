@@ -2,7 +2,7 @@
 //! watching and prefetch (`docs/specs/browsing.md`).
 
 use super::*;
-use crate::testkit::Harness;
+use crate::testkit::{Harness, IMAGE_SIZE};
 use Key::*;
 
 fn index(h: &Harness) -> Option<usize> {
@@ -423,6 +423,54 @@ fn cloud_placeholders_are_not_read_ahead_but_load_when_navigated_to() {
     assert_eq!(h.current_name().as_deref(), Some("c.png"));
     assert_eq!(h.view_reads(), ["b.png", "a.png", "c.png"]);
     assert_eq!(h.frame().images.len(), 1, "c.png is shown");
+}
+
+// ------------------------------------------------------------------- GPU
+
+/// The images whose screen-sized stage is on the GPU, in list order.
+fn on_gpu(h: &Harness) -> Vec<String> {
+    let list = h.app.list();
+    (0..list.len())
+        .filter_map(|i| list.get(i))
+        .filter(|e| h.app.has_stage(e.cache_id(), Stage::Screen))
+        .map(|e| e.name.clone())
+        .collect()
+}
+
+/// AC-13 (the App's part; the shells report the budget).
+#[test]
+fn the_wanted_window_stays_on_the_gpu_and_a_released_image_is_prepared_again() {
+    let names: Vec<String> = (0..20).map(|i| format!("a{i:02}.png")).collect();
+    let one_image = IMAGE_SIZE.0 as usize * IMAGE_SIZE.1 as usize * 4;
+    let mut h = Harness::with_budget(Settings::default(), Some(one_image));
+    for n in &names {
+        h.write_png(n, IMAGE_SIZE.0, IMAGE_SIZE.1);
+    }
+    h.open("a00.png");
+    assert_eq!(
+        on_gpu(&h),
+        [
+            "a00.png", "a01.png", "a02.png", "a03.png", "a04.png", "a18.png", "a19.png"
+        ],
+        "over budget, but every one is protected"
+    );
+    for _ in 0..10 {
+        h.key(Right);
+    }
+    assert_eq!(h.current_name().as_deref(), Some("a10.png"));
+    // 4 on either side, the larger of 4 ahead and 2 behind.
+    let window: Vec<String> = (6..=14).map(|i| format!("a{i:02}.png")).collect();
+    assert_eq!(on_gpu(&h), window);
+    assert!(names.iter().all(|n| reads_of(&h, n) <= 1));
+    // Back to a released one: it is read and shown again.
+    for _ in 0..5 {
+        h.key(Left);
+    }
+    assert_eq!(h.current_name().as_deref(), Some("a05.png"));
+    assert_eq!(reads_of(&h, "a05.png"), 2);
+    assert_eq!(reads_of(&h, "a06.png"), 1, "protected all along");
+    assert!(on_gpu(&h).contains(&"a05.png".to_string()));
+    assert_eq!(h.frame().images.len(), 1);
 }
 
 // ------------------------------------------------------ reading, errors

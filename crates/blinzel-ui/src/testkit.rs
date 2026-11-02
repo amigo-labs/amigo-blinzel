@@ -71,6 +71,8 @@ impl ImageInfo for FakeImage {
 pub(crate) struct FakeDevice {
     /// Stage size of every image uploaded, in order.
     pub uploads: Mutex<Vec<(u32, u32)>>,
+    /// The texture budget it reports; `None`: 1 GiB, like Linux.
+    pub budget: Option<usize>,
 }
 
 impl Device for FakeDevice {
@@ -91,7 +93,7 @@ impl Device for FakeDevice {
         Ok(())
     }
     fn texture_budget(&self) -> usize {
-        1 << 30
+        self.budget.unwrap_or(1 << 30)
     }
     fn adapter_name(&self) -> String {
         "test".into()
@@ -409,6 +411,8 @@ pub(crate) struct Harness {
     wakes: Receiver<Wake>,
     actions: Vec<Action>,
     rendered_at: usize,
+    /// The device's texture budget ([`FakeDevice::budget`]).
+    budget: Option<usize>,
     // Dropped after the app (its threads may still read files).
     tmp: TempDir,
     _serial: MutexGuard<'static, ()>,
@@ -422,6 +426,12 @@ impl Harness {
 
     /// An empty folder, nothing open.
     pub fn with_settings(settings: Settings) -> Harness {
+        Harness::with_budget(settings, None)
+    }
+
+    /// An empty folder, nothing open, a device whose texture budget is
+    /// `budget` bytes (`None`: 1 GiB).
+    pub fn with_budget(settings: Settings, budget: Option<usize>) -> Harness {
         let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         blinzel_i18n::set_lang(blinzel_i18n::FALLBACK);
         let tmp = TempDir::new();
@@ -429,13 +439,14 @@ impl Harness {
         std::fs::create_dir_all(&images).unwrap();
         let config = tmp.path().join("config");
         crate::settings_store::TEST_CONFIG_DIR.with(|d| *d.borrow_mut() = Some(config));
-        let (app, wakes) = Harness::start(tmp.path(), settings);
+        let (app, wakes) = Harness::start(tmp.path(), settings, budget);
         Harness {
             app,
             images,
             wakes,
             actions: Vec::new(),
             rendered_at: 0,
+            budget,
             tmp,
             _serial: serial,
         }
@@ -445,7 +456,7 @@ impl Harness {
     /// thumbnail cache), with the settings as saved; nothing open.
     pub fn restart(&mut self) {
         let settings = self.saved_settings().unwrap_or_default();
-        let (app, wakes) = Harness::start(self.tmp.path(), settings);
+        let (app, wakes) = Harness::start(self.tmp.path(), settings, self.budget);
         self.app = app;
         self.wakes = wakes;
         self.actions.clear();
@@ -453,7 +464,11 @@ impl Harness {
     }
 
     /// A new App over the folders under `tmp`.
-    fn start(tmp: &Path, settings: Settings) -> (App<TestBackend>, Receiver<Wake>) {
+    fn start(
+        tmp: &Path,
+        settings: Settings,
+        budget: Option<usize>,
+    ) -> (App<TestBackend>, Receiver<Wake>) {
         let (tx, wakes) = channel();
         let services = Arc::new(FakeServices {
             wakes: Mutex::new(tx),
@@ -465,7 +480,10 @@ impl Harness {
             decodes: Mutex::new(Vec::new()),
             previews: Mutex::new(HashMap::new()),
         });
-        let device = Arc::new(FakeDevice::default());
+        let device = Arc::new(FakeDevice {
+            budget,
+            ..FakeDevice::default()
+        });
         let loader = Loader::new(services.clone(), 1, 2, 2);
         loader.set_device(device.clone());
         let color = ColorManager::new(settings.color_management, no_lut);
