@@ -375,6 +375,68 @@ mod tests {
         );
     }
 
+    /// Three 8×6 keyframes, red, green and blue, of 15, 21 and 9 ticks at
+    /// 500/3 ticks per second, playing twice. Made from a hand-written APNG
+    /// (delays 5, 7 and 3 ms) with `cjxl -d 0 -e 7` (libjxl 0.7), whose
+    /// animation header (1000/1 ticks per second, no loop count) was then
+    /// rewritten bit by bit: libjxl 0.7 writes no loop count and only
+    /// 1000/1 for APNG input.
+    const ANIM_LOOP2: &[u8] = include_bytes!("../../testdata/anim-8x6-loop2.jxl");
+    /// The same three keyframes as cjxl wrote them: 5, 7 and 3 ticks at
+    /// 1000/1 ticks per second, looping for ever.
+    const ANIM_FOREVER: &[u8] = include_bytes!("../../testdata/anim-8x6-forever.jxl");
+
+    #[test]
+    fn plays_keyframe_animations_at_their_ticks_and_loops() {
+        let anim = decode_animation(ANIM_LOOP2, usize::MAX).unwrap().unwrap();
+        assert_eq!(anim.plays, Some(2));
+        // ticks × 1000 × 3 / 500 ms; 18 ms is under 20 and plays as 100.
+        let delays: Vec<u32> = anim.frames.iter().map(|f| f.delay_ms).collect();
+        assert_eq!(delays, [30, 42, 100]);
+        let first: Vec<[u8; 4]> = anim
+            .frames
+            .iter()
+            .map(|f| rgba_of(&f.image)[..4].try_into().unwrap())
+            .collect();
+        assert_eq!(
+            first,
+            [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]]
+        );
+        assert!(
+            anim.frames.iter().all(|f| f.plays == Some(2)),
+            "every frame carries the loop count"
+        );
+        assert_eq!(
+            rgba_of(&decode(ANIM_LOOP2, 1).unwrap()),
+            rgba_of(&anim.frames[0].image)
+        );
+
+        let forever = decode_animation(ANIM_FOREVER, usize::MAX).unwrap().unwrap();
+        assert_eq!(forever.plays, None);
+        let delays: Vec<u32> = forever.frames.iter().map(|f| f.delay_ms).collect();
+        assert_eq!(delays, [100, 100, 100]);
+    }
+
+    #[test]
+    fn keyframes_beyond_the_budget_are_not_decoded() {
+        let frame = 8 * 6 * 4;
+        let mut seen = 0;
+        let info = stream_animation(ANIM_LOOP2, 3 * frame - 1, &mut |_| {
+            seen += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!((seen, info.frames, info.plays), (2, 2, Some(2)));
+        let two = decode_animation(ANIM_LOOP2, 2 * frame).unwrap().unwrap();
+        assert_eq!(two.frames.len(), 2);
+        // A single keyframe that fits is no animation.
+        assert!(
+            decode_animation(ANIM_LOOP2, 2 * frame - 1)
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn rejects_broken_files() {
         assert!(info(&LOSSY[..3]).is_err());
