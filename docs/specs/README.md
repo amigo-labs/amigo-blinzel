@@ -50,7 +50,6 @@ Behavior the code has today that contradicts the design or is plainly wrong. Eac
 | A decode error in the middle of an animation drops its loop count: the frames so far loop for ever | [animations](animations.md) |
 | Linux (missing or broken first file) and macOS (broken first file) never show the window: there is no 400 ms fallback at a cold start | [startup](startup.md) |
 | `--exit-after-first-frame` with an undecodable file never exits, and the Windows CI step has no timeout | [startup](startup.md) |
-| When the current file is deleted outside the viewer, next/previous stop working; a file rewritten in place is not reloaded; a folder change during the listing is dropped | [browsing](browsing.md) |
 | The thumbnail cache key lowercases the path on every platform: `A.jpg` and `a.jpg` share an entry on Linux and macOS | [thumbnails](thumbnails.md) |
 | An AVIF whose `ftyp` major brand is `mif1` is taken for HEIF and never decoded by rav1d | [image-formats](image-formats.md) |
 | A GIF with a 0×0 logical screen is rejected by the probe although the decoder could show it | [image-formats](image-formats.md) |

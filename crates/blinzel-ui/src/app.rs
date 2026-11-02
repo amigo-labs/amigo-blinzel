@@ -20,6 +20,7 @@ use blinzel_core::layout::{
     self, Layout, ViewMode, ViewState, compute, content_in_stage, stage_to_client, zoom_at,
     zoom_step,
 };
+use blinzel_core::natsort;
 use blinzel_core::selection::{self, Drag, Hit, LeftDrag, hit_test, left_drag_action};
 use blinzel_core::settings::Settings;
 use blinzel_core::timing;
@@ -215,6 +216,11 @@ pub struct App<B: Backend> {
     pub loader: Loader<B::Device, B::Services>,
     list: FileList,
     list_rx: Option<Receiver<(PathBuf, std::io::Result<Vec<Entry>>)>>,
+    /// The folder changed while it was being listed: list it once more.
+    relist: bool,
+    /// The current image left the folder after it was listed (deleted or
+    /// renamed outside the viewer): Next and Previous go on from its place.
+    current_left: bool,
     /// The watched folder and the platform's watch on it.
     watcher: Option<(PathBuf, Box<dyn Any>)>,
     pub current: Option<Current>,
@@ -299,6 +305,8 @@ impl<B: Backend> App<B> {
             loader,
             list: FileList::default(),
             list_rx: None,
+            relist: false,
+            current_left: false,
             watcher: None,
             current: None,
             textures: ByteLru::new(),
@@ -483,6 +491,7 @@ impl<B: Backend> App<B> {
         }
         let cache_id = entry.cache_id();
         let index = self.list.index_of(&entry.name);
+        self.current_left = false;
         self.current = Some(Current {
             path,
             entry,
@@ -497,6 +506,7 @@ impl<B: Backend> App<B> {
     pub fn start_listing(&mut self, dir: PathBuf) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.list_rx = Some(rx);
+        self.relist = false;
         let services = self.services.clone();
         let _ = std::thread::Builder::new()
             .name("blinzel-list".into())
@@ -519,11 +529,31 @@ impl<B: Backend> App<B> {
         self.list_rx = None;
         let entries = result.unwrap_or_default();
         self.list = FileList::new(dir.clone(), entries);
+        let mut rewritten = None;
         if let Some(cur) = &mut self.current {
+            let was_listed = cur.index.is_some();
             cur.index = self.list.index_of(&cur.entry.name);
+            self.current_left = cur.index.is_none() && (was_listed || self.current_left);
+            // Rewritten in place: load the new version (the old one stays
+            // on screen until it is there).
+            if let Some(e) = cur.index.and_then(|i| self.list.get(i))
+                && e.cache_id() != cur.cache_id
+            {
+                cur.entry = e.clone();
+                cur.cache_id = e.cache_id();
+                rewritten = Some(cur.cache_id);
+            }
+        }
+        if rewritten.is_some() {
+            self.stop_animation();
+            self.drop_animations(rewritten);
         }
         if self.watcher.as_ref().is_none_or(|w| w.0 != dir) {
             self.watcher = self.host.watch_dir(&dir).map(|w| (dir.clone(), w));
+        }
+        if self.relist {
+            // What changed during this listing.
+            self.start_listing(dir);
         }
         self.update_wanted();
         self.invalidate();
@@ -532,7 +562,12 @@ impl<B: Backend> App<B> {
 
     pub fn on_dir_changed(&mut self) {
         let dir = self.list.dir().to_path_buf();
-        if !dir.as_os_str().is_empty() && self.list_rx.is_none() {
+        if dir.as_os_str().is_empty() {
+            return;
+        }
+        if self.list_rx.is_some() {
+            self.relist = true;
+        } else {
             self.start_listing(dir);
         }
     }
@@ -543,6 +578,7 @@ impl<B: Backend> App<B> {
         };
         let path = self.list.dir().join(&entry.name);
         let cache_id = entry.cache_id();
+        self.current_left = false;
         self.current = Some(Current {
             path,
             entry,
@@ -554,13 +590,27 @@ impl<B: Backend> App<B> {
     }
 
     fn step(&mut self, steps: isize) -> Vec<Action> {
-        let Some(i) = self.current.as_ref().and_then(|c| c.index) else {
+        let Some(cur) = &self.current else {
             return vec![];
         };
+        let to = match cur.index {
+            Some(i) => self.list.offset(i, steps).filter(|&j| j != i),
+            // Gone from the folder: on from the place its name sorts at.
+            None if self.current_left => {
+                let name = cur.entry.name.as_str();
+                let gap = self
+                    .list
+                    .entries()
+                    .partition_point(|e| natsort::compare(&e.name, name).is_lt());
+                self.list
+                    .offset(gap, if steps > 0 { steps - 1 } else { steps })
+            }
+            None => return vec![],
+        };
         self.direction = if steps < 0 { -1 } else { 1 };
-        match self.list.offset(i, steps) {
-            Some(j) if j != i => self.go_to_index(j),
-            _ => vec![],
+        match to {
+            Some(j) => self.go_to_index(j),
+            None => vec![],
         }
     }
 
