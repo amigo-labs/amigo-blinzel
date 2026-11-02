@@ -20,7 +20,7 @@ The first three carry decisions of 2026-11-02 that change behavior, so they come
 | 8 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
 | 9 | [animations](animations.md) | 4 / 14 | 0 | 1 | `/spec-build` |
 | 10 | [color-management](color-management.md) | 10 / 19 | 3 | 2 | `/spec-build` |
-| 11 | [batch-resize](batch-resize.md) | 18 / 28 | 1 | 2 | `/spec-build` |
+| 11 | [batch-resize](batch-resize.md) | 24 / 28 | 1 | 2 | `/spec batch-resize` for the open question on AC-05 (DCT scales); push for the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design); then `/spec-check` |
 | 12 | [localization](localization.md) | 7 / 17 | 1 | 0 | `/spec-build` |
 | 13 | [platform-shells](platform-shells.md) | 8 / 24 | 11 | 5 | `/spec-build` |
 | 14 | [resident-mode](resident-mode.md) | 3 / 23 | 13 | 0 | `/spec-build` |
@@ -31,7 +31,7 @@ The first three carry decisions of 2026-11-02 that change behavior, so they come
 | 19 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 20 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
 | 21 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **201 / 426** | | | |
+| | **Total** | **207 / 426** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
@@ -54,7 +54,6 @@ Behavior the code has today that contradicts the design or is plainly wrong. Eac
 | The thumbnail cache key lowercases the path on every platform: `A.jpg` and `a.jpg` share an entry on Linux and macOS | [thumbnails](thumbnails.md) |
 | An AVIF whose `ftyp` major brand is `mif1` is taken for HEIF and never decoded by rav1d | [image-formats](image-formats.md) |
 | A GIF with a 0×0 logical screen is rejected by the probe although the decoder could show it | [image-formats](image-formats.md) |
-| On macOS, files dropped onto the batch dialog open the first image instead: the batch list cannot be filled there | [batch-resize](batch-resize.md) |
 | A macOS `--resident` start with the setting off leaves the LaunchAgent in place (Windows removes its Run value) | [resident-mode](resident-mode.md) |
 
 ## Backlog

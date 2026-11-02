@@ -56,6 +56,8 @@ pub enum UserEvent {
     Wake(Wake),
     /// Finder, the Dock or `open` handed over a file.
     Open(PathBuf),
+    /// Files and folders dropped onto the window.
+    Dropped(Vec<PathBuf>),
     /// A message for the notice toast.
     Notice(String),
     /// A copy's pixels as PNG, encoded in the background.
@@ -806,6 +808,14 @@ impl Shell {
                 if hidden {
                     a.push(Action::Wake { opened: true });
                 } else if !app.cloaked {
+                    a.push(Action::Activate);
+                }
+                a
+            }
+            UserEvent::Dropped(paths) => {
+                let mut a = app.files_dropped(paths);
+                // As for a file from Finder: the window comes to the front.
+                if !app.cloaked {
                     a.push(Action::Activate);
                 }
                 a
@@ -1592,17 +1602,20 @@ define_class!(
                 // SAFETY: NSURL is a valid class to read.
                 unsafe { pb.readObjectsForClasses_options(&classes, None) }
             };
-            let path = urls.and_then(|a| {
-                a.iter()
-                    .find_map(|o| o.downcast::<NSURL>().ok().and_then(|u| url_path(&u)))
-            });
-            match path {
-                Some(p) => {
-                    deliver(UserEvent::Open(p));
-                    true
-                }
-                None => false,
+            // Every file and folder, for the batch dialog's list; the
+            // App shows the first one when the dialog is closed.
+            let mut paths: Vec<PathBuf> = Vec::new();
+            if let Some(a) = urls {
+                paths.extend(
+                    a.iter()
+                        .filter_map(|o| o.downcast::<NSURL>().ok().and_then(|u| url_path(&u))),
+                );
             }
+            if paths.is_empty() {
+                return false;
+            }
+            deliver(UserEvent::Dropped(paths));
+            true
         }
     }
 );

@@ -2,7 +2,7 @@
 status: todo
 created: 2026-11-02
 size: L
-platforms: all (Windows, macOS, Linux; dropping files onto the dialog works on Windows and Linux only)
+platforms: all (Windows, macOS, Linux)
 design: [blinzel.md §2, blinzel.md §3, blinzel.md §7, blinzel.md §12]
 ---
 
@@ -14,7 +14,7 @@ Users want to resize many images at once — for the web, for mail, for a fixed 
 
 This spec was reverse-engineered from the code on 2026-11-02: the engine `blinzel_core::batch` (feature `batch`), the dialog `blinzel-ui/src/batch_dialog.rs` with its file list `batch_files.rs`, the wiring in `App`, and the drop handlers and folder dialogs of the three shells. It records what the code does, not what the design spec says it should do.
 
-Known gaps the code has today: on macOS a drop onto the window always opens the first file, so the batch dialog's list cannot be filled there; file modification dates in names are local time only on Windows (UTC on Linux and macOS).
+Known gaps the code has today: file modification dates in names are local time only on Windows (UTC on Linux and macOS). (Until 2026-11-02 a drop onto the window on macOS always opened the first file, so the batch dialog's list could not be filled there; fixed, see Decisions.)
 
 ## Scope
 
@@ -59,7 +59,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 ### Dialog
 
 - [ ] AC-22 (event): When the user presses Ctrl+B or chooses "Resize images…", a modal panel opens over the viewer with the files marked in the grid (`thumbnails.md` AC-23), otherwise an empty file list, and the settings last used in this session (the first time: long edge 1920, "don't enlarge", format "as source", quality 85, keep metadata, location and colour profile, pattern `{name}`, folder `resized`); while it is open, every key and click goes to it.
-- [ ] AC-23 (event): When images or folders are dropped onto the window on Windows or Linux while the dialog is open, they are added to its list: a folder adds the images directly in it (not those of subfolders) in natural order; non-images and files already listed are left out; their headers are read in the background. Without an open dialog, a drop opens the first dropped file in the viewer.
+- [ ] AC-23 (event): When images or folders are dropped onto the window (Windows, macOS, Linux) while the dialog is open, they are added to its list: a folder adds the images directly in it (not those of subfolders) in natural order; non-images and files already listed are left out; their headers are read in the background. Without an open dialog, a drop opens the first dropped file in the viewer.
 - [ ] AC-24 (state): While the list is shown, each row reads old name → new name, the new name being the planned path with the real output size and the file's real date; rows still being read show "reading…", unreadable files show "unreadable: {reason}" in red and are left out of the run; × removes a row and "Remove all" clears the list.
 - [ ] AC-25 (error): If a header is still being read, no file is readable, the size is empty, zero or above 100000, the pattern is invalid (unclosed `{`, unknown placeholder, empty, or a `/` or `\`) or the folder is empty, then Start and Enter do nothing and the new names show `–`. Size fields accept only digits, at most six.
 - [ ] AC-26 (event): When the user presses Enter the batch starts (or, after a run, the dialog closes); Esc closes the dialog, or cancels while a batch runs; Tab and Shift+Tab move between the text fields (the second size field only for "fit in box" and "fill box").
@@ -73,7 +73,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 - Encoders: JPEG through libjpeg-turbo (needs the `turbojpeg` feature), PNG through `png`, WebP through libwebp (`VP8X` with `ICCP`/`EXIF` chunks added by us), AVIF through `ravif`/rav1e (8-bit, one thread per file, `colr`/`prof` box spliced in, `iloc` offsets shifted).
 - Writing (`run::write_new`): a temporary file `.{base}.{pid}-{n}.blinzel-tmp` in the target folder, then `hard_link` to the name (fails if the name exists → next number); file systems without hard links fall back to `rename` after checking the name is free.
 - The memory budget counts `width × height × 4` bytes of the full stored size per file, also when the JPEG is decoded smaller.
-- App wiring (`blinzel-ui/src/app.rs`): `Cmd::Batch` (Ctrl+B, also while the grid is shown), `files_dropped`, threads `blinzel-batch-inspect` and `blinzel-batch` (decoding through the platform's `Services`, one decode thread per file), `Wake::Batch` for progress, `last_dialog` keeps the settings until the app exits (not saved to disk). Drops: Windows `WM_DROPFILES` (`window.rs`), Linux `WindowEvent::DroppedFile` (`linux/shell.rs`); macOS `performDragOperation:` delivers `UserEvent::Open` (`macos/shell.rs`). Local time: `Services::utc_offset`, implemented only in `blinzel-app/src/backend.rs` (Windows).
+- App wiring (`blinzel-ui/src/app.rs`): `Cmd::Batch` (Ctrl+B, also while the grid is shown), `files_dropped`, threads `blinzel-batch-inspect` and `blinzel-batch` (decoding through the platform's `Services`, one decode thread per file), `Wake::Batch` for progress, `last_dialog` keeps the settings until the app exits (not saved to disk). Drops: Windows `WM_DROPFILES` (`window.rs`), Linux `WindowEvent::DroppedFile` (`linux/shell.rs`); macOS `performDragOperation:` delivers every dropped path as `UserEvent::Dropped` (`macos/shell.rs`); all three hand them to `App::files_dropped`. Local time: `Services::utc_offset`, implemented only in `blinzel-app/src/backend.rs` (Windows).
 - "Remove location (GPS)" can only be toggled while "keep metadata" is on.
 
 ## Edge cases
@@ -88,7 +88,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 | Target folder `.` and pattern `{name}`, same format as the source | The copy gets ` (2)`; the source stays as it is |
 | The same file dropped twice, or a folder containing it | Listed once |
 | Several files that make the same name | Numbered in list order, as shown in the list before the start |
-| macOS: files dropped while the dialog is open | The first file opens in the viewer behind the dialog; the list stays empty (known gap; marking in the grid fills it instead) |
+| macOS: files dropped while the dialog is open | Added to the list, as on Windows and Linux (the first file opened in the viewer behind the dialog until 2026-11-02) |
 | File system without hard links (FAT, some shares) | Written by rename; a file appearing at that very moment could be replaced (race window) |
 | Cancel while large files are in progress | Those files finish and are written; only files not started are skipped |
 
@@ -124,11 +124,11 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 | AC-20 | `cancelled_batches_skip_the_rest` (`blinzel-core/src/batch/run.rs`), `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`, Esc cancels), Linux | built | |
 | AC-21 | manual: `blinzel-bench batch` (not run in CI) | open | |
 | AC-22 | `resize_images_opens_a_modal_dialog_that_keeps_its_settings`, `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`), `edits_make_the_job` (`blinzel-ui/src/batch_dialog.rs`), Linux | built | |
-| AC-23 | partial: `dropped_files_and_folders_fill_the_list` (`blinzel-ui/src/batch_files.rs`) covers the list; the routing of drops in `App` is untested | open | |
+| AC-23 | `drops_fill_the_open_dialog_and_otherwise_open_the_first_file` (`crates/blinzel-ui/src/app_batch_tests.rs`), `dropped_files_and_folders_fill_the_list` (`blinzel-ui/src/batch_files.rs`), Linux; the macOS shell's forwarding builds only in the macOS CI job | built | |
 | AC-24 | `dropped_files_and_folders_fill_the_list` (`blinzel-ui/src/batch_files.rs`), `new_names_follow_the_pattern` (`blinzel-ui/src/batch_dialog.rs`), Linux | built | |
-| AC-25 | `dropped_files_wait_for_their_headers`, `edits_make_the_job`, `new_names_follow_the_pattern` (`blinzel-ui/src/batch_dialog.rs`), `bad_patterns_are_refused` (`blinzel-core/src/batch/naming.rs`), Linux; the empty folder and the 100000 limit are untested | built | |
-| AC-26 | `keys_and_tab_order`, `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`, Linux); Enter after a run is untested | built | |
-| AC-27 | partial: `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`) checks drops ignored and the output folder; texts and the error list are untested | open | |
+| AC-25 | `start_needs_a_valid_size_pattern_folder_and_a_readable_file`, `dropped_files_wait_for_their_headers`, `edits_make_the_job`, `new_names_follow_the_pattern` (`blinzel-ui/src/batch_dialog.rs`), `bad_patterns_are_refused` (`blinzel-core/src/batch/naming.rs`), Linux | built | |
+| AC-26 | `keys_and_tab_order`, `two_sizes_take_part_in_the_tab_order_and_enter_closes_a_finished_run`, `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`), `a_batch_reports_its_result_and_opens_the_output_folder` (`crates/blinzel-ui/src/app_batch_tests.rs`, Enter after a run), Linux | built | |
+| AC-27 | `a_batch_reports_its_result_and_opens_the_output_folder`, `progress_counts_and_the_first_four_errors_are_shown` (`crates/blinzel-ui/src/app_batch_tests.rs`), `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`, drops ignored), Linux | built | |
 | AC-28 | manual | open | |
 
 ## Decisions
@@ -137,4 +137,6 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 - 2026-11-02: `resize_images_opens_a_modal_dialog_that_keeps_its_settings` was green at once: Ctrl+B, the menu, the defaults, the modality and the kept settings already worked; only the start with the grid's marks was new (red first in `resize_images_starts_with_the_marked_files_in_folder_order`).
 - 2026-11-02: the engine tests for AC-08, AC-12, AC-14, AC-17, AC-18 and AC-19 were green at once: the behavior existed and only the tests were missing. Each was run red against a mutation of the code instead (subsampling from quality 91, the modification time without the platform's offset, an absolute folder taken as relative, the planned name kept despite another extension, the decode without `catch_unwind`, the memory budget ignored), then the mutation was reverted.
 - 2026-11-02: AC-13, Windows part: the body of `WinServices::utc_offset` moved into `utc_offset_in(tz, t)` in `blinzel-app/src/backend.rs`, so the test can hand it a fixed Central European zone (winter +1 h, summer +2 h, whatever zone the CI runner is in) and also compare the services with the system zone's current bias (`GetTimeZoneInformation`). The test runs only in the Windows CI job (`cargo test --workspace --release`) and could not be compiled here (no MSVC tools for the C dependencies' build scripts), so its first CI run is the proof. Linux and macOS: their `Services` keep the trait's default offset 0 (UTC), which `dates_are_the_capture_time_else_the_modification_time` checks through the batch `Source`'s default.
+- 2026-11-02: fixed the defect that macOS drops opened the first file instead of filling the batch list (AC-23 revised from "on Windows or Linux" to all three platforms, at the user's request). `performDragOperation:` now hands every dropped path to the same `App::files_dropped` the Windows and Linux shells use (as `UserEvent::Dropped`) and, as before, brings the window to the front. The routing lives in `blinzel-ui`, where `drops_fill_the_open_dialog_and_otherwise_open_the_first_file` checks it; the macOS change itself is only built and linted by the macOS CI job.
+- 2026-11-02: the App and dialog tests for AC-23, AC-25, AC-26 and AC-27 were green at once (the shared path already routed drops; the defect was the macOS shell's bypass). They were run red against mutations instead (drops never reaching the dialog, a size limit of 1000000, no check of the folder, Enter after a run starting nothing). The harness's window fits its small images, so the App tests widen it to 1280 × 900 before opening the dialog: in a narrow window the rows' names are elided.
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's ✅ markers for §7 "Batch processing" were not taken as evidence.
