@@ -545,26 +545,15 @@ impl Shell {
             let _ = std::thread::Builder::new()
                 .name("blinzel-copy".into())
                 .spawn(move || {
-                    let r = (|| -> Result<_, String> {
-                        let data = services.read_file(&src.path).map_err(|e| e.to_string())?;
-                        let img = services
-                            .decode(&data, Request::Region(src.stored_rect), 1)
-                            .map_err(|e| e.to_string())?;
-                        let bgra = img.to_bgra();
-                        let (px, w, h) = blinzel_core::selection::orient_bgra(
-                            &bgra,
-                            img.width,
-                            img.height,
-                            src.orientation,
-                        );
+                    let r = src.pixels(&*services).map(|(px, w, h)| {
                         let rgba = px
                             .as_chunks::<4>()
                             .0
                             .iter()
                             .flat_map(|p| [p[2], p[1], p[0], p[3]])
                             .collect();
-                        Ok((rgba, w, h))
-                    })();
+                        (rgba, w, h)
+                    });
                     services.send(UserEvent::Clipboard(r));
                 });
         }

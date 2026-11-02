@@ -713,18 +713,7 @@ impl Shell {
             let _ = std::thread::Builder::new()
                 .name("blinzel-copy".into())
                 .spawn(move || {
-                    let r = (|| -> Result<_, String> {
-                        let data = services.read_file(&src.path).map_err(|e| e.to_string())?;
-                        let img = services
-                            .decode(&data, Request::Region(src.stored_rect), 1)
-                            .map_err(|e| e.to_string())?;
-                        let bgra = img.to_bgra();
-                        let (px, w, h) = blinzel_core::selection::orient_bgra(
-                            &bgra,
-                            img.width,
-                            img.height,
-                            src.orientation,
-                        );
+                    let r = src.pixels(&*services).and_then(|(px, w, h)| {
                         blinzel_core::batch::encode::encode(
                             &px,
                             w,
@@ -734,7 +723,7 @@ impl Shell {
                             None,
                             None,
                         )
-                    })();
+                    });
                     post(UserEvent::Clipboard(r));
                 });
         }
