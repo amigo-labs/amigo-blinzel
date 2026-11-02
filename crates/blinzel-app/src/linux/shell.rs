@@ -464,13 +464,7 @@ impl Shell {
                     None => vec![],
                 }
             }
-            Action::Recycle(path) => match trash::delete(&path) {
-                Ok(()) => app.removed(&path),
-                Err(e) => {
-                    log(&format!("trash: {e}"));
-                    vec![]
-                }
-            },
+            Action::Recycle(path) => recycle(&path, |p| app.removed(p)),
             Action::SaveCutout(job) => {
                 self.save(job);
                 vec![]
@@ -594,23 +588,8 @@ impl Shell {
     /// The resize direction for a client point near the window's edges.
     fn edge(&self, p: (f64, f64)) -> Option<ResizeDirection> {
         let (app, window) = (self.app.as_ref()?, self.window.as_ref()?);
-        if app.fullscreen || window.is_maximized() {
-            return None;
-        }
-        let e = EDGE * self.scale();
-        let (w, h) = (app.client.0 as f64, app.client.1 as f64);
-        let (l, r, t, b) = (p.0 < e, p.0 >= w - e, p.1 < e, p.1 >= h - e);
-        Some(match (l, r, t, b) {
-            (true, _, true, _) => ResizeDirection::NorthWest,
-            (_, true, true, _) => ResizeDirection::NorthEast,
-            (true, _, _, true) => ResizeDirection::SouthWest,
-            (_, true, _, true) => ResizeDirection::SouthEast,
-            (true, ..) => ResizeDirection::West,
-            (_, true, ..) => ResizeDirection::East,
-            (_, _, true, _) => ResizeDirection::North,
-            (_, _, _, true) => ResizeDirection::South,
-            _ => return None,
-        })
+        let plain = !app.fullscreen && !window.is_maximized();
+        resize_edge(p, app.client, EDGE * self.scale(), plain)
     }
 
     fn update_cursor(&self) {
@@ -619,10 +598,7 @@ impl Shell {
         };
         let p = self.cursor;
         let icon = match self.edge(p) {
-            Some(ResizeDirection::North | ResizeDirection::South) => CursorIcon::NsResize,
-            Some(ResizeDirection::East | ResizeDirection::West) => CursorIcon::EwResize,
-            Some(ResizeDirection::NorthWest | ResizeDirection::SouthEast) => CursorIcon::NwseResize,
-            Some(_) => CursorIcon::NeswResize,
+            Some(dir) => resize_cursor(dir),
             None if app.popup.is_some() => CursorIcon::Default,
             None => match app.cursor_at(p, self.modifiers.shift_key()) {
                 CursorKind::Arrow => CursorIcon::Default,
@@ -647,44 +623,40 @@ impl Shell {
                 && (q.1 - p.1).abs() < 4.0
         });
         self.last_click = (!double).then(|| (Instant::now(), p));
+        let edge = self.edge(p);
         let (Some(app), Some(window)) = (self.app.as_mut(), self.window.clone()) else {
             return;
         };
-        if app.popup.is_none() {
-            if let Some(dir) = self.edge(p) {
-                let _ = window.drag_resize_window(dir);
-                return;
-            }
-            let app = self.app.as_mut().unwrap();
+        let what = if app.popup.is_some() {
+            Press::App
+        } else {
             let chrome = app.chrome();
             let button = (!app.fullscreen).then(|| chrome.hit(p)).flatten();
-            if let Some(b @ (Button::Minimize | Button::Maximize | Button::Close)) = button {
+            let caption = !app.fullscreen && p.1 < chrome.caption_height() && !app.is_dragging();
+            press(edge, button, double, caption)
+        };
+        match what {
+            Press::Resize(dir) => {
+                let _ = window.drag_resize_window(dir);
+            }
+            Press::Button(b) => {
                 app.pressed = Some(b);
                 self.chrome_pressed = Some(b);
                 app.invalidate();
-                return;
             }
-            if double {
-                let actions = match app.double_click(p) {
-                    Some(a) => a,
-                    None => vec![Action::ToggleMaximize],
-                };
+            Press::DoubleClick => {
+                let actions = double_clicked(app.double_click(p));
                 self.run(el, actions);
-                return;
             }
-            if !app.fullscreen
-                && button.is_none()
-                && p.1 < chrome.caption_height()
-                && !app.is_dragging()
-            {
+            Press::MoveWindow => {
                 let _ = window.drag_window();
-                return;
+            }
+            Press::App => {
+                let ctrl = self.modifiers.control_key();
+                let actions = app.mouse_down(p, shift, ctrl, false);
+                self.run(el, actions);
             }
         }
-        let app = self.app.as_mut().unwrap();
-        let ctrl = self.modifiers.control_key();
-        let actions = app.mouse_down(p, shift, ctrl, false);
-        self.run(el, actions);
     }
 
     fn left_up(&mut self, el: &ActiveEventLoop) {
@@ -767,6 +739,94 @@ impl Shell {
 }
 
 const URL: &str = "https://github.com/amigo-labs/amigo-blinzel";
+
+/// The resize direction for client point `p` within `edge` physical pixels
+/// of the edges of a `client`-sized window (diagonal in the corners); none
+/// while the window is maximized or full screen (`plain` false).
+fn resize_edge(
+    p: (f64, f64),
+    client: (u32, u32),
+    edge: f64,
+    plain: bool,
+) -> Option<ResizeDirection> {
+    if !plain {
+        return None;
+    }
+    let (w, h) = (client.0 as f64, client.1 as f64);
+    let (l, r, t, b) = (p.0 < edge, p.0 >= w - edge, p.1 < edge, p.1 >= h - edge);
+    Some(match (l, r, t, b) {
+        (true, _, true, _) => ResizeDirection::NorthWest,
+        (_, true, true, _) => ResizeDirection::NorthEast,
+        (true, _, _, true) => ResizeDirection::SouthWest,
+        (_, true, _, true) => ResizeDirection::SouthEast,
+        (true, ..) => ResizeDirection::West,
+        (_, true, ..) => ResizeDirection::East,
+        (_, _, true, _) => ResizeDirection::North,
+        (_, _, _, true) => ResizeDirection::South,
+        _ => return None,
+    })
+}
+
+/// The pointer over a resize edge.
+fn resize_cursor(dir: ResizeDirection) -> CursorIcon {
+    match dir {
+        ResizeDirection::North | ResizeDirection::South => CursorIcon::NsResize,
+        ResizeDirection::East | ResizeDirection::West => CursorIcon::EwResize,
+        ResizeDirection::NorthWest | ResizeDirection::SouthEast => CursorIcon::NwseResize,
+        ResizeDirection::NorthEast | ResizeDirection::SouthWest => CursorIcon::NeswResize,
+    }
+}
+
+/// What a left press does before the App sees it.
+#[derive(Debug, PartialEq)]
+enum Press {
+    /// Resize the window from this edge.
+    Resize(ResizeDirection),
+    /// A caption button, acting on release.
+    Button(Button),
+    /// The second press of a double click.
+    DoubleClick,
+    /// Move the window.
+    MoveWindow,
+    /// The App's own press (image, selection, ☰).
+    App,
+}
+
+/// A left press at a resize `edge`, on a caption `button`, as the second of
+/// a `double` click, or on the free `caption` strip (not full screen, no
+/// selection drag running).
+fn press(
+    edge: Option<ResizeDirection>,
+    button: Option<Button>,
+    double: bool,
+    caption: bool,
+) -> Press {
+    match (edge, button) {
+        (Some(dir), _) => Press::Resize(dir),
+        (_, Some(b @ (Button::Minimize | Button::Maximize | Button::Close))) => Press::Button(b),
+        _ if double => Press::DoubleClick,
+        (_, None) if caption => Press::MoveWindow,
+        _ => Press::App,
+    }
+}
+
+/// A double click: the App's `answer`, or on the free caption strip (where
+/// the App answers none) maximize or restore.
+fn double_clicked(answer: Option<Vec<Action>>) -> Vec<Action> {
+    answer.unwrap_or_else(|| vec![Action::ToggleMaximize])
+}
+
+/// Moves `path` to the desktop's trash; only then does `removed` take it
+/// out of the file list. A refused move leaves the file and the list alone.
+fn recycle(path: &Path, removed: impl FnOnce(&Path) -> Vec<Action>) -> Vec<Action> {
+    match trash::delete(path) {
+        Ok(()) => removed(path),
+        Err(e) => {
+            log(&format!("trash: {e}"));
+            vec![]
+        }
+    }
+}
 
 fn open_url(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
@@ -1293,6 +1353,102 @@ mod tests {
             let e = decode_with(data, Request::Fit { w: 64, h: 64 }, 1).unwrap_err();
             assert_eq!(e.to_string(), msg);
         }
+    }
+
+    /// `docs/specs/platform-shells.md` AC-11: within 6 logical px of an
+    /// edge a press resizes in that direction, diagonally in the corners,
+    /// under the matching cursor; never while maximized or full screen.
+    #[test]
+    fn the_edges_resize_the_plain_window_only() {
+        use ResizeDirection::*;
+        let client = (800, 600);
+        let at = |p, scale: f64| resize_edge(p, client, EDGE * scale, true);
+        assert_eq!(at((0.0, 0.0), 1.0), Some(NorthWest));
+        assert_eq!(at((799.0, 3.0), 1.0), Some(NorthEast));
+        assert_eq!(at((5.9, 599.0), 1.0), Some(SouthWest));
+        assert_eq!(at((794.0, 594.0), 1.0), Some(SouthEast));
+        assert_eq!(at((2.0, 300.0), 1.0), Some(West));
+        assert_eq!(at((797.0, 300.0), 1.0), Some(East));
+        assert_eq!(at((400.0, 1.0), 1.0), Some(North));
+        assert_eq!(at((400.0, 598.0), 1.0), Some(South));
+        assert_eq!(at((6.0, 300.0), 1.0), None, "6 px in: the image");
+        assert_eq!(at((400.0, 593.0), 1.0), None);
+        // Logical pixels: twice as wide at 200 %.
+        assert_eq!(at((11.0, 300.0), 2.0), Some(West));
+        assert_eq!(at((12.0, 300.0), 2.0), None);
+        assert_eq!(resize_edge((0.0, 0.0), client, EDGE, false), None);
+        assert_eq!(resize_edge((400.0, 599.0), client, EDGE, false), None);
+
+        assert_eq!(resize_cursor(North), CursorIcon::NsResize);
+        assert_eq!(resize_cursor(South), CursorIcon::NsResize);
+        assert_eq!(resize_cursor(West), CursorIcon::EwResize);
+        assert_eq!(resize_cursor(East), CursorIcon::EwResize);
+        assert_eq!(resize_cursor(NorthWest), CursorIcon::NwseResize);
+        assert_eq!(resize_cursor(SouthEast), CursorIcon::NwseResize);
+        assert_eq!(resize_cursor(NorthEast), CursorIcon::NeswResize);
+        assert_eq!(resize_cursor(SouthWest), CursorIcon::NeswResize);
+    }
+
+    /// `docs/specs/platform-shells.md` AC-11: a press on the free caption
+    /// strip moves the window and a double click there is the App's (which
+    /// answers none there, so the window maximizes or restores); edges come
+    /// before everything, caption buttons act on release.
+    #[test]
+    fn a_press_resizes_moves_or_goes_to_the_app() {
+        let north = Some(ResizeDirection::North);
+        assert_eq!(
+            press(north, Some(Button::Close), true, true),
+            Press::Resize(ResizeDirection::North)
+        );
+        for b in [Button::Minimize, Button::Maximize, Button::Close] {
+            assert_eq!(press(None, Some(b), true, true), Press::Button(b));
+        }
+        assert_eq!(press(None, None, false, true), Press::MoveWindow);
+        assert_eq!(press(None, None, true, true), Press::DoubleClick);
+        assert_eq!(press(None, None, true, false), Press::DoubleClick);
+        assert_eq!(press(None, Some(Button::Menu), false, true), Press::App);
+        assert_eq!(
+            press(None, Some(Button::Menu), true, true),
+            Press::DoubleClick
+        );
+        // Below the strip, full screen or while a selection drag runs.
+        assert_eq!(press(None, None, false, false), Press::App);
+        assert_eq!(double_clicked(None), [Action::ToggleMaximize]);
+        let full = vec![Action::ToggleFullscreen];
+        assert_eq!(double_clicked(Some(full.clone())), full);
+    }
+
+    /// `docs/specs/platform-shells.md` AC-14: a deleted image goes to the
+    /// desktop's trash and only then leaves the list; a refused move
+    /// leaves the list alone.
+    #[test]
+    fn a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed() {
+        let dir = std::env::temp_dir().join(format!("blinzel-trash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let file = dir.join("a.png");
+        std::fs::write(&file, b"png").unwrap();
+        let mut removed = vec![];
+        let a = recycle(&file, |p| {
+            removed.push(p.to_path_buf());
+            vec![Action::Uncloak]
+        });
+        assert_eq!(a, [Action::Uncloak]);
+        assert_eq!(removed, std::slice::from_ref(&file));
+        assert!(!file.exists());
+        let trashed: Vec<_> = trash::os_limited::list()
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.original_parent == dir && i.name == "a.png")
+            .collect();
+        assert_eq!(trashed.len(), 1, "in the trash");
+        trash::os_limited::purge_all(trashed).unwrap();
+
+        let missing = dir.join("b.png");
+        let a = recycle(&missing, |_| panic!("the list keeps it"));
+        assert!(a.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// `docs/specs/browsing.md` AC-14: changes in the folder are collected

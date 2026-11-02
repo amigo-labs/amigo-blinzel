@@ -91,12 +91,12 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 | AC-08 |      | open   |        |
 | AC-09 | `warp_golden.rs`: `ycc_subsamplings_with_tile_seams`, `all_orientations_minified`, `zoom_crop_gray_and_alpha`, `heavy_minification_uses_box_filter`, `overlay_shapes_and_text_render`, `colour_transform_lut`, Windows CI job | built |        |
 | AC-10 | CI step "Startup smoke test (window, first frame)" exists but is `continue-on-error`, so it asserts nothing | open |        |
-| AC-11 |      | open   |        |
+| AC-11 | `the_edges_resize_the_plain_window_only`, `a_press_resizes_moves_or_goes_to_the_app` (`crates/blinzel-app/src/linux/shell.rs`); `a_double_click_below_the_caption_strip_toggles_full_screen` (`crates/blinzel-ui/src/app_viewing_tests.rs`, the App answers none on the strip) | built |        |
 | AC-12 | `keyboard_skips_separators_and_disabled_items`, `mouse_opens_submenus_and_chooses`, `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), Linux CI job | built |        |
 | AC-13 |      | open   |        |
-| AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
-| AC-16 |      | open   |        |
+| AC-14 | `a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed` (`crates/blinzel-app/src/linux/shell.rs`); `delete_moves_the_file_away_and_shows_the_one_that_took_its_place` (`crates/blinzel-ui/src/app_viewing_tests.rs`); `a_copy_is_offered_to_other_programs_as_png` (`crates/blinzel-app/src/linux/clipboard.rs`, the Xvfb step of the Linux CI job) | built |        |
+| AC-15 | `adding_renaming_and_removing_a_file_are_reported` (`crates/blinzel-app/src/watch.rs`, Linux and macOS jobs); `a_changed_folder_is_listed_again_and_the_current_image_stays` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built |        |
+| AC-16 | `a_later_launch_hands_its_file_to_the_running_window`, `the_socket_of_a_crashed_instance_is_replaced`, `without_a_runtime_folder_there_is_no_socket` (`crates/blinzel-app/src/linux/instance.rs`); `same_window_follows_the_setting`, `a_handed_over_file_opens_and_the_window_comes_to_the_front` (`crates/blinzel-app/src/linux/shell.rs`); `a_launch_hands_its_file_over_and_exits_before_the_window` (`crates/blinzel-app/tests/startup.rs`, exit code 0) | built |        |
 | AC-17 | `wgpu_golden.rs`: the same six tests on lavapipe, Linux CI job (`BLINZEL_REQUIRE_GPU=1`) | built |        |
 | AC-18 | CI step "Linux viewer smoke test" (Linux job) | built |        |
 | AC-19 | `system_buttons_leave_the_menu_alone` (`crates/blinzel-ui/src/chrome.rs`), Linux CI job and all others | built |        |
@@ -107,3 +107,8 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 | AC-24 | CI step "App bundle and smoke test (window, first frame)" (macOS job) | built |        |
 
 ## Decisions
+
+- AC-11's decisions moved out of the Linux shell's event handlers into functions without a window: `resize_edge` (the 6 logical px edges, none while maximized or full screen), `resize_cursor`, `press` (edge, caption button, double click, free caption strip, the App) and `double_clicked` (the App's answer, else maximize or restore). Each test went red when the code under it was broken on purpose (the maximized check dropped, `<=` at the edge, the double click checked after the strip, `ToggleFullscreen` for `ToggleMaximize`).
+- AC-14's trash call moved into `recycle`; its test trashes a temporary file through the real freedesktop trash, finds it in `trash::os_limited::list` and purges it, so no test file stays in the developer's trash. A refusal is a file that does not exist. The test went red with `std::fs::remove_file` instead of the trash and with the list told on a refusal. Wayland's clipboard has no test (no compositor in CI); X11's is the Xvfb test.
+- AC-15: both shells' notify watchers were the same code; they are now one function, `watch::folder` (`crates/blinzel-app/src/watch.rs`), so one test covers inotify (Linux) and FSEvents (macOS job). It went red with the callback dropped and with the access filter removed.
+- AC-16 held before this spec was built: the tests of `docs/specs/browsing.md` AC-15 check exactly its clauses. The exit code 0 of the second launch went red in `tests/startup.rs` when `run` returned 3 instead.
