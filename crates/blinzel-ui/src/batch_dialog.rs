@@ -176,6 +176,15 @@ impl BatchDialog {
         self.files.paths()
     }
 
+    /// Where the "Open folder" button was drawn last (tests).
+    #[cfg(test)]
+    pub(crate) fn open_folder_button(&self) -> Option<Rect> {
+        self.hits
+            .iter()
+            .find(|(_, h)| *h == Hit::OpenFolder)
+            .map(|(r, _)| *r)
+    }
+
     pub fn is_running(&self) -> bool {
         self.run.as_ref().is_some_and(|r| r.summary.is_none())
     }
@@ -880,5 +889,79 @@ mod tests {
             d.run.as_ref().unwrap().output.as_deref(),
             Some(Path::new("/photos/resized"))
         );
+    }
+
+    /// `docs/specs/batch-resize.md` AC-25.
+    #[test]
+    fn start_needs_a_valid_size_pattern_folder_and_a_readable_file() {
+        let mut d = dialog();
+        d.focus = Some(Field::First);
+        d.first.clear();
+        d.text_input("1234567");
+        assert_eq!(d.first, "123456", "six digits at most");
+        let refused = |d: &mut BatchDialog, why: &str| {
+            assert!(d.job().is_none(), "{why}");
+            assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "{why}");
+            assert_eq!(new_name(d), "–", "{why}");
+        };
+        refused(&mut d, "above 100000");
+        d.first = "100000".into();
+        assert!(d.job().is_some(), "100000 is allowed");
+        for size in ["", "0"] {
+            d.first = size.into();
+            refused(&mut d, "empty or zero");
+        }
+        d.first = "1920".into();
+        d.mode = 3;
+        d.second = "0".into();
+        refused(&mut d, "second size zero");
+        d.mode = 0;
+        for bad in ["{name", "{size}", "", "web/{name}", "web\\{name}"] {
+            d.pattern = bad.into();
+            refused(&mut d, bad);
+        }
+        d.pattern = "{name}".into();
+        d.folder = "  ".into();
+        refused(&mut d, "no folder");
+        d.folder = "resized".into();
+        assert!(matches!(d.key(Key::Enter), Outcome::Start(..)));
+
+        // Only an unreadable file: nothing to start.
+        let mut d = BatchDialog::new();
+        d.add(vec!["/photos/broken.jpg".into()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        d.inspecting(rx);
+        tx.send(("/photos/broken.jpg".into(), Err("broken".into())))
+            .unwrap();
+        d.poll();
+        assert!(d.job().is_some());
+        assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "no readable file");
+    }
+
+    /// `docs/specs/batch-resize.md` AC-26.
+    #[test]
+    fn two_sizes_take_part_in_the_tab_order_and_enter_closes_a_finished_run() {
+        let mut d = dialog();
+        d.mode = 3;
+        let mut order = Vec::new();
+        for _ in 0..5 {
+            d.tab(false);
+            order.push(d.focus.unwrap());
+        }
+        use Field::*;
+        assert_eq!(order, [First, Second, Pattern, Folder, First]);
+        d.tab(true);
+        assert_eq!(d.focus, Some(Folder), "Shift+Tab goes back");
+        d.mode = 4;
+        d.tab(false);
+        d.tab(false);
+        assert_eq!(d.focus, Some(Second), "fill box: two values too");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        d.started(1, rx, Arc::new(AtomicBool::new(false)));
+        assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "running");
+        tx.send(RunMsg::Finished(Summary::default())).unwrap();
+        d.poll();
+        assert_eq!(d.key(Key::Enter), Outcome::Close, "after the run");
     }
 }
