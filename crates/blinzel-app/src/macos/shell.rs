@@ -765,11 +765,7 @@ impl Shell {
                 self.opened = true;
                 let hidden = app.hidden;
                 let mut a = app.open(file);
-                if hidden {
-                    a.push(Action::Wake { opened: true });
-                } else if !app.cloaked {
-                    a.push(Action::Activate);
-                }
+                a.extend(after_open(hidden, app.cloaked));
                 a
             }
             UserEvent::Dropped(paths) => {
@@ -1250,10 +1246,15 @@ fn tell(app: &mut App<Mac>, notice_until: &mut Option<Instant>, text: String) {
 /// Resident mode on or off: the menu bar icon and the login item.
 fn set_resident(mtm: MainThreadMarker, on: bool) {
     let delegate = DELEGATE.with(|d| d.get().cloned());
-    super::resident::set_tray(mtm, on, delegate.as_deref());
-    if let Err(e) = super::resident::set_autostart(on) {
-        log(&format!("login item: {e}"));
-    }
+    super::resident::set_resident(
+        on,
+        |on| {
+            if let Err(e) = super::resident::set_autostart(on) {
+                log(&format!("login item: {e}"));
+            }
+        },
+        |change| super::resident::set_tray(mtm, change, delegate.as_deref()),
+    );
 }
 
 /// Drops leading, trailing and doubled separators.
@@ -1336,7 +1337,7 @@ define_class!(
         /// The Dock icon or Finder opened the running app again.
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-            with_shell(|s| s.run(vec![Action::Wake { opened: false }]));
+            with_shell(|s| s.run(vec![REOPEN]));
             false
         }
 
@@ -1417,7 +1418,7 @@ define_class!(
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
             if super::resident::is_tray_menu(menu) {
-                fill_menu(menu, &blinzel_ui::menu::tray_items(), self.mtm());
+                fill_menu(menu, &super::resident::tray_menu(), self.mtm());
                 return;
             }
             let Some(state) = with_shell(|s| s.app.menu_state()) else {
@@ -1742,6 +1743,24 @@ fn create_shell(mtm: MainThreadMarker) -> Result<(), String> {
     Ok(())
 }
 
+/// The Dock icon clicked (`applicationShouldHandleReopen:`): the window
+/// wakes without a file (`docs/specs/resident-mode.md` AC-14).
+const REOPEN: Action = Action::Wake { opened: false };
+
+/// After a file from the Finder opened in a window that was `hidden`: it
+/// wakes with the file; a visible one comes to the front unless it is
+/// still `cloaked` for its first frame (`docs/specs/resident-mode.md`
+/// AC-14).
+fn after_open(hidden: bool, cloaked: bool) -> Option<Action> {
+    if hidden {
+        Some(Action::Wake { opened: true })
+    } else if !cloaked {
+        Some(Action::Activate)
+    } else {
+        None
+    }
+}
+
 /// What a `--resident` start (the login item) does before AppKit starts
 /// (`docs/specs/resident-mode.md` AC-19).
 #[derive(Debug, PartialEq)]
@@ -1873,6 +1892,22 @@ mod tests {
             }
         );
         assert_eq!(resident_start(true), ResidentStart::Run);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-14: the Dock icon wakes the hidden
+    /// window without a file, a file from the Finder wakes it with the
+    /// file, and brings a visible window to the front once it shows.
+    #[test]
+    fn the_dock_icon_and_a_file_from_the_finder_wake_the_window() {
+        assert_eq!(REOPEN, Action::Wake { opened: false });
+        for cloaked in [false, true] {
+            assert_eq!(
+                after_open(true, cloaked),
+                Some(Action::Wake { opened: true })
+            );
+        }
+        assert_eq!(after_open(false, false), Some(Action::Activate));
+        assert_eq!(after_open(false, true), None);
     }
 
     /// AC-21 (`docs/specs/platform-shells.md`): a deleted image goes to the

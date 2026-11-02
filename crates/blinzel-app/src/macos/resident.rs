@@ -16,6 +16,7 @@ use objc2_app_kit::{
 use objc2_foundation::{MainThreadMarker, NSString, ns_string};
 
 use blinzel_i18n::{Msg, tr};
+use blinzel_ui::menu::MenuItem;
 
 /// The LaunchAgent's label and file name.
 const AGENT: &str = "io.github.amigo-labs.blinzel";
@@ -27,28 +28,89 @@ thread_local! {
     static FLASH: Cell<u32> = const { Cell::new(0) };
 }
 
-/// Shows or removes the menu bar icon. Its menu is filled each time it
-/// opens ([`is_tray_menu`]), by the delegate set on it.
-pub fn set_tray(mtm: MainThreadMarker, on: bool, delegate: Option<&super::shell::Delegate>) {
-    let bar = NSStatusBar::systemStatusBar();
-    if !on {
-        if let Some(item) = ITEM.with(|i| i.borrow_mut().take()) {
-            bar.removeStatusItem(&item);
+/// What turning resident mode on or off does to the menu bar icon.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TrayChange {
+    /// Put the icon into the menu bar.
+    Add,
+    /// Take it out of the menu bar.
+    Remove,
+    /// It already is as resident mode wants it.
+    Keep,
+}
+
+/// The change from an icon that is `shown` to resident mode `on`.
+fn tray_change(shown: bool, on: bool) -> TrayChange {
+    match (shown, on) {
+        (false, true) => TrayChange::Add,
+        (true, false) => TrayChange::Remove,
+        _ => TrayChange::Keep,
+    }
+}
+
+/// Resident mode on or off (`docs/specs/resident-mode.md` AC-02): the
+/// sign-in entry follows at once through `sign_in` (the app passes
+/// [`set_autostart`]), the menu bar icon through `tray` ([`set_tray`]).
+pub fn set_resident(on: bool, sign_in: impl FnOnce(bool), tray: impl FnOnce(TrayChange)) {
+    sign_in(on);
+    tray(tray_change(ITEM.with(|i| i.borrow().is_some()), on));
+}
+
+/// How the menu bar icon looks (`docs/specs/resident-mode.md` AC-14).
+#[derive(Debug, PartialEq)]
+struct TrayLook {
+    /// The SF Symbol it shows.
+    symbol: &'static str,
+    /// Drawn as a template image, in the menu bar's own colours.
+    template: bool,
+    /// Its tooltip and accessibility description (also the title where
+    /// the symbol is missing).
+    tooltip: &'static str,
+}
+
+fn tray_look() -> TrayLook {
+    TrayLook {
+        symbol: "eye",
+        template: true,
+        tooltip: tr(Msg::AppName),
+    }
+}
+
+/// The menu bar icon's menu: the tray menu, built anew each time it opens
+/// (`menuNeedsUpdate:`).
+pub fn tray_menu() -> Vec<MenuItem> {
+    blinzel_ui::menu::tray_items()
+}
+
+/// Adds or removes the menu bar icon. Its menu is filled each time it
+/// opens ([`is_tray_menu`], [`tray_menu`]), by the delegate set on it.
+pub fn set_tray(
+    mtm: MainThreadMarker,
+    change: TrayChange,
+    delegate: Option<&super::shell::Delegate>,
+) {
+    match change {
+        TrayChange::Keep => {}
+        TrayChange::Remove => {
+            if let Some(item) = ITEM.with(|i| i.borrow_mut().take()) {
+                NSStatusBar::systemStatusBar().removeStatusItem(&item);
+            }
+            MENU.with(|m| m.borrow_mut().take());
         }
-        MENU.with(|m| m.borrow_mut().take());
-        return;
+        TrayChange::Add => add_tray(mtm, delegate),
     }
-    if ITEM.with(|i| i.borrow().is_some()) {
-        return;
-    }
-    let item = bar.statusItemWithLength(NSVariableStatusItemLength);
+}
+
+fn add_tray(mtm: MainThreadMarker, delegate: Option<&super::shell::Delegate>) {
+    let look = tray_look();
+    let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
     if let Some(button) = item.button(mtm) {
-        let name = NSString::from_str(tr(Msg::AppName));
+        let name = NSString::from_str(look.tooltip);
         if let Some(image) = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-            ns_string!("eye"),
+            &NSString::from_str(look.symbol),
             Some(&name),
         ) {
-            image.setTemplate(true);
+            image.setTemplate(look.template);
             button.setImage(Some(&image));
         } else {
             button.setTitle(&name);
@@ -103,12 +165,17 @@ pub fn is_tray_menu(menu: &NSMenu) -> bool {
 
 /// With the window hidden, the app leaves the Dock and the app switcher.
 pub fn set_in_dock(mtm: MainThreadMarker, on: bool) {
-    let policy = if on {
+    NSApplication::sharedApplication(mtm).setActivationPolicy(dock_policy(on));
+}
+
+/// The activation policy for an app that is `on` the Dock: "accessory"
+/// keeps it out of the Dock and the app switcher.
+fn dock_policy(on: bool) -> NSApplicationActivationPolicy {
+    if on {
         NSApplicationActivationPolicy::Regular
     } else {
         NSApplicationActivationPolicy::Accessory
-    };
-    NSApplication::sharedApplication(mtm).setActivationPolicy(policy);
+    }
 }
 
 fn agent_path() -> Option<PathBuf> {
@@ -181,6 +248,7 @@ fn sign_in(path: &Path, on: bool, bundle: Option<PathBuf>) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blinzel_ui::menu::Cmd;
 
     /// `docs/specs/resident-mode.md` AC-18: only a copy in an app bundle
     /// writes the LaunchAgent; outside one, or with resident mode off, an
@@ -202,6 +270,69 @@ mod tests {
         sign_in(&path, false, Some(program)).unwrap();
         assert!(!path.exists(), "resident mode off: removed");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-02 (the macOS shell): turning
+    /// resident mode on adds the menu bar icon and writes the LaunchAgent
+    /// at once, off removes both (in a temporary folder, never the real
+    /// one; the icon itself needs the main thread, so `tray` records it).
+    #[test]
+    fn toggling_resident_mode_adds_or_removes_the_icon_and_the_launch_agent() {
+        assert_eq!(tray_change(false, true), TrayChange::Add);
+        assert_eq!(tray_change(true, false), TrayChange::Remove);
+        assert_eq!(tray_change(true, true), TrayChange::Keep);
+        assert_eq!(tray_change(false, false), TrayChange::Keep);
+
+        let dir = std::env::temp_dir().join(format!("blinzel-toggle-{}", std::process::id()));
+        let path = dir.join("LaunchAgents").join(format!("{AGENT}.plist"));
+        let program = PathBuf::from("/Applications/amigo-blinzel.app/Contents/MacOS/blinzel");
+        let agent = |on| sign_in(&path, on, Some(program.clone())).unwrap();
+        let mut tray = vec![];
+        set_resident(true, agent, |c| tray.push(c));
+        assert!(path.exists(), "LaunchAgent written");
+        set_resident(false, agent, |c| tray.push(c));
+        assert!(!path.exists(), "LaunchAgent removed");
+        // No icon was really added on this thread, so off keeps it absent.
+        assert_eq!(tray, [TrayChange::Add, TrayChange::Keep]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-14: the menu bar item shows the SF
+    /// Symbol "eye" as a template image with the app name as tooltip; its
+    /// menu is the tray menu, screenshots included; while the window is
+    /// hidden the app is an accessory (not in the Dock or app switcher).
+    #[test]
+    fn the_menu_bar_item_is_an_eye_with_the_tray_menu() {
+        assert_eq!(
+            tray_look(),
+            TrayLook {
+                symbol: "eye",
+                template: true,
+                tooltip: tr(Msg::AppName),
+            }
+        );
+        let entries: Vec<Option<(Cmd, String)>> = tray_menu()
+            .into_iter()
+            .map(|i| match i {
+                MenuItem::Item { cmd, label, .. } => Some((cmd, label)),
+                _ => None,
+            })
+            .collect();
+        let item = |c, m| Some((c, tr(m).to_string()));
+        assert_eq!(
+            entries,
+            [
+                item(Cmd::ShowWindow, Msg::TrayShow),
+                item(Cmd::Open, Msg::MenuOpen),
+                None,
+                item(Cmd::Capture, Msg::TrayCapture),
+                item(Cmd::CaptureScreen, Msg::TrayCaptureScreen),
+                None,
+                item(Cmd::Quit, Msg::Exit),
+            ]
+        );
+        assert_eq!(dock_policy(false), NSApplicationActivationPolicy::Accessory);
+        assert_eq!(dock_policy(true), NSApplicationActivationPolicy::Regular);
     }
 
     #[test]
