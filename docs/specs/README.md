@@ -10,17 +10,17 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 
 | # | Spec | ACs proven | CI-only | Manual | Next |
 | - | ---- | ---------- | ------- | ------ | ---- |
-| 1 | [selection-and-export](selection-and-export.md) | 18 / 22 | 2 | 2 | the first CI runs of AC-09 (Windows, `clipboard.rs`) and AC-11 (macOS, `macos/shell.rs`); the manual checks AC-04 (visual design), AC-15 (save dialog); then `/spec-check` |
+| 1 | [selection-and-export](selection-and-export.md) | 20 / 22 | 2 | 2 | the manual checks AC-04 (visual design), AC-15 (save dialog); then `/spec-check` |
 | 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements), then `/spec-check` |
-| 3 | [startup](startup.md) | 8 / 14 | 6 | 3 | the first CI runs of AC-04 (Windows `first_frame.rs`), AC-07 (Windows `window.rs`, `run.rs`), AC-14 (Windows `bench.rs`) and the Windows half of AC-01 (`tests/startup.rs`); the manual checks AC-06 (visual), AC-08 (module-load trace), AC-12 (measurement); then `/spec-check` |
+| 3 | [startup](startup.md) | 11 / 14 | 6 | 3 | the first Windows CI runs of AC-08 (`tests/startup.rs`, module `win_modules`, written) and the Windows half of AC-01 (`tests/startup.rs`); the manual checks AC-06 (visual), AC-08 (module-load trace), AC-12 (measurement); then `/spec-check` |
 | 4 | [browsing](browsing.md) | 20 / 21 | 4 | 1 | the first CI runs of AC-13 (Windows `gfx/device.rs`, macOS `metal_golden.rs`), AC-15 (Windows `instance.rs`) and AC-18 (Windows `run.rs`, `platform/threads.rs`); the manual check AC-21 (measurement); then `/spec-check` |
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
-| 6 | [image-formats](image-formats.md) | 21 / 24 | 4 | 0 | the first Windows CI run of AC-21, AC-22 (`wic.rs`) and macOS CI run of AC-23 (`macos/imageio.rs`), all written; then `/spec-check` |
+| 6 | [image-formats](image-formats.md) | 24 / 24 | 4 | 0 | `/spec-check` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 16 / 17 | 0 | 1 | the manual check AC-17 (speed factor on an 8-core machine, `blinzel-bench jpeg-ab`), then `/spec-check` |
 | 8 | [animations](animations.md) | 13 / 14 | 0 | 1 | the manual check AC-14 (playback smoothness); then `/spec-check` |
-| 9 | [color-management](color-management.md) | 15 / 19 | 3 | 2 | the first CI runs of AC-03's macOS ImageIO clause (`macos/imageio.rs`) and AC-11's Windows half (`color.rs`), both written; the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
-| 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | `/spec-check` round 3 (round 2's blockers fixed: tile tags, Linux multi-file drops, mutation-proof tests); the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design) |
-| 11 | [localization](localization.md) | 15 / 17 | 2 | 0 | the first Windows CI runs of AC-10's Windows half (`run.rs`) and AC-16 (`menu.rs`, `gfx/text.rs`, `platform/mod.rs`), both written; then `/spec-check` |
+| 9 | [color-management](color-management.md) | 17 / 19 | 3 | 2 | the first Windows CI run of AC-19's `run.rs` test (`warm_resident`, written); the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
+| 10 | [batch-resize](batch-resize.md) | 26 / 28 | 1 | 2 | `/spec-check` round 3 (round 2's blockers fixed: tile tags, Linux multi-file drops, mutation-proof tests); the manual checks AC-21 (measurement), AC-28 (visual design) |
+| 11 | [localization](localization.md) | 17 / 17 | 2 | 0 | `/spec-check` |
 | 12 | [platform-shells](platform-shells.md) | 12 / 24 | 11 | 5 | the first Windows CI runs of AC-01 (`platform/os.rs`, `setup/mod.rs`), AC-02 (`tests/manifest.rs`), AC-03, AC-04, AC-08 (`window.rs`) and AC-10 (smoke step) and the first macOS CI run of AC-21 (`macos/shell.rs`), all written; the manual checks AC-05, AC-06, AC-13, AC-20, AC-22; then `/spec-check` |
 | 13 | [resident-mode](resident-mode.md) | 10 / 23 | 15 | 1 | the first CI runs of AC-06, AC-15, AC-19 and the written AC-02, AC-03, AC-04, AC-07, AC-08, AC-09, AC-11, AC-13, AC-16, AC-20 (Windows `instance.rs`, `tests/setup.rs`, `setup/mod.rs`, `run.rs`, `window.rs`, `resident.rs`) and AC-02, AC-09, AC-14, AC-17, AC-18, AC-19, AC-21 (macOS `macos/resident.rs`, `macos/shell.rs`, `macos/update.rs`); the manual check AC-23 (measurement) |
 | 14 | [screenshots](screenshots.md) | 13 / 23 | 8 | 1 | `/spec-build` |
@@ -30,7 +30,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 18 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 19 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
 | 20 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **235 / 410** | | | |
+| | **Total** | **248 / 410** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 

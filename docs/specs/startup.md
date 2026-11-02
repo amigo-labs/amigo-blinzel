@@ -97,17 +97,17 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | AC-01 | `a_launch_hands_its_file_over_and_exits_before_the_window` (`crates/blinzel-app/tests/startup.rs`, module `linux`: headless, the child has no display, so only a hand-over before the window exits with 0; module `win`: counts the viewer windows when the hand-over arrives, Windows CI job) | built | |
 | AC-02 | `startup_order_queues_the_decode_before_the_window_and_the_device` (`crates/blinzel-app/tests/startup.rs`, Linux on Xvfb: the CI step "Linux viewer smoke test" runs it) | built | |
 | AC-03 | `without_a_file_the_window_shows_the_open_hint_at_once` (`crates/blinzel-ui/src/app_startup_tests.rs`; every shell uncovers the window on `Action::Uncloak`) | built | |
-| AC-04 | `a_first_image_before_the_device_is_drawn_on_the_cpu_and_shown` (`crates/blinzel-app/src/first_frame.rs`, `cfg(windows)`; its first Windows CI run is pending) | open | |
+| AC-04 | `a_first_image_before_the_device_is_drawn_on_the_cpu_and_shown` (`crates/blinzel-app/src/first_frame.rs`, `cfg(windows)`; Windows job ok (CI run 41504896644, `0acbc36`)) | built | |
 | AC-05 | `tracks_the_reference_renderer`, `straight_alpha_blends_over_the_background`, `applies_the_colour_transform_to_the_image_only`, `fast_path_matches_the_general_path` (`crates/blinzel-core/src/preview.rs`; Linux, macOS, Windows) | built | |
-| AC-06 | manual: visual check on Windows 11 pending (`blinzel.md` §13, the GDI → Direct3D transition) | open | |
-| AC-07 | `a_window_whose_image_does_not_come_becomes_visible_after_400_ms` (`crates/blinzel-app/src/window.rs`), `a_window_with_a_file_waits_400_ms_for_its_image` (`crates/blinzel-app/src/run.rs`; both `cfg(windows)`, their first Windows CI run is pending) | open | |
+| AC-06 | CI half: `app::startup_tests::the_window_stays_cloaked_while_the_first_image_decodes` (`crates/blinzel-ui/src/app_startup_tests.rs`), Windows job ok (CI run 41504896644, `0acbc36`); manual: visual check on Windows 11 pending (`blinzel.md` §13, the GDI → Direct3D transition) | open | |
+| AC-07 | `a_window_whose_image_does_not_come_becomes_visible_after_400_ms` (`crates/blinzel-app/src/window.rs`), `a_window_with_a_file_waits_400_ms_for_its_image` (`crates/blinzel-app/src/run.rs`; both `cfg(windows)`; Windows job ok (CI run 41504896644, `0acbc36`)) | built | |
 | AC-08 | `the_first_frame_needs_no_text_dll_d3d11_from_the_device_thread_and_no_com` (`crates/blinzel-app/tests/startup.rs`, module `win_modules`: the test debugs a `--exit-after-first-frame` run on a PNG), CI: Windows — written, not run yet; manual: module-load trace pending | open | |
 | AC-09 | `measuring_the_first_frame_writes_the_report_and_quits` (`crates/blinzel-ui/src/app_startup_tests.rs`: report written, `Action::Quit`, exit code 0); CI step "Linux viewer smoke test" (`.github/workflows/ci.yml`, Linux job: exit code within 120 s, `cat startup.json`); also "App bundle and smoke test (window, first frame)" (macOS job); the Windows "Startup smoke test" is `continue-on-error` | built | |
 | AC-10 | `same_window_follows_the_setting` (no hand-over and no socket while measuring), `the_startup_report_goes_to_json_or_startup_json` (`crates/blinzel-app/src/linux/shell.rs`); Windows: `measuring_starts_its_own_instance_and_reports_to_json_or_startup_json` (`crates/blinzel-app/src/run.rs`, Windows CI job) | built | |
 | AC-11 | `measuring_the_first_frame_writes_the_report_and_quits` (`crates/blinzel-ui/src/app_startup_tests.rs`: one object with `adapter`, `warp` from `Device::is_software`, `marks` with `first_present`); `marks_and_json` (`crates/blinzel-core/src/timing.rs`: marks count from the origin given to `timing::init`, which is `process_age_us()` on Windows and 0 at the start of `main` on Linux and macOS) | built | |
 | AC-12 | manual: measurement | open | |
 | AC-13 | CI step "App benchmark (offscreen, WARP)" (`.github/workflows/ci.yml`, Windows job: exit code 0; the report's content is not checked) | built | |
-| AC-14 | `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`, `cfg(windows)`; its first Windows CI run is pending) | open | |
+| AC-14 | `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`, `cfg(windows)`; Windows job ok (CI run 41504896644, `0acbc36`)) | built | |
 
 ## Decisions
 

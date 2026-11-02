@@ -87,7 +87,7 @@ This spec records what the code does today.
 | ----- | ---- | ------ | ------ |
 | AC-01 | `reads_profiles_from_jpeg`, `reads_profiles_from_png` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
 | AC-02 | `display_p3_gets_a_profile`, `decodes_8_and_10_bit` (`crates/blinzel-core/src/decode/avif.rs`), CI: Linux | built | |
-| AC-03 | `probe_reads_the_icc_chunk` (`crates/blinzel-core/src/decode/webp.rs`), `probe_reads_the_icc_profile_tag` (`decode/tiff.rs`), `probe_reads_the_colour_profile` (`decode/heif.rs`), `heic_profile_comes_from_the_container` (`decode/avif.rs`), `probe_yields_the_rendered_colour_space` (`decode/jxl.rs`), CI: Linux; the macOS ImageIO clause: `probe_yields_the_profile_imageio_reports` (`crates/blinzel-app/src/macos/imageio.rs`), CI: macOS — written, not run yet | open | |
+| AC-03 | `probe_reads_the_icc_chunk` (`crates/blinzel-core/src/decode/webp.rs`), `probe_reads_the_icc_profile_tag` (`decode/tiff.rs`), `probe_reads_the_colour_profile` (`decode/heif.rs`), `heic_profile_comes_from_the_container` (`decode/avif.rs`), `probe_yields_the_rendered_colour_space` (`decode/jxl.rs`), CI: Linux; the macOS ImageIO clause: `probe_yields_the_profile_imageio_reports` (`crates/blinzel-app/src/macos/imageio.rs`), CI: macOS, macOS job ok (CI run 41504896644, `0acbc36`) | built | |
 | AC-04 | `recognises_srgb_by_primaries_and_curve`, `parametric_srgb_curve_counts` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
 | AC-05 | `caches_per_profile_and_skips_srgb` (`crates/blinzel-ui/src/color.rs`), CI: Linux | built | |
 | AC-06 | `caches_per_profile_and_skips_srgb` (`crates/blinzel-ui/src/color.rs`), CI: Linux | built | |
@@ -95,7 +95,7 @@ This spec records what the code does today.
 | AC-08 | `srgb_to_srgb_is_identity`, `wide_gamut_to_srgb` (`crates/blinzel-app/src/color.rs`), CI: Windows | built | |
 | AC-09 | `colour_transform_lut` (`crates/blinzel-app/tests/wgpu_golden.rs` CI: Linux; `warp_golden.rs` CI: Windows; `metal_golden.rs` CI: macOS), `applies_the_colour_transform_to_the_image_only` (`crates/blinzel-core/src/preview.rs`), CI: Linux | built | |
 | AC-10 | `integer_lookup_follows_the_float_one`, `identity_maps_to_itself` (`crates/blinzel-core/src/lut.rs`), CI: Linux | built | |
-| AC-11 | `the_start_draws_with_the_remembered_target_and_asks_after_the_first_frame` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux; `remembers_the_target_per_monitor_for_the_next_start` (`crates/blinzel-app/src/color.rs`), CI: Windows — written, not run yet | open | |
+| AC-11 | `the_start_draws_with_the_remembered_target_and_asks_after_the_first_frame` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux; `remembers_the_target_per_monitor_for_the_next_start` (`crates/blinzel-app/src/color.rs`), CI: Windows, Windows job ok (CI run 41504896644, `0acbc36`) | built | |
 | AC-12 | — | open | |
 | AC-13 | `reads_the_x11_display_profile` (`crates/blinzel-app/src/linux/color.rs`), CI: Linux, step with `BLINZEL_X11_TEST` (returns early without it) | built | |
 | AC-14 | `reads_the_x11_display_profile` (`crates/blinzel-app/src/linux/color.rs`), CI: Linux, step with `BLINZEL_X11_TEST` (returns early without it) | built | |
