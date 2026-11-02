@@ -485,9 +485,7 @@ impl Shell {
                 if panel.runModal() == NSModalResponseOK
                     && let Some(path) = panel.URL().and_then(|u| url_path(&u))
                 {
-                    let mut a = self.app.open(path);
-                    a.push(Action::Wake { opened: true });
-                    a
+                    self.app.open_chosen(path)
                 } else {
                     vec![]
                 }
@@ -631,19 +629,10 @@ impl Shell {
     /// first frame of the file just `opened` (or at once without one). A
     /// visible window is activated.
     fn wake(&mut self, opened: bool) -> Vec<Action> {
-        if !self.app.hidden {
+        if !self.app.wake(opened) {
             self.show();
             return vec![];
         }
-        if !opened {
-            self.app.reload_settings();
-        }
-        self.app.hidden = false;
-        self.app.cloaked = true;
-        self.app.activate_on_uncloak = true;
-        timing::mark("wake");
-        blinzel_core::bufpool::global()
-            .set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
         super::resident::set_in_dock(MainThreadMarker::from(&*self.window), true);
         self.window.setAlphaValue(0.0);
         self.window.orderFront(None);

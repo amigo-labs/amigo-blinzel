@@ -754,12 +754,8 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::OpenDialog => match crate::dialogs::open_file(hwnd) {
-            Some(p) => {
-                // From the tray the window may be hidden.
-                let mut more = with_app(|a| a.open(p)).unwrap_or_default();
-                more.push(Action::Wake { opened: true });
-                more
-            }
+            // From the tray the window may be hidden.
+            Some(p) => with_app(|a| a.open_chosen(p)).unwrap_or_default(),
             None => vec![],
         },
         Action::Recycle(path) => {
@@ -1051,19 +1047,7 @@ pub fn restart_requested() -> bool {
 /// first frame of the file just opened (or right away with the hint), then
 /// activated. A visible window is only activated.
 fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
-    let was_hidden = with_app(|a| {
-        let hidden = a.hidden;
-        if hidden {
-            if !opened {
-                a.reload_settings();
-            }
-            a.hidden = false;
-            a.cloaked = true;
-            a.activate_on_uncloak = true;
-        }
-        hidden
-    })
-    .unwrap_or(false);
+    let was_hidden = with_app(|a| a.wake(opened)).unwrap_or(false);
     if screenshot::take_hint() {
         with_app(|a| a.show_notice(screenshot::hotkey_taken()));
         unsafe {
@@ -1073,8 +1057,6 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
     if !was_hidden {
         return vec![Action::Activate];
     }
-    blinzel_core::timing::mark("wake");
-    blinzel_core::bufpool::global().set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
     unsafe {
         // Painted while cloaked; not activated yet (costs ~20 ms).
         let _ = ShowWindow(hwnd, SW_SHOWNA);
