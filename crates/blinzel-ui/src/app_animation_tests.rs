@@ -48,6 +48,20 @@ fn a_decode_error_before_the_second_frame_leaves_a_still() {
 }
 
 #[test]
+fn a_panicking_decoder_plays_the_frames_so_far_and_the_viewer_goes_on() {
+    let mut h = Harness::new();
+    let name = format!("{}.gif", loader::PANICS_ON_THIRD_FRAME);
+    h.write_file(&name, &gif(64, 48, &frames(4), Some(2)));
+    h.write_png("next.png", 64, 48);
+    // The pump returns only once the loader is idle: the job finished.
+    h.open(&name);
+    assert_eq!(anim(&h), Some((2, Some(3), true)));
+    h.key(Key::Right);
+    assert_eq!(h.current_name().as_deref(), Some("next.png"));
+    assert_eq!(h.frame().images.len(), 1);
+}
+
+#[test]
 fn a_failed_upload_plays_the_frames_uploaded_so_far_with_the_files_loop_count() {
     let mut h = Harness::new();
     h.write_file("a.gif", &gif(64, 48, &frames(4), Some(2)));

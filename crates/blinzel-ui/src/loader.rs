@@ -47,6 +47,11 @@ pub struct GpuAnimation<I> {
 /// frames so far.
 const ANIM_UPDATE: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Fault injection for tests: the animation of a file whose name starts
+/// with this panics on its third frame, the way a decoder bug would.
+#[cfg(test)]
+pub(crate) const PANICS_ON_THIRD_FRAME: &str = "panics-on-third-frame";
+
 /// Texture/job key: the file's cache id with the stage in the low bits.
 pub fn key(cache_id: u64, stage: Stage) -> Key {
     (cache_id & !3) | stage as u64
@@ -491,27 +496,39 @@ fn animation_stage<D: Device, S: Services>(
     let mut upload_ms = 0.0;
     let mut sent = None::<Instant>;
     let mut plays = None;
-    let info = stream(data, ANIM_BUDGET, &mut |f: AnimFrame| {
-        if cancel.is_cancelled() {
-            return false;
-        }
-        if device.is_none() {
-            device = shared.wait_device(cancel);
-        }
-        let Some(d) = &device else { return false };
-        let tu = Instant::now();
-        // Out of GPU memory: play the frames uploaded so far.
-        let Ok(gpu) = d.upload(&f.image, probe.orientation) else {
-            return false;
-        };
-        upload_ms += tu.elapsed().as_secs_f64() * 1e3;
-        frames.push((Arc::new(gpu), f.delay_ms));
-        plays = f.plays;
-        if frames.len() >= 2 && sent.is_none_or(|s| s.elapsed() >= ANIM_UPDATE) {
-            send(&frames, None, false, upload_ms);
-            sent = Some(Instant::now());
-        }
-        true
+    // A panicking decoder is a decode error too (AGENTS.md §9).
+    let info = blinzel_core::decode::guard(|| {
+        stream(data, ANIM_BUDGET, &mut |f: AnimFrame| {
+            if cancel.is_cancelled() {
+                return false;
+            }
+            if device.is_none() {
+                device = shared.wait_device(cancel);
+            }
+            let Some(d) = &device else { return false };
+            #[cfg(test)]
+            if frames.len() == 2
+                && job
+                    .path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(PANICS_ON_THIRD_FRAME))
+            {
+                panic!("injected animation decoder panic");
+            }
+            let tu = Instant::now();
+            // Out of GPU memory: play the frames uploaded so far.
+            let Ok(gpu) = d.upload(&f.image, probe.orientation) else {
+                return false;
+            };
+            upload_ms += tu.elapsed().as_secs_f64() * 1e3;
+            frames.push((Arc::new(gpu), f.delay_ms));
+            plays = f.plays;
+            if frames.len() >= 2 && sent.is_none_or(|s| s.elapsed() >= ANIM_UPDATE) {
+                send(&frames, None, false, upload_ms);
+                sent = Some(Instant::now());
+            }
+            true
+        })
     });
     if cancel.is_cancelled() {
         return;
