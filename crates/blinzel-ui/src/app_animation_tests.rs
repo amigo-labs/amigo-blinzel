@@ -65,8 +65,15 @@ fn a_panicking_decoder_plays_the_frames_so_far_and_the_viewer_goes_on() {
 fn a_failed_upload_plays_the_frames_uploaded_so_far_with_the_files_loop_count() {
     let mut h = Harness::new();
     h.write_file("a.gif", &gif(64, 48, &frames(4), Some(2)));
-    // The still and two frames fit on the GPU.
-    h.fail_uploads_after(3);
+    // The still and two frames fit on the GPU, the third does not; the
+    // fourth would fit again, but decoding stopped.
+    h.fail_upload_after(3);
     h.open("a.gif");
     assert_eq!(anim(&h), Some((2, Some(3), true)));
+    assert_eq!(uploads(&h), 3);
+}
+
+/// Uploads to the device so far.
+fn uploads(h: &Harness) -> usize {
+    h.app.device.uploads.lock().unwrap().len()
 }

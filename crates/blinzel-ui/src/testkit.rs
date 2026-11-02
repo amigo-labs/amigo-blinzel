@@ -73,8 +73,8 @@ pub(crate) struct FakeDevice {
     pub uploads: Mutex<Vec<(u32, u32)>>,
     /// The texture budget it reports; `None`: 1 GiB, like Linux.
     pub budget: Option<usize>,
-    /// When set, that many more uploads succeed, then every one fails
-    /// (out of GPU memory).
+    /// When set, that many more uploads succeed, then one fails (out of
+    /// GPU memory) and the later ones succeed again.
     pub uploads_left: Mutex<Option<usize>>,
 }
 
@@ -85,12 +85,16 @@ impl Device for FakeDevice {
     fn upload(&self, img: &Image, orientation: Orientation) -> Result<FakeImage, String> {
         let size = (img.width, img.height);
         let full_size = (img.full_width, img.full_height);
-        if let Some(left) = self.uploads_left.lock().unwrap().as_mut() {
-            if *left == 0 {
+        let mut left = self.uploads_left.lock().unwrap();
+        match left.as_mut() {
+            Some(0) => {
+                *left = None;
                 return Err("out of memory".into());
             }
-            *left -= 1;
+            Some(n) => *n -= 1,
+            None => {}
         }
+        drop(left);
         self.uploads.lock().unwrap().push(size);
         Ok(FakeImage {
             size,
@@ -1022,8 +1026,8 @@ impl Harness {
         self.app.services.decodes.lock().unwrap().clone()
     }
 
-    /// `n` more uploads to the device succeed, then every one fails.
-    pub fn fail_uploads_after(&self, n: usize) {
+    /// `n` more uploads to the device succeed, then one fails.
+    pub fn fail_upload_after(&self, n: usize) {
         *self.app.device.uploads_left.lock().unwrap() = Some(n);
     }
 
