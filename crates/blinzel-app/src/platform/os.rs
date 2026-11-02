@@ -43,6 +43,39 @@ pub fn build_number() -> u32 {
     }
 }
 
+/// Whether the viewer runs on Windows build `build` (0: the build could not
+/// be read).
+pub fn supported(build: u32) -> bool {
+    build >= MIN_BUILD
+}
+
 pub fn is_supported() -> bool {
-    build_number() >= MIN_BUILD
+    supported(build_number())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `docs/specs/platform-shells.md` AC-01: 24H2 (26100) and newer run,
+    /// 23H2 (22631) and an unreadable build do not.
+    #[test]
+    fn windows_11_24h2_and_newer_are_supported() {
+        for build in [0, 19045, 22631, 26099] {
+            assert!(!supported(build), "{build}");
+        }
+        for build in [26100, 26200, 30000] {
+            assert!(supported(build), "{build}");
+        }
+    }
+
+    /// `docs/specs/platform-shells.md` AC-01: the real build number. The
+    /// test executable has no manifest, so a shimmed version API would say
+    /// Windows 8 (build 9200); the runner has 24H2 or newer.
+    #[test]
+    fn the_build_number_is_the_real_one() {
+        let build = build_number();
+        assert!(build >= MIN_BUILD, "build {build}");
+        assert!(is_supported());
+    }
 }

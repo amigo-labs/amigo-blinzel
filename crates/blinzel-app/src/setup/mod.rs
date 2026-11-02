@@ -57,10 +57,7 @@ pub fn run(mode: Mode) -> i32 {
     match mode {
         Mode::Install { silent } => {
             if !crate::platform::os::is_supported() {
-                if !silent {
-                    ui::message(tr(Msg::ErrorOs), true);
-                }
-                return 2;
+                return refuse_install(silent, |text| ui::message(text, true));
             }
             if silent {
                 match install_now(&layout, &exe) {
@@ -159,9 +156,34 @@ fn delete_self_later(exe: &Path) {
         .spawn();
 }
 
+/// An install on a Windows build the viewer does not support: tells the
+/// user (the viewer's message) unless `silent`, installs nothing and exits
+/// with 2.
+fn refuse_install(silent: bool, tell: impl FnOnce(&str)) -> i32 {
+    if !silent {
+        tell(tr(Msg::ErrorOs));
+    }
+    2
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/platform-shells.md` AC-01: the setup on an unsupported
+    /// build shows the viewer's message, not with `--silent`, and exits
+    /// with 2.
+    #[test]
+    fn an_unsupported_windows_refuses_the_install_with_2() {
+        let mut told = vec![];
+        assert_eq!(refuse_install(false, |t| told.push(t.to_string())), 2);
+        assert_eq!(told, [tr(Msg::ErrorOs)]);
+        assert_eq!(refuse_install(true, |_| panic!("silent")), 2);
+        assert_eq!(
+            blinzel_i18n::tr_in(blinzel_i18n::FALLBACK, Msg::ErrorOs),
+            "amigo-blinzel requires Windows 11 version 24H2 or newer."
+        );
+    }
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
