@@ -129,6 +129,12 @@ mod tests {
             detect(b"BM\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0\0"),
             Format::Bmp
         );
+        // BMP needs its 14-byte file header and the 4-byte DIB header size.
+        assert_eq!(
+            detect(b"BM\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0"),
+            Format::Unknown,
+            "17 bytes"
+        );
         assert_eq!(detect(b"RIFF\0\0\0\0WEBPVP8 "), Format::WebP);
         assert_eq!(detect(b"\0\0\0\x18ftypheic\0\0\0\0"), Format::Heif);
         assert_eq!(detect(b"\0\0\0\x18ftypavif\0\0\0\0"), Format::Avif);
