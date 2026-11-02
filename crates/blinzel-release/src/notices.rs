@@ -91,19 +91,26 @@ fn run(root: &Path, platform: &Platform, check: bool) -> Result<(), String> {
     let out = &root.join(platform.file);
     let text = generate(root, platform)?;
     if check {
-        let current = fs::read_to_string(out).unwrap_or_default();
-        if current.replace("\r\n", "\n") != text {
-            return Err(format!(
-                "{} is out of date: run `cargo run -p blinzel-release -- notices`",
-                out.display()
-            ));
-        }
+        up_to_date(out, &fs::read_to_string(out).unwrap_or_default(), &text)?;
         println!("{} is up to date", out.display());
     } else {
         fs::write(out, &text).map_err(|e| format!("{}: {e}", out.display()))?;
         println!("wrote {} ({} bytes)", out.display(), text.len());
     }
     Ok(())
+}
+
+/// Whether `current` (the file `out` as checked in, empty if missing) is
+/// what the generator writes; line endings are ignored.
+fn up_to_date(out: &Path, current: &str, generated: &str) -> Result<(), String> {
+    if current.replace("\r\n", "\n") == generated {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} is out of date: run `cargo run -p blinzel-release -- notices`",
+            out.display()
+        ))
+    }
 }
 
 fn generate(root: &Path, platform: &Platform) -> Result<String, String> {
@@ -674,6 +681,23 @@ mod tests {
         );
         assert_eq!(alternatives("GPL-2.0 OR MIT"), Some(vec![vec!["MIT"]]));
         assert_eq!(alternatives("(MIT"), None);
+    }
+
+    /// AC-16: a stale or missing file fails the check with the fix to run;
+    /// only line endings may differ.
+    #[test]
+    fn up_to_date_ignores_line_endings_only() {
+        let file = Path::new("THIRD-PARTY-NOTICES-linux.txt");
+        let generated = "a\n\nb\n";
+        assert!(up_to_date(file, generated, generated).is_ok());
+        assert!(up_to_date(file, "a\r\n\r\nb\r\n", generated).is_ok());
+        let stale = Err(
+            "THIRD-PARTY-NOTICES-linux.txt is out of date: run `cargo run -p blinzel-release -- notices`"
+                .to_string(),
+        );
+        assert_eq!(up_to_date(file, "a\n\nc\n", generated), stale);
+        assert_eq!(up_to_date(file, "a\n\nb", generated), stale);
+        assert_eq!(up_to_date(file, "", generated), stale);
     }
 
     #[test]
