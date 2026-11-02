@@ -136,6 +136,7 @@ jobs:
           exit $p.ExitCode
       - name: Startup smoke test (window, first frame)
         continue-on-error: true
+        timeout-minutes: 2
         shell: pwsh
         run: |
           $p = Start-Process -FilePath target/release/blinzel.exe -ArgumentList 'testdata/generated/jpeg-24mp-420.jpg','--exit-after-first-frame','--json','bench-startup-windows.json' -Wait -PassThru -NoNewWindow
