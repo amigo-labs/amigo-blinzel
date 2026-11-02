@@ -85,12 +85,12 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 |      | open   |        |
+| AC-01 | `menu_settings_offers_each_platforms_entries` (`crates/blinzel-ui/src/app_settings_tests.rs`), `the_tray_menu_shows_opens_takes_screenshots_and_exits` (`crates/blinzel-ui/src/app_resident_tests.rs`), `screenshot_actions_do_nothing_on_linux` (`crates/blinzel-app/src/linux/shell.rs`) | built |        |
 | AC-02 |      | open   |        |
 | AC-03 |      | open   |        |
 | AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
-| AC-06 |      | open   |        |
+| AC-05 | `turning_the_screenshot_key_on_turns_resident_mode_on_too` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) | built |        |
+| AC-06 | `the_tray_entries_take_the_screen_or_open_the_overlay` (`crates/blinzel-ui/src/app_screenshot_tests.rs`), `the_whole_screen_is_the_monitor_under_the_pointer` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-07 |      | open   |        |
 | AC-08 |      | open   |        |
 | AC-09 | `quartz_frames_count_down_from_the_main_display`, `windows_map_into_display_pixels`, `crops_rows` (`crates/blinzel-app/src/macos/screenshot.rs`), macOS CI job | built |        |
@@ -99,14 +99,18 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 | AC-12 | `enter_takes_the_monitor_escape_cancels`, `arrows_move_the_pointer_and_enter_finishes_a_drag` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-13 | `arrows_move_the_pointer_and_enter_finishes_a_drag` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
+| AC-15 | `a_shot_that_misses_the_clipboard_or_its_file_says_why` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) covers the notice; the clipboard formats (DIBV5 and PNG, PNG) have no test yet | open |        |
 | AC-16 | `destination_follows_the_settings` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
 | AC-17 | `writes_free_names_and_sweeps_old_shots` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
 | AC-18 |      | open   |        |
 | AC-19 | `writes_free_names_and_sweeps_old_shots` covers the sweep by age and extension; that the shell sweeps before writing is untested | open |        |
-| AC-20 | `edit_asks_for_an_editor_first` (`crates/blinzel-ui/src/app.rs`) covers only the editor choice | open |        |
+| AC-20 | `a_shot_opens_in_the_viewer_or_says_it_was_copied_then_goes_to_the_editor` (`crates/blinzel-ui/src/app_screenshot_tests.rs`), `edit_asks_for_an_editor_first` (`crates/blinzel-ui/src/app.rs`) | built |        |
 | AC-21 |      | open   |        |
 | AC-22 | CI step "Screenshot capture test" (Windows job, `.github/workflows/ci.yml`) | built |        |
 | AC-23 | CI step "Screenshot capture test" (macOS job) is `continue-on-error`, so it asserts nothing | open |        |
 
 ## Decisions
+
+- AC-01: the menus' halves existed and were tested per platform (`menu::items_for`, `menu::tray_items_with`). That the Linux shell ignores the screenshot actions the App still gives (resident mode's toggle sends `SetScreenshotHotkey` on every platform) is the private `takes_screenshots`, checked before the shell's dispatch like `ends_process`; the App itself stays platform-independent and keeps answering the commands, since its tests run every platform's menu on Linux. The behavior existed; dropping an action from `takes_screenshots` turns the test red.
+- AC-05, AC-06 (the App half): the behavior existed and the tests were green at once; skipping the `SetResident(true)` or swapping `whole_screen` turns them red. The monitor under the pointer was the same `find` in the overlay and both shells; it is now `snip::monitor_under` (new public API of `blinzel-ui`), tested on Linux. That the shells take it at once without the overlay is their early return in `start` (Windows) and `frozen` (macOS), without a test of its own.
+- AC-15, AC-20: which notice a taken shot gets (clipboard failed, file failed, only copied, none while it opens in the viewer) was the same match in the Windows and macOS shells; `App::on_screenshot(copied, file)` now returns the actions and that text (changed public API of `blinzel-ui`), and each shell shows it through `App::tell`. The tests were written against the new signature first (they did not type-check). A hidden App reloads the settings when it opens a file, so the test answers the `Wake` with `App::wake` as the shell does before it changes more settings.

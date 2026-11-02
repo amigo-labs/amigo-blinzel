@@ -405,6 +405,9 @@ impl Shell {
             el.exit();
             return vec![];
         }
+        if takes_screenshots(&a) {
+            return vec![];
+        }
         match a {
             Action::ShowMenu { x, y } => {
                 app.open_menu((x as f64, y as f64));
@@ -538,7 +541,7 @@ impl Shell {
                     None => vec![],
                 }
             }
-            // Screenshots are not on Linux yet (the menu does not offer them).
+            // Ignored above.
             Action::Capture { .. }
             | Action::SetScreenshotHotkey(_)
             | Action::PickScreenshotFolder => vec![],
@@ -1211,9 +1214,39 @@ fn ends_process(a: &Action) -> bool {
     matches!(a, Action::Close | Action::Exit | Action::Quit)
 }
 
+/// Whether `a` is a screenshot action, which the Linux shell ignores:
+/// screenshots are not on Linux yet, and the menu does not offer them
+/// (`docs/specs/screenshots.md` AC-01).
+fn takes_screenshots(a: &Action) -> bool {
+    matches!(
+        a,
+        Action::Capture { .. } | Action::SetScreenshotHotkey(_) | Action::PickScreenshotFolder
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/screenshots.md` AC-01: Linux offers no screenshots, and
+    /// the screenshot actions the App gives (the key follows resident
+    /// mode's toggle on every platform) do nothing.
+    #[test]
+    fn screenshot_actions_do_nothing_on_linux() {
+        const { assert!(!blinzel_ui::menu::SCREENSHOTS) };
+        for a in [
+            Action::Capture { whole_screen: true },
+            Action::Capture {
+                whole_screen: false,
+            },
+            Action::SetScreenshotHotkey(true),
+            Action::PickScreenshotFolder,
+        ] {
+            assert!(takes_screenshots(&a), "{a:?}");
+        }
+        assert!(!takes_screenshots(&Action::OpenWith("a.png".into())));
+        assert!(!takes_screenshots(&Action::ChooseEditor { then: None }));
+    }
 
     /// `docs/specs/resident-mode.md` AC-01: on Linux closing the window
     /// ends the process even with resident mode on in the settings.
