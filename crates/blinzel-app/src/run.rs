@@ -74,6 +74,19 @@ pub fn parse_args() -> Args {
     a
 }
 
+/// Whether this launch may hand its file to a running window: not while
+/// measuring the first frame (`docs/specs/startup.md` AC-10).
+fn may_hand_off(args: &Args) -> bool {
+    !args.exit_after_first_frame
+}
+
+/// Where `--exit-after-first-frame` writes the startup report: the
+/// `--json` path, else `startup.json` in the working directory.
+fn report_path(args: &Args) -> Option<PathBuf> {
+    let json = || args.json.clone().unwrap_or_else(|| "startup.json".into());
+    args.exit_after_first_frame.then(json)
+}
+
 /// Microseconds since the process was created (loader, Defender scan and
 /// CRT init happened before `main`).
 fn process_age_us() -> i64 {
@@ -197,7 +210,7 @@ pub fn run() -> i32 {
         if instance::running().is_some() {
             return 0;
         }
-    } else if !args.exit_after_first_frame
+    } else if may_hand_off(&args)
         && let Some(target) = instance::target(settings.single_instance, settings.resident)
     {
         let handed_off = match &args.file {
@@ -414,12 +427,7 @@ pub fn run() -> i32 {
     app.monitor = hmonitor.0 as isize;
     // The GDI first frame already made the window visible.
     app.cloaked = !crate::first_frame::shown();
-    if args.exit_after_first_frame {
-        app.exit_after_first_frame = args
-            .json
-            .clone()
-            .or_else(|| Some(PathBuf::from("startup.json")));
-    }
+    app.exit_after_first_frame = report_path(&args);
     if args.resident {
         app.hidden = true;
         app.wake_report = args.json.clone();
@@ -561,7 +569,22 @@ fn decode_workers(performance: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_workers, io_threads};
+    use super::{Args, decode_workers, io_threads, may_hand_off, report_path};
+    use std::path::PathBuf;
+
+    /// `docs/specs/startup.md` AC-10: measuring never hands over, and its
+    /// report goes to `--json`'s path or `startup.json`.
+    #[test]
+    fn measuring_starts_its_own_instance_and_reports_to_json_or_startup_json() {
+        let mut args = Args::default();
+        assert!(may_hand_off(&args));
+        assert_eq!(report_path(&args), None);
+        args.exit_after_first_frame = true;
+        assert!(!may_hand_off(&args));
+        assert_eq!(report_path(&args), Some(PathBuf::from("startup.json")));
+        args.json = Some(PathBuf::from("out.json"));
+        assert_eq!(report_path(&args), Some(PathBuf::from("out.json")));
+    }
 
     #[test]
     fn io_threads_read_one_file_at_a_time_on_a_rotating_disk() {

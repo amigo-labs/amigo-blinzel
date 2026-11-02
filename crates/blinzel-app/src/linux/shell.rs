@@ -358,14 +358,7 @@ impl Shell {
             client,
         );
         app.cloaked = self.args.file.is_some();
-        if self.args.exit_after_first_frame {
-            app.exit_after_first_frame = Some(
-                self.args
-                    .json
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("startup.json")),
-            );
-        }
+        app.exit_after_first_frame = report_path(&self.args);
         let actions = match self.args.file.clone() {
             Some(f) => app.open(f),
             None => Vec::new(),
@@ -1032,6 +1025,13 @@ fn same_window(settings: &Settings, args: &Args) -> bool {
     settings.single_instance && !args.exit_after_first_frame
 }
 
+/// Where `--exit-after-first-frame` writes the startup report: the
+/// `--json` path, else `startup.json` in the working directory.
+fn report_path(args: &Args) -> Option<PathBuf> {
+    let json = || args.json.clone().unwrap_or_else(|| "startup.json".into());
+    args.exit_after_first_frame.then(json)
+}
+
 /// What a later launch's hand-over does: the window opens its file, if it
 /// sent one, and comes to the foreground.
 fn handed_over(file: Option<PathBuf>, open: impl FnOnce(PathBuf) -> Vec<Action>) -> Vec<Action> {
@@ -1179,6 +1179,20 @@ mod tests {
             ..Args::default()
         };
         assert!(!same_window(&Settings::default(), &measuring));
+    }
+
+    /// `docs/specs/startup.md` AC-10: measuring writes `--json`'s path, or
+    /// `startup.json` without it; without the mode there is no report.
+    #[test]
+    fn the_startup_report_goes_to_json_or_startup_json() {
+        let mut args = Args::default();
+        assert_eq!(report_path(&args), None);
+        args.json = Some(PathBuf::from("out.json"));
+        assert_eq!(report_path(&args), None, "--json alone measures nothing");
+        args.exit_after_first_frame = true;
+        assert_eq!(report_path(&args), Some(PathBuf::from("out.json")));
+        args.json = None;
+        assert_eq!(report_path(&args), Some(PathBuf::from("startup.json")));
     }
 
     /// `docs/specs/browsing.md` AC-15: the running window shows the handed
