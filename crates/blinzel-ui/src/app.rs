@@ -2330,12 +2330,32 @@ impl<B: Backend> App<B> {
             .collect()
     }
 
-    /// A screenshot is on the clipboard and, when the settings asked for
-    /// a file, in `file`: shows it in the viewer, then hands it to the
-    /// editor (which then lies on top), as configured.
-    pub fn on_screenshot(&mut self, file: Option<PathBuf>) -> Vec<Action> {
+    /// A screenshot is taken: `copied` says whether it reached the
+    /// clipboard, `file` where it was written (none when the settings ask
+    /// for no file). Shows it in the viewer and wakes the window, then
+    /// hands it to the editor (which then lies on top), as configured.
+    /// Returns those actions and the text for the user, if any: why the
+    /// shot failed, or that it is only on the clipboard
+    /// (`docs/specs/screenshots.md` AC-15, AC-20).
+    pub fn on_screenshot(
+        &mut self,
+        copied: bool,
+        file: Result<Option<PathBuf>, String>,
+    ) -> (Vec<Action>, Option<String>) {
+        let failed = |reason: &str| trf(Msg::ScreenshotFailed, &[("reason", &reason)]);
+        let file = match file {
+            Ok(file) => file,
+            Err(e) => return (vec![], Some(failed(&e))),
+        };
+        let text = if !copied {
+            Some(failed("clipboard"))
+        } else if !self.settings.screenshot_open {
+            Some(tr(Msg::ScreenshotCopied).to_string())
+        } else {
+            None
+        };
         let Some(file) = file else {
-            return vec![];
+            return (vec![], text);
         };
         let mut actions = Vec::new();
         if self.settings.screenshot_open {
@@ -2345,7 +2365,7 @@ impl<B: Backend> App<B> {
         if self.settings.screenshot_edit {
             actions.push(edit_action(self.settings.editor.as_deref(), file));
         }
-        actions
+        (actions, text)
     }
 
     pub fn screenshot_folder_picked(&mut self, folder: PathBuf) {
@@ -2616,6 +2636,10 @@ mod resident_tests;
 #[cfg(test)]
 #[path = "app_language_tests.rs"]
 mod language_tests;
+
+#[cfg(test)]
+#[path = "app_screenshot_tests.rs"]
+mod screenshot_tests;
 
 /// The command a navigation key gives in the single-image view;
 /// right-to-left languages page leftwards.

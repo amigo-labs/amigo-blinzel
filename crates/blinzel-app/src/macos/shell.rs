@@ -830,18 +830,7 @@ impl Shell {
             UserEvent::Shot(r) => match r {
                 Ok(t) => {
                     let copied = put_png(&t.png);
-                    let open = app.settings.screenshot_open;
-                    let (actions, text) = match t.file {
-                        Ok(file) => (
-                            app.on_screenshot(file),
-                            match (copied, open) {
-                                (false, _) => Some(screenshot::failure("clipboard")),
-                                (true, false) => Some(screenshot::copied()),
-                                (true, true) => None,
-                            },
-                        ),
-                        Err(e) => (vec![], Some(screenshot::failure(&e))),
-                    };
+                    let (actions, text) = app.on_screenshot(copied, t.file);
                     if let Some(text) = text {
                         tell(app, &mut self.notice_until, text);
                     }

@@ -359,11 +359,6 @@ pub fn failure(reason: &str) -> String {
     trf(Msg::ScreenshotFailed, &[("reason", &reason)])
 }
 
-/// Text for a screenshot that only went to the clipboard.
-pub fn copied() -> String {
-    tr(Msg::ScreenshotCopied).to_string()
-}
-
 /// Encodes part `r` of the picture and writes the file the settings ask
 /// for in the background, then tells `main`.
 fn save(main: HWND, shot: &Shot, r: Rect) {

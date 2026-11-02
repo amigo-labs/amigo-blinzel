@@ -590,17 +590,9 @@ fn handle(
                     // borrowed app here.
                     app.clip = None;
                     let copied = clipboard::put_shot(hwnd, &t.bgra, t.width, t.height, &t.png);
-                    match t.file {
-                        Ok(file) => {
-                            actions.extend(app.on_screenshot(file));
-                            match (copied, app.settings.screenshot_open) {
-                                (false, _) => Some(screenshot::failure("clipboard")),
-                                (true, false) => Some(screenshot::copied()),
-                                (true, true) => None,
-                            }
-                        }
-                        Err(e) => Some(screenshot::failure(&e)),
-                    }
+                    let (more, text) = app.on_screenshot(copied, t.file);
+                    actions.extend(more);
+                    text
                 }
                 Err(e) => Some(screenshot::failure(&e)),
             };

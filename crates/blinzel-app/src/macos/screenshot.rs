@@ -702,11 +702,6 @@ pub fn failure(reason: &str) -> String {
     trf(Msg::ScreenshotFailed, &[("reason", &reason)])
 }
 
-/// Text for a screenshot that only went to the clipboard.
-pub fn copied() -> String {
-    tr(Msg::ScreenshotCopied).to_string()
-}
-
 /// The folder from the settings, else ~/Pictures/Screenshots.
 fn folder(settings: &Settings) -> PathBuf {
     if let Some(d) = &settings.screenshot_dir {
