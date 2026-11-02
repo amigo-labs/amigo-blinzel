@@ -22,13 +22,23 @@ use objc2_image_io::{
     CGImageSource, kCGImagePropertyOrientation, kCGImagePropertyPixelHeight,
     kCGImagePropertyPixelWidth, kCGImageSourceCreateThumbnailFromImageAlways,
     kCGImageSourceCreateThumbnailWithTransform, kCGImageSourceShouldCacheImmediately,
-    kCGImageSourceThumbnailMaxPixelSize,
+    kCGImageSourceThumbnailMaxPixelSize, kCGImageSourceTypeIdentifierHint,
 };
 
 fn source(data: &[u8]) -> Result<CFRetained<CGImageSource>> {
     let cf = CFData::from_bytes(data);
-    // SAFETY: valid data, no options.
-    unsafe { CGImageSource::with_data(&cf, None) }
+    // An icon's signature (0 0 1 0) is too weak for ImageIO to sniff from
+    // bare data, so its type is named.
+    let hint = (detect(data) == Format::Ico).then(|| {
+        let uti = CFString::from_static_str("com.microsoft.ico");
+        // SAFETY: ImageIO's constant key with the string value it documents.
+        CFDictionary::<CFString, CFType>::from_slices(
+            &[unsafe { kCGImageSourceTypeIdentifierHint }],
+            &[uti.as_ref()],
+        )
+    });
+    // SAFETY: valid data; the options hold only the type hint.
+    unsafe { CGImageSource::with_data(&cf, hint.as_ref().map(|d| d.as_ref())) }
         .filter(|s| unsafe { s.count() } > 0)
         .ok_or(DecodeError::Unsupported(detect(data)))
 }
