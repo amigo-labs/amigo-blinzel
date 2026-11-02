@@ -2,7 +2,7 @@
 //! following the window's monitor (`docs/specs/color-management.md`).
 
 use super::*;
-use crate::testkit::{self, Harness, LUTS_BUILT};
+use crate::testkit::{self, Harness, LUT_SOURCES, LUTS_BUILT};
 use Cmd::*;
 use blinzel_core::icc::{Profile, Trc, colorants, embed_in_jpeg, matrix_profile};
 use std::sync::atomic::Ordering;
@@ -95,4 +95,113 @@ fn a_new_monitor_retargets_and_redraws() {
     h.app.check_monitor(true);
     assert!(h.host().invalidations > before, "redraws");
     assert!(!converted(&mut h), "sRGB again");
+}
+
+fn queries(h: &Harness) -> usize {
+    h.app.services.target_queries.load(Ordering::Relaxed)
+}
+
+/// AC-11: the start draws with the remembered target (the shell sets it
+/// before the window) without asking the platform, asks once after the
+/// first frame and redraws with the answer when it differs.
+#[test]
+fn the_start_draws_with_the_remembered_target_and_asks_after_the_first_frame() {
+    let mut h = Harness::new();
+    // As the Windows shell starts: the monitor under the cursor, the target
+    // remembered for it.
+    h.app.monitor = 1;
+    h.app
+        .color
+        .set_target(Some(profile(colorants::DISPLAY_P3, "P3 display")));
+    let adobe = profile(colorants::ADOBE_RGB, "Adobe display");
+    h.app
+        .services
+        .targets
+        .lock()
+        .unwrap()
+        .insert(1, adobe.clone());
+    h.write_png("a.png", 64, 48);
+    assert_eq!(queries(&h), 0, "nothing asked before the window");
+
+    let services = h.app.services.clone();
+    let held = services.target_gate.lock().unwrap();
+    h.open("a.png");
+    let built = LUT_SOURCES.lock().unwrap().len();
+    assert!(
+        converted(&mut h),
+        "the first frames use the remembered target"
+    );
+
+    drop(held);
+    let before = h.host().invalidations;
+    h.wait_for(|h| h.color_answers > 0);
+    assert_eq!(queries(&h), 1, "asked after the first frame");
+    assert!(h.host().invalidations > before, "another answer redraws");
+    assert!(converted(&mut h));
+    assert_eq!(
+        LUT_SOURCES.lock().unwrap().len(),
+        built + 1,
+        "a transform for the answer"
+    );
+    for _ in 0..3 {
+        h.render();
+    }
+    assert_eq!(queries(&h), 1, "asked once");
+    drop(h);
+
+    // The answer is what was remembered: nothing to redraw.
+    let mut h = Harness::new();
+    h.render();
+    let before = h.host().invalidations;
+    h.wait_for(|h| h.color_answers > 0);
+    assert_eq!(queries(&h), 1);
+    assert_eq!(h.host().invalidations, before, "the same answer");
+}
+
+/// The rXYZ, gXYZ and bXYZ colorants of an ICC profile.
+fn colorants_of(icc: &[u8]) -> [[f64; 3]; 3] {
+    let be = |at: usize| u32::from_be_bytes(icc[at..at + 4].try_into().unwrap());
+    let tag = |sig: &[u8; 4]| {
+        let entry = (0..be(128) as usize)
+            .map(|i| 132 + 12 * i)
+            .find(|&e| &icc[e..e + 4] == sig)
+            .expect("colorant tag");
+        let at = be(entry + 4) as usize + 8;
+        [0, 4, 8].map(|k| f64::from(be(at + k) as i32) / 65536.0)
+    };
+    [tag(b"rXYZ"), tag(b"gXYZ"), tag(b"bXYZ")]
+}
+
+/// AC-19: the resident start's warm-up loads the colour engine once, with
+/// a Display P3 profile, while no image is open; with colour management
+/// off it does not.
+#[cfg(feature = "turbojpeg")]
+#[test]
+fn the_warm_up_builds_one_display_p3_transform() {
+    let mut h = Harness::new();
+    let before = LUT_SOURCES.lock().unwrap().len();
+    h.app.warm_up(1);
+    let built = LUT_SOURCES.lock().unwrap()[before..].to_vec();
+    assert_eq!(built.len(), 1, "one transform");
+    let src = built[0].as_ref().expect("from a profile");
+    assert!(!src.srgb);
+    for (got, want) in colorants_of(&src.bytes).iter().zip(&colorants::DISPLAY_P3) {
+        for (g, w) in got.iter().zip(want) {
+            assert!((g - w).abs() < 1e-4, "Display P3: {got:?} vs {want:?}");
+        }
+    }
+    drop(h);
+
+    let off = Settings {
+        color_management: false,
+        ..Settings::default()
+    };
+    let mut h = Harness::with_settings(off);
+    let before = LUT_SOURCES.lock().unwrap().len();
+    h.app.warm_up(1);
+    assert_eq!(
+        LUT_SOURCES.lock().unwrap().len(),
+        before,
+        "off: no transform"
+    );
 }

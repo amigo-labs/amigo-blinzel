@@ -291,6 +291,10 @@ pub(crate) struct FakeServices {
     pub develops: Mutex<Option<(u32, u32)>>,
     /// The colour target of each monitor that is not sRGB.
     pub targets: Mutex<HashMap<isize, Profile>>,
+    /// How often the App asked for a monitor's colour target.
+    pub target_queries: AtomicUsize,
+    /// Held by a test, it keeps every colour-target answer back.
+    pub target_gate: Mutex<()>,
 }
 
 impl FakeServices {
@@ -347,6 +351,8 @@ impl Services for FakeServices {
         eprintln!("blinzel: {msg}");
     }
     fn display_target(&self, monitor: isize) -> Option<Profile> {
+        self.target_queries.fetch_add(1, Ordering::Relaxed);
+        let _answer = self.target_gate.lock().unwrap();
         self.targets.lock().unwrap().get(&monitor).cloned()
     }
     fn thumb_threads(&self) -> usize {
@@ -594,10 +600,14 @@ const PUMP_LIMIT: Duration = Duration::from_secs(30);
 /// Colour transforms built so far ([`identity_lut`]).
 pub(crate) static LUTS_BUILT: AtomicUsize = AtomicUsize::new(0);
 
+/// The source profile of every transform built so far, in order.
+pub(crate) static LUT_SOURCES: Mutex<Vec<Option<Profile>>> = Mutex::new(Vec::new());
+
 /// The colour engine: every transform is the identity (the frame records
 /// only whether one was used: [`DrawnImage::converted`]).
-fn identity_lut(_: Option<&Profile>, _: Option<&Profile>) -> Option<Lut3d> {
+fn identity_lut(src: Option<&Profile>, _: Option<&Profile>) -> Option<Lut3d> {
     LUTS_BUILT.fetch_add(1, Ordering::Relaxed);
+    LUT_SOURCES.lock().unwrap().push(src.cloned());
     let n = blinzel_core::lut::SIZE;
     let step = 65535.0 / (n - 1) as f64;
     let nodes = (0..n * n * n)
@@ -618,6 +628,8 @@ pub(crate) struct Harness {
     wakes: Receiver<Wake>,
     actions: Vec<Action>,
     rendered_at: usize,
+    /// Colour-target answers delivered to the App ([`Wake::ColorTarget`]).
+    pub color_answers: usize,
     /// The device's texture budget ([`FakeDevice::budget`]).
     budget: Option<usize>,
     // Dropped after the app (its threads may still read files).
@@ -653,6 +665,7 @@ impl Harness {
             wakes,
             actions: Vec::new(),
             rendered_at: 0,
+            color_answers: 0,
             budget,
             tmp,
             _serial: serial,
@@ -668,6 +681,7 @@ impl Harness {
         self.wakes = wakes;
         self.actions.clear();
         self.rendered_at = 0;
+        self.color_answers = 0;
     }
 
     /// A new App over the folders under `tmp`.
@@ -688,6 +702,8 @@ impl Harness {
             previews: Mutex::new(HashMap::new()),
             develops: Mutex::new(None),
             targets: Mutex::new(HashMap::new()),
+            target_queries: AtomicUsize::new(0),
+            target_gate: Mutex::new(()),
         });
         let device = Arc::new(FakeDevice {
             budget,
@@ -955,6 +971,7 @@ impl Harness {
                 vec![]
             }
             Wake::ColorTarget { monitor, target } => {
+                self.color_answers += 1;
                 self.app.on_color_target(monitor, target);
                 vec![]
             }
