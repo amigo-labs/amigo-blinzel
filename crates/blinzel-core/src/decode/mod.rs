@@ -447,6 +447,209 @@ mod tests {
         assert!(avif::container_profile(data).is_none());
     }
 
+    /// A JPEG header the parser accepts: SOF `marker` with `precision`
+    /// bits, three components, and an empty scan.
+    fn jpeg_header(w: u16, h: u16, precision: u8, marker: u8) -> Vec<u8> {
+        let mut d = vec![0xFF, 0xD8, 0xFF, marker, 0, 17, precision];
+        d.extend(h.to_be_bytes());
+        d.extend(w.to_be_bytes());
+        d.extend([3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+        d.extend([0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0x11, 3, 0x11, 0, 63, 0]);
+        d.extend([0xFF, 0xD9]);
+        d
+    }
+
+    /// `marker` segment (APPn) with `payload`, inserted after the SOI.
+    fn with_segment(jpeg: &[u8], marker: u8, payload: &[u8]) -> Vec<u8> {
+        let len = (payload.len() + 2) as u16;
+        [
+            &jpeg[..2],
+            &[0xFF, marker],
+            &len.to_be_bytes(),
+            payload,
+            &jpeg[2..],
+        ]
+        .concat()
+    }
+
+    fn unsupported<T>(r: Result<T>) -> Option<Format> {
+        match r {
+            Err(DecodeError::Unsupported(f)) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Formats without a native decoder, 12-bit JPEGs, raw pixels and raws
+    /// without previews all go to the system decoder (AC-03).
+    #[test]
+    fn other_formats_and_raw_pixels_go_to_the_platform() {
+        let signatures: [(&[u8], Format); 7] = [
+            (b"II\xbc\x01\0\0\0\0", Format::JpegXr),
+            (b"II\xbc\x00\0\0\0\0", Format::JpegXr),
+            (&[0, 0, 1, 0, 1, 0, 16, 16], Format::Ico),
+            (&[0, 0, 2, 0, 1, 0, 16, 16], Format::Ico),
+            (b"DDS |\0\0\0", Format::Dds),
+            (b"8BPS\0\x01\0\0", Format::Psd),
+            (b"qoif\0\0\0\x04", Format::Qoi),
+        ];
+        for (data, f) in signatures {
+            assert_eq!(format::detect(data), f);
+            assert_eq!(unsupported(probe(data)), Some(f));
+            assert_eq!(unsupported(decode(data, Request::Full)), Some(f));
+        }
+        let twelve = jpeg_header(16, 8, 12, 0xC1);
+        for threads in [1, 4] {
+            let r = decode_with(&twelve, Request::Full, threads);
+            assert_eq!(unsupported(r), Some(Format::Jpeg));
+        }
+        // TIFF-based raws without previews: sub-IFDs, DNG, Canon CR2.
+        use ::tiff::encoder::{TiffEncoder, colortype};
+        use ::tiff::tags::Tag;
+        let tiff = |tag: Option<(u16, u32)>| {
+            let mut out = std::io::Cursor::new(Vec::new());
+            let mut enc = TiffEncoder::new(&mut out).unwrap();
+            let mut img = enc.new_image::<colortype::RGB8>(4, 3).unwrap();
+            if let Some((t, v)) = tag {
+                img.encoder().write_tag(Tag::Unknown(t), v).unwrap();
+            }
+            img.write_data(&crate::testimg::rgb(4, 3)).unwrap();
+            out.into_inner()
+        };
+        assert!(decode(&tiff(None), Request::Full).is_ok());
+        let mut cr2 = tiff(None);
+        cr2[8..10].copy_from_slice(b"CR");
+        for data in [tiff(Some((330, 8))), tiff(Some((50706, 0x0104_0000))), cr2] {
+            assert_eq!(unsupported(probe(&data)), Some(Format::Tiff));
+            assert_eq!(
+                unsupported(decode(&data, Request::Full)),
+                Some(Format::Tiff)
+            );
+        }
+        // Other raw containers without previews.
+        for data in [
+            &b"FUJIFILMCCD-RAW 0201"[..],
+            b"IIRO\x08\0\0\0\0\0",
+            b"\0\0\0\x18ftypcrx \0\0",
+        ] {
+            assert_eq!(unsupported(probe(data)), Some(Format::Raw));
+            assert_eq!(unsupported(decode(data, Request::Full)), Some(Format::Raw));
+        }
+    }
+
+    /// JPEG (EXIF), WebP (`webp.rs`) and JPEG XL (header) carry an
+    /// orientation; PNG, GIF and BMP are upright even with EXIF (AC-17).
+    #[test]
+    fn probe_reports_the_orientation() {
+        let tiff = crate::exif::tests::tiff_le(6, None);
+        let exif = [b"Exif\0\0".as_slice(), &tiff].concat();
+        let jpeg = with_segment(&jpeg_header(16, 8, 8, 0xC0), 0xE1, &exif);
+        let p = probe(&jpeg).unwrap();
+        assert_eq!((p.width, p.height), (16, 8));
+        assert_eq!(p.orientation, Orientation::from_exif(6));
+        assert_eq!(p.oriented_size(), (8, 16));
+
+        let jxl = probe(include_bytes!("../../testdata/orient6-4x2.jxl")).unwrap();
+        assert_eq!((jxl.format, jxl.width, jxl.height), (Format::Jxl, 4, 2));
+        assert_eq!(jxl.orientation, Orientation::from_exif(6));
+
+        let mut png = Vec::new();
+        {
+            let mut e = ::png::Encoder::new(&mut png, 2, 1);
+            e.set_color(::png::ColorType::Rgb);
+            let mut w = e.write_header().unwrap();
+            w.write_chunk(::png::chunk::ChunkType(*b"eXIf"), &tiff)
+                .unwrap();
+            w.write_image_data(&[0; 6]).unwrap();
+        }
+        let mut gif = Vec::new();
+        ::gif::Encoder::new(&mut gif, 2, 1, &[0; 6])
+            .unwrap()
+            .write_frame(&::gif::Frame::from_indexed_pixels(2, 1, vec![0, 1], None))
+            .unwrap();
+        let mut bmp = b"BM".to_vec();
+        bmp.extend(
+            [62u32, 0, 54, 40, 2, 1]
+                .iter()
+                .flat_map(|v| v.to_le_bytes()),
+        );
+        bmp.extend(1u16.to_le_bytes());
+        bmp.extend(24u16.to_le_bytes());
+        bmp.extend([0u8; 24 + 8]);
+        for (data, f) in [(png, Format::Png), (gif, Format::Gif), (bmp, Format::Bmp)] {
+            let p = probe(&data).unwrap();
+            assert_eq!((p.format, p.width, p.height), (f, 2, 1));
+            assert_eq!(p.orientation, Orientation::NORMAL);
+        }
+    }
+
+    /// The probe lists a JPEG's EXIF thumbnail and MPF images inside the
+    /// given bytes that are 8-bit lossy JPEGs, largest first, each once; a
+    /// decoded preview is a reduced stage of the main image (AC-19).
+    #[cfg(feature = "turbojpeg")]
+    #[test]
+    fn jpeg_previews_from_exif_and_mpf() {
+        let enc = |w, h| jpeg::encode_rgb(&crate::testimg::rgb(w, h), w, h, Default::default());
+        let (main, thumb, big) = (enc(320, 240).unwrap(), enc(32, 24).unwrap(), enc(160, 120));
+        let big = big.unwrap();
+        let (twelve, lossless) = (
+            jpeg_header(200, 150, 12, 0xC1),
+            jpeg_header(300, 200, 8, 0xC3),
+        );
+        // APP1: the thumbnail right after IFD1 (56 bytes of TIFF).
+        let mut app1 = b"Exif\0\0".to_vec();
+        app1.extend(crate::exif::tests::tiff_le(
+            1,
+            Some((56, thumb.len() as u32)),
+        ));
+        app1.extend(&thumb);
+        // APP2: MPF index with five images after the primary one.
+        let n = 6;
+        let mpf_len = 4 + 26 + 16 * n;
+        let mpf_at = 2 + 4 + app1.len() + 4 + 4; // TIFF header inside APP2
+        let tail_at = 2 + 4 + app1.len() + 4 + mpf_len + main.len() - 2;
+        let at = |i: usize| (tail_at + [0, big.len(), big.len() + twelve.len()][i] - mpf_at) as u32;
+        let total = (tail_at + big.len() + twelve.len() + lossless.len() - mpf_at) as u32;
+        let entries = [
+            (0x03_0000, main.len() as u32, 0),
+            (0x01_0002, big.len() as u32, at(0)),
+            (0x01_0002, big.len() as u32, at(0)),
+            (0x01_0002, twelve.len() as u32, at(1)),
+            (0x01_0002, lossless.len() as u32, at(2)),
+            (0x01_0002, 100, total),
+        ];
+        let mut mpf = b"MPF\0II*\0".to_vec();
+        mpf.extend(8u32.to_le_bytes());
+        mpf.extend(1u16.to_le_bytes());
+        mpf.extend(0xB002u16.to_le_bytes());
+        mpf.extend(7u16.to_le_bytes());
+        mpf.extend((16 * n as u32).to_le_bytes());
+        mpf.extend(26u32.to_le_bytes());
+        mpf.extend(0u32.to_le_bytes());
+        for (attr, size, off) in entries {
+            mpf.extend([attr, size, off, 0u32].iter().flat_map(|v| v.to_le_bytes()));
+        }
+        assert_eq!(mpf.len(), mpf_len);
+        let data = with_segment(&with_segment(&main, 0xE2, &mpf), 0xE1, &app1);
+        let data = [data, big.clone(), twelve, lossless].concat();
+        assert_eq!(&data[tail_at..tail_at + big.len()], &big[..]);
+
+        let p = probe(&data).unwrap();
+        assert_eq!((p.width, p.height), (320, 240));
+        let sizes: Vec<_> = p.previews.iter().map(|v| (v.width, v.height)).collect();
+        assert_eq!(sizes, [(160, 120), (32, 24)]);
+        assert_eq!(p.previews[0].range, tail_at..tail_at + big.len());
+        // Previews beyond the given bytes are not listed.
+        let head = probe(&data[..tail_at]).unwrap();
+        let sizes: Vec<_> = head.previews.iter().map(|v| (v.width, v.height)).collect();
+        assert_eq!(sizes, [(32, 24)]);
+
+        for req in [Request::Full, Request::Region(PixelRect::new(0, 0, 8, 8))] {
+            let img = decode_preview(&data, &p.previews[0], (320, 240), req).unwrap();
+            assert_eq!((img.width, img.height), (160, 120));
+            assert_eq!((img.full_width, img.full_height), (320, 240));
+        }
+    }
+
     #[test]
     fn size_limits() {
         assert!(check_size(100, 100).is_ok());

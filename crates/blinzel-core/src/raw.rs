@@ -448,6 +448,13 @@ mod tests {
         // Through the decoder's probe: a raw, its size and orientation.
         let p = crate::decode::probe(&t.d).unwrap();
         assert!(p.is_raw());
+        // Its sensor data goes to the system decoder (AC-03).
+        assert!(matches!(
+            crate::decode::decode(&t.d, crate::decode::Request::Full),
+            Err(crate::decode::DecodeError::Unsupported(
+                crate::format::Format::Tiff
+            ))
+        ));
         assert_eq!(
             (p.width, p.height, p.orientation),
             (600, 400, Orientation::from_exif(8))

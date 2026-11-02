@@ -109,7 +109,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | ----- | ---- | ------ | ------ |
 | AC-01 | `detects_formats` (`crates/blinzel-core/src/format.rs`), CI: Linux | built | |
 | AC-02 | `unknown_formats_are_unsupported`, `panics_are_contained`, `size_limits` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
-| AC-03 | — (`detects_formats` does not cover these signatures; no test for 12-bit JPEG, raw decode or raws without previews) | open | |
+| AC-03 | `other_formats_and_raw_pixels_go_to_the_platform` (`crates/blinzel-core/src/decode/mod.rs`), `tiff_raws_list_their_jpegs` (`crates/blinzel-core/src/raw.rs`), CI: Linux | built | |
 | AC-04 | `planar_decode_matches_packed`, `dct_scaling_picks_smallest_sufficient_size`, `region_equals_crop_of_full_decode`, `gray_progressive_and_restart` (`crates/blinzel-core/src/decode/jpeg.rs`), CI: Linux | built | |
 | AC-05 | `truncated_files_still_decode_or_fail_cleanly` (`crates/blinzel-core/src/decode/jpeg.rs`), CI: Linux | built | |
 | AC-06 | `decodes_color_types`, `interlaced_and_palette`, `corrupt_input_is_an_error` (`crates/blinzel-core/src/decode/png.rs`), CI: Linux | built | |
@@ -123,9 +123,9 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | AC-14 | `hdr_and_broken_files_are_refused_without_panicking` (`crates/blinzel-core/src/decode/avif.rs`), CI: Linux | built | |
 | AC-15 | `probe_and_decode_rgb`, `alpha_is_straight`, `broken_files_go_to_the_platform` (`crates/blinzel-core/src/decode/heif.rs`), CI: Linux (feature unified by `cargo test --workspace`) | built | |
 | AC-16 | `heic_needs_the_feature` (`crates/blinzel-core/src/decode/mod.rs`), CI: macOS only (the other jobs build with `heic`) | built | |
-| AC-17 | — (`reads_orientation_le_and_be` in `crates/blinzel-core/src/exif.rs` covers the TIFF parsing, not the probe; WebP and JPEG XL tests use upright files only) | open | |
+| AC-17 | `probe_reports_the_orientation` (`crates/blinzel-core/src/decode/mod.rs`), `exif_orientation_is_probed` (`crates/blinzel-core/src/decode/webp.rs`), CI: Linux | built | |
 | AC-18 | `tiff_raws_list_their_jpegs`, `image_size_trusts_exif_only_with_the_previews_aspect`, `raf_header_and_records`, `cr3_boxes`, `garbage_yields_nothing` (`crates/blinzel-core/src/raw.rs`), CI: Linux | built | |
-| AC-19 | — (`reads_thumbnail_range`, `reads_mpf_index` in `crates/blinzel-core/src/exif.rs` cover the parsing; no test through the probe or `decode_preview`) | open | |
+| AC-19 | `jpeg_previews_from_exif_and_mpf` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
 | AC-20 | — | open | |
 | AC-21 | — | open | |
 | AC-22 | — | open | |
@@ -135,3 +135,6 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 ## Decisions
 
 - 2026-11-02: Extracted from the code (`/spec-extract`). Colour-profile ACs live in `color-management.md`; this spec only lists which formats the probe reads a profile from (Technical notes).
+- 2026-11-02: AC-03, AC-17 and AC-19 described behavior the code already had, so their tests were green at once; each was checked by breaking the code it covers (the 12-bit check, the CR2/sub-IFD/DNG checks, the ICO signature, the EXIF/WebP/JPEG XL orientation, the 8-bit/lossless/duplicate filters, the sort and `full_width`), which turned it red.
+- 2026-11-02: The JPEG XL orientation fixture `crates/blinzel-core/testdata/orient6-4x2.jxl` (84 bytes, container with an `Exif` box) was made with `cjxl -d 0` (libjxl 0.7) from a 4 × 2 PNG with an `eXIf` orientation 6; `jxlinfo` shows orientation 6 in the codestream header.
+- 2026-11-02: An AVIF with major brand `mif1`/`msf1` counts as AVIF when its compatible brands (inside the `ftyp` box) name `avif`/`avis` and no HEVC brand; a file naming both stays HEIF, since zune-heic or the system decoder can then still try it.

@@ -299,4 +299,27 @@ mod tests {
         assert!(!is_lossy_still(&data));
         assert!(decode(b"RIFF\0\0\0\0WEBPVP8 ").is_err());
     }
+
+    /// The probe reads the EXIF orientation, with or without JPEG's
+    /// `Exif\0\0` in front of the TIFF data (AC-17).
+    #[test]
+    fn exif_orientation_is_probed() {
+        let (w, h) = (5, 4);
+        let tiff = crate::exif::tests::tiff_le(6, None);
+        for exif in [tiff.clone(), [b"Exif\0\0".as_slice(), &tiff].concat()] {
+            let mut data = Vec::new();
+            let mut enc = image_webp::WebPEncoder::new(&mut data);
+            enc.set_exif_metadata(exif);
+            enc.encode(
+                &crate::testimg::rgba(w, h),
+                w,
+                h,
+                image_webp::ColorType::Rgba8,
+            )
+            .unwrap();
+            let probe = crate::decode::probe(&data).unwrap();
+            assert_eq!(probe.orientation, Orientation::from_exif(6));
+            assert_eq!((probe.width, probe.height), (w, h));
+        }
+    }
 }
