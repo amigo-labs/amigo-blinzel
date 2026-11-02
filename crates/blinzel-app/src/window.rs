@@ -597,20 +597,8 @@ fn handle(
             actions.extend(app.files_dropped(paths));
             done
         }
-        WM_RENDERFORMAT => {
-            if let Some(src) = &app.clip {
-                clipboard::render(src, wp.0 as u32);
-            }
-            done
-        }
-        WM_RENDERALLFORMATS => {
-            if let Some(src) = app.clip.clone() {
-                clipboard::render_all(hwnd, &src);
-            }
-            done
-        }
-        WM_DESTROYCLIPBOARD => {
-            app.clip = None;
+        WM_RENDERFORMAT | WM_RENDERALLFORMATS | WM_DESTROYCLIPBOARD => {
+            clipboard::on_message(hwnd, msg, wp, &mut app.clip);
             done
         }
         WM_CLOSE => {
