@@ -96,6 +96,8 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 
 <!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
+- AC-05 does not hold as written: the batch decodes on one thread, where JPEG goes through libjpeg-turbo, which scales by any n/8 (n = 1…8), not only 1/2, 1/4 or 1/8. A 640×480 JPEG resized to a width of 100 is decoded at 3/8 (240×180, which still leaves twice the target), not at 1/2 (320×240) as the AC says (red run of `jpeg_sources_decode_at_the_smallest_scale_that_keeps_twice_the_target`, 2026-11-02; the test is not committed). `blinzel.md` §7 only says "as long as at least twice the target size remains". Either the AC becomes "the smallest DCT scale n/8 that still leaves at least twice the target size" (the code as it is, fewer pixels to resample), or the batch is limited to 1/2, 1/4 and 1/8 (the scales `blinzel-jpeg` has). Settle with `/spec batch-resize`.
+
 ## Evidence
 
 | AC    | Test | Status | Commit |
@@ -107,18 +109,18 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 | AC-05 | partial: `jpeg_sources_are_decoded_at_a_reduced_scale_and_rotated` checks the result, not the decode scale | open | |
 | AC-06 | `flat_areas_are_unchanged_and_edges_gain_contrast`, `zero_amount_is_a_no_op` (`blinzel-core/src/batch/sharpen.rs`, Linux) | built | |
 | AC-07 | `every_codec_round_trips_with_metadata`, `webp_lossless_is_exact` (`blinzel-core/src/batch/encode.rs`), `same_format_where_we_can_write_it` (`blinzel-core/src/batch/mod.rs`), Linux | built | |
-| AC-08 | | open | |
+| AC-08 | `jpeg_keeps_full_chroma_from_quality_90` (`blinzel-core/src/batch/encode.rs`, Linux) | built | |
 | AC-09 | `rewrite_drops_what_must_go_and_keeps_the_rest`, `gps_stays_on_request`, `exif_is_found_in_every_container` (`blinzel-core/src/batch/meta.rs`), `every_codec_round_trips_with_metadata` (`encode.rs`), `jpeg_sources_are_decoded_at_a_reduced_scale_and_rotated` (`run.rs`, GPS removed), Linux | built | |
 | AC-10 | `every_codec_round_trips_with_metadata` (`blinzel-core/src/batch/encode.rs`, Linux) | built | |
 | AC-11 | `placeholders`, `date_formats` (`blinzel-core/src/batch/naming.rs`, Linux) | built | |
-| AC-12 | partial: `planned_names_are_the_names_written` (`run.rs`, EXIF date), `date_formats` (empty date); the modification-time fallback is untested | open | |
+| AC-12 | `dates_are_the_capture_time_else_the_modification_time` (`blinzel-core/src/batch/plan.rs`), `planned_names_are_the_names_written` (`run.rs`, EXIF date), `date_formats` (`naming.rs`, empty date), Linux | built | |
 | AC-13 | partial: `stamps` (`blinzel-core/src/batch/naming.rs`) covers the offset arithmetic, not the platforms | open | |
-| AC-14 | `names_in_order_with_numbers_for_collisions` (`blinzel-core/src/batch/plan.rs`), `batch_writes_new_files_and_never_replaces` (`run.rs`, folder created), Linux; absolute folders untested | built | |
+| AC-14 | `names_in_order_with_numbers_for_collisions`, `relative_folders_follow_each_source_and_absolute_ones_are_kept` (`blinzel-core/src/batch/plan.rs`), `batch_writes_new_files_and_never_replaces` (`run.rs`, folder created), Linux | built | |
 | AC-15 | `batch_writes_new_files_and_never_replaces` (`blinzel-core/src/batch/run.rs`), `claims_never_repeat_or_hit_existing_files` (`naming.rs`), Linux | built | |
 | AC-16 | `planned_names_are_the_names_written` (`run.rs`), `names_in_order_with_numbers_for_collisions` (`plan.rs`), `keys_and_tab_order` (`blinzel-ui/src/batch_dialog.rs`), Linux | built | |
-| AC-17 | | open | |
-| AC-18 | `batch_writes_new_files_and_never_replaces` (`blinzel-core/src/batch/run.rs`, Linux); the panic path is untested | built | |
-| AC-19 | partial: `batch_writes_new_files_and_never_replaces` runs with a 1-byte budget (images larger than the budget still finish); the concurrency limit is untested | open | |
+| AC-17 | `taken_or_mismatched_names_get_the_next_free_one` (`blinzel-core/src/batch/run.rs`, Linux) | built | |
+| AC-18 | `unreadable_broken_and_panicking_files_fail_and_the_batch_goes_on`, `batch_writes_new_files_and_never_replaces` (`blinzel-core/src/batch/run.rs`, Linux) | built | |
+| AC-19 | `files_run_in_parallel_within_the_memory_budget` (`blinzel-core/src/batch/run.rs`, Linux; the app runs with `Options::default()`) | built | |
 | AC-20 | `cancelled_batches_skip_the_rest` (`blinzel-core/src/batch/run.rs`), `progress_and_summary` (`blinzel-ui/src/batch_dialog.rs`, Esc cancels), Linux | built | |
 | AC-21 | manual: `blinzel-bench batch` (not run in CI) | open | |
 | AC-22 | `resize_images_opens_a_modal_dialog_that_keeps_its_settings`, `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`), `edits_make_the_job` (`blinzel-ui/src/batch_dialog.rs`), Linux | built | |
@@ -133,4 +135,5 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 
 - 2026-11-02: revised AC-22: the dialog starts with the grid's marks when there are any (decision in `thumbnails.md`).
 - 2026-11-02: `resize_images_opens_a_modal_dialog_that_keeps_its_settings` was green at once: Ctrl+B, the menu, the defaults, the modality and the kept settings already worked; only the start with the grid's marks was new (red first in `resize_images_starts_with_the_marked_files_in_folder_order`).
+- 2026-11-02: the engine tests for AC-08, AC-12, AC-14, AC-17, AC-18 and AC-19 were green at once: the behavior existed and only the tests were missing. Each was run red against a mutation of the code instead (subsampling from quality 91, the modification time without the platform's offset, an absolute folder taken as relative, the planned name kept despite another extension, the decode without `catch_unwind`, the memory budget ignored), then the mutation was reverted.
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's ✅ markers for §7 "Batch processing" were not taken as evidence.

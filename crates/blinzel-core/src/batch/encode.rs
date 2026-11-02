@@ -603,4 +603,26 @@ mod tests {
             }
         }
     }
+
+    /// `docs/specs/batch-resize.md` AC-08.
+    #[test]
+    fn jpeg_keeps_full_chroma_from_quality_90() {
+        use blinzel_jpeg::Subsampling;
+        let (w, h) = (32, 32);
+        let px = gradient(w, h, false);
+        for (jpeg, want) in [
+            (50, Subsampling::S420),
+            (89, Subsampling::S420),
+            (90, Subsampling::S444),
+            (100, Subsampling::S444),
+        ] {
+            let q = Quality {
+                jpeg,
+                ..Default::default()
+            };
+            let file = encode(&px, w, h, Codec::Jpeg, &q, None, None).unwrap();
+            let info = blinzel_jpeg::parse(&file).unwrap();
+            assert_eq!(info.subsampling(), want, "quality {jpeg}");
+        }
+    }
 }

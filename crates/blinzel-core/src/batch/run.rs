@@ -549,4 +549,218 @@ mod tests {
         assert!(!ifd0.iter().any(|e| e.tag == 0x8825), "GPS removed");
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    /// Native decoders that note each decoded size, and that run
+    /// `during` while a decode is in progress.
+    struct Watched<F: Fn() + Sync> {
+        decoded: Mutex<Vec<(u32, u32)>>,
+        during: F,
+    }
+
+    impl<F: Fn() + Sync> Watched<F> {
+        fn new(during: F) -> Self {
+            Watched {
+                decoded: Mutex::new(Vec::new()),
+                during,
+            }
+        }
+    }
+
+    impl<F: Fn() + Sync> Source for Watched<F> {
+        fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
+            decode::probe(data)
+        }
+        fn decode(&self, data: &[u8], req: Request) -> Result<Image, DecodeError> {
+            (self.during)();
+            let img = decode::decode(data, req)?;
+            self.decoded.lock().unwrap().push((img.width, img.height));
+            Ok(img)
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-17.
+    #[test]
+    fn taken_or_mismatched_names_get_the_next_free_one() {
+        let dir = tmp("taken");
+        let a = dir.join("a.png");
+        std::fs::write(&a, source_png()).unwrap();
+        let job = Job {
+            size: Size::Width(30),
+            ..Job::default()
+        };
+        let info = plan::inspect(&a, &Native).unwrap();
+        let planned = plan::targets(&job, &[(&a, &info)]).remove(0).unwrap();
+        assert_eq!(planned, dir.join("resized/a.png"));
+        // Taken between planning and writing.
+        std::fs::create_dir_all(dir.join("resized")).unwrap();
+        std::fs::write(&planned, b"someone else's").unwrap();
+        // Planned as WebP, written as PNG.
+        let webp = dir.join("resized/b.webp");
+        let items = [
+            Item {
+                source: a.clone(),
+                target: Some(planned.clone()),
+            },
+            Item {
+                source: a.clone(),
+                target: Some(webp.clone()),
+            },
+        ];
+        let written = Mutex::new(vec![None; 2]);
+        let sum = run(
+            &job,
+            &items,
+            &Native,
+            &Options {
+                threads: 1,
+                ..Options::default()
+            },
+            &|p| {
+                if let Progress::Done { index, output, .. } = p {
+                    written.lock().unwrap()[index] = Some(output);
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        assert_eq!(sum.done, 2);
+        let written = written.into_inner().unwrap();
+        assert_eq!(written[0], Some(dir.join("resized/a (2).png")));
+        assert_eq!(written[1], Some(dir.join("resized/a (3).png")));
+        assert_eq!(std::fs::read(&planned).unwrap(), b"someone else's");
+        assert!(!webp.exists(), "no file under the wrong extension");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Decodes like [`Native`], except that it panics on `bomb.png`'s
+    /// pixels.
+    struct Bomb;
+
+    impl Source for Bomb {
+        fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
+            decode::probe(data)
+        }
+        fn decode(&self, data: &[u8], req: Request) -> Result<Image, DecodeError> {
+            let img = decode::decode(data, req)?;
+            assert!(img.width != 299, "decoder bug");
+            Ok(img)
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-18.
+    #[test]
+    fn unreadable_broken_and_panicking_files_fail_and_the_batch_goes_on() {
+        let dir = tmp("fail");
+        let a = dir.join("a.png");
+        std::fs::write(&a, source_png()).unwrap();
+        // 299 wide: the source panics on it.
+        let px = vec![200u8; 299 * 10 * 4];
+        let bomb = dir.join("bomb.png");
+        let bomb_data = encode::encode(&px, 299, 10, Codec::Png, &Default::default(), None, None);
+        std::fs::write(&bomb, bomb_data.unwrap()).unwrap();
+        let broken = dir.join("broken.png");
+        std::fs::write(&broken, b"\x89PNG\r\n\x1a\n nothing else").unwrap();
+        let missing = dir.join("missing.png");
+        let files: Vec<Item> = [&bomb, &missing, &broken, &a]
+            .map(|p| p.clone().into())
+            .into();
+        let errors = Mutex::new(vec![None; files.len()]);
+        let sum = run(
+            &Job::default(),
+            &files,
+            &Bomb,
+            &Options {
+                threads: 1,
+                ..Options::default()
+            },
+            &|p| {
+                if let Progress::Failed { index, error, .. } = p {
+                    errors.lock().unwrap()[index] = Some(error);
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        assert_eq!(
+            sum,
+            Summary {
+                done: 1,
+                failed: 3,
+                skipped: 0
+            }
+        );
+        let errors = errors.into_inner().unwrap();
+        assert!(
+            errors[0].as_deref().unwrap().contains("decoder bug"),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1].as_deref().is_some_and(|e| !e.is_empty()),
+            "{errors:?}"
+        );
+        assert!(
+            errors[2].as_deref().is_some_and(|e| !e.is_empty()),
+            "{errors:?}"
+        );
+        assert_eq!(errors[3], None);
+        assert!(dir.join("resized/a.png").exists(), "the batch went on");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The most decodes in progress at once while `files` copies of
+    /// `source_png` run with `opts`; each decode waits until `fill` run
+    /// at once (or a moment passes), then lingers so more could join.
+    fn most_at_once(files: usize, opts: &Options, fill: usize) -> usize {
+        let dir = tmp(&format!("parallel-{}-{}", opts.threads, opts.memory_budget));
+        let a = dir.join("a.png");
+        std::fs::write(&a, source_png()).unwrap();
+        let (now, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        let source = Watched::new(|| {
+            let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+            most.fetch_max(n, Ordering::SeqCst);
+            let t = std::time::Instant::now();
+            while now.load(Ordering::SeqCst) < fill && t.elapsed().as_millis() < 500 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            most.fetch_max(now.load(Ordering::SeqCst), Ordering::SeqCst);
+            now.fetch_sub(1, Ordering::SeqCst);
+        });
+        let items: Vec<Item> = (0..files).map(|_| a.clone().into()).collect();
+        let sum = run(
+            &Job::default(),
+            &items,
+            &source,
+            opts,
+            &|_| {},
+            &AtomicBool::new(false),
+        );
+        assert_eq!(sum.done, files);
+        std::fs::remove_dir_all(&dir).unwrap();
+        most.into_inner()
+    }
+
+    /// `docs/specs/batch-resize.md` AC-19.
+    #[test]
+    fn files_run_in_parallel_within_the_memory_budget() {
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let opts = Options::default();
+        assert_eq!(opts.threads, cores, "one file per hardware thread");
+        assert_eq!(opts.memory_budget, 2 << 30, "2 GiB");
+        // 300 × 200 × 4 bytes per file.
+        let one = 300 * 200 * 4;
+        let ample = |threads| Options {
+            threads,
+            memory_budget: 100 * one,
+        };
+        assert_eq!(most_at_once(6, &ample(3), 3), 3, "as many as threads");
+        let two = Options {
+            threads: 4,
+            memory_budget: 2 * one,
+        };
+        assert_eq!(most_at_once(6, &two, 4), 2, "as many as fit the budget");
+        let tiny = Options {
+            threads: 4,
+            memory_budget: one / 2,
+        };
+        assert_eq!(most_at_once(3, &tiny, 4), 1, "too large: alone");
+    }
 }
