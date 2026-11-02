@@ -69,6 +69,23 @@ fn a_raw_preview_that_covers_the_stage_is_the_stage_and_the_system_decoder_is_no
     assert_eq!(probed_size(&h), (1500, 1000));
 }
 
+/// AC-20: a preview just over 1 % short of the screen box is not the stage.
+#[test]
+fn a_raw_preview_just_over_one_percent_short_shows_first_and_the_system_decoder_is_asked() {
+    // 1600 × 1066 against the 1620 × 1080 the screen box needs: 1.2 % and
+    // 1.3 % short.
+    let mut h = with_raw("a.raf", (1600, 1066));
+    h.open("a.raf");
+    let id = current_id(&h);
+    assert!(h.app.has_stage(id, Stage::Preview));
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert_eq!(
+        h.decodes(),
+        [((6240, 4160), 2)],
+        "the system decoder is asked"
+    );
+}
+
 /// AC-20: a smaller raw preview shows first, then the system decoder
 /// develops the image and says how large it is.
 #[test]
