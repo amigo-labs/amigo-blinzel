@@ -6,7 +6,7 @@
 //! 1. Ed25519 signature of `SHA256SUMS` with our own release key,
 //! 2. SHA-256 of the executable against `SHA256SUMS`.
 //!
-//! Releases carry no Authenticode signature (docs/PLAN.md, section 10), so
+//! Releases carry no Authenticode signature (docs/specs/blinzel.md, section 10), so
 //! the release key is the only proof of origin.
 //!
 //! A new version that fails to reach its first frame three times is

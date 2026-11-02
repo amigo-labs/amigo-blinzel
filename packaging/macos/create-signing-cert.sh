@@ -3,7 +3,7 @@
 # as the GitHub secrets MACOS_SIGNING_CERT (the .p12, base64) and
 # MACOS_SIGNING_CERT_PASSWORD. Release workflows import it and sign with
 # it: not trusted by Gatekeeper, but a stable identity, so macOS keeps
-# permissions such as Screen Recording across updates (docs/PLAN.md,
+# permissions such as Screen Recording across updates (docs/specs/blinzel.md,
 # section 10). One certificate serves every app; create it once. A new one
 # makes every Mac ask for those permissions again.
 #

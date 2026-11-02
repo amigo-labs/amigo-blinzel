@@ -6,11 +6,11 @@ name: Release
 # tag's GitHub release, which is then published. release-please.yml calls
 # this after a release PR is merged (it creates the tag and the draft
 # release); by hand, run it for an existing tag.
-# Nothing carries a code signing certificate from a CA (docs/PLAN.md,
+# Nothing carries a code signing certificate from a CA (docs/specs/blinzel.md,
 # section 10): no Authenticode; the Mac app is signed with our own
 # self-signed certificate (ad hoc without it) and not notarized.
 #
-# Needed (docs/PLAN.md, section 14):
+# Needed (docs/SECRETS.md):
 #   secret   RELEASE_SIGNING_KEY          Ed25519 seed (blinzel-release keygen)
 # Optional:
 #   secret   MACOS_SIGNING_CERT           self-signed code signing .p12, base64
