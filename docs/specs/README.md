@@ -15,7 +15,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 3 | [startup](startup.md) | 8 / 14 | 6 | 3 | the first CI runs of AC-04 (Windows `first_frame.rs`), AC-07 (Windows `window.rs`, `run.rs`), AC-14 (Windows `bench.rs`) and the Windows half of AC-01 (`tests/startup.rs`); the manual checks AC-06 (visual), AC-08 (module-load trace), AC-12 (measurement); then `/spec-check` |
 | 4 | [browsing](browsing.md) | 20 / 21 | 4 | 1 | the first CI runs of AC-13 (Windows `gfx/device.rs`, macOS `metal_golden.rs`), AC-15 (Windows `instance.rs`) and AC-18 (Windows `run.rs`, `platform/threads.rs`); the manual check AC-21 (measurement); then `/spec-check` |
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
-| 6 | [image-formats](image-formats.md) | 21 / 24 | 4 | 0 | `/spec-build` for AC-23 (macOS, `macos/imageio.rs`); the first Windows CI run of AC-21, AC-22 (`wic.rs`, written); then `/spec-check` |
+| 6 | [image-formats](image-formats.md) | 21 / 24 | 4 | 0 | the first Windows CI run of AC-21, AC-22 (`wic.rs`) and macOS CI run of AC-23 (`macos/imageio.rs`), all written; then `/spec-check` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
 | 8 | [animations](animations.md) | 13 / 14 | 0 | 1 | the manual check AC-14 (playback smoothness); then `/spec-check` |
 | 9 | [color-management](color-management.md) | 10 / 19 | 3 | 2 | `/spec-build` |
