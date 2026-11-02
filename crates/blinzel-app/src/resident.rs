@@ -133,6 +133,17 @@ pub fn on_taskbar_created(hwnd: HWND) {
     }
 }
 
+/// Resident mode on or off, at once: the tray icon and the sign-in entry
+/// (`sign_in`: [`set_autostart`]; a test passes its own).
+pub fn set_resident(hwnd: HWND, on: bool, sign_in: impl FnOnce(bool)) {
+    sign_in(on);
+    if on {
+        add_tray(hwnd);
+    } else {
+        remove_tray(hwnd);
+    }
+}
+
 /// A tray icon event (NOTIFYICON_VERSION_4: the event in the low word of
 /// `lp`, the anchor point in `wp`).
 pub fn on_tray(wp: WPARAM, lp: LPARAM) -> Option<Action> {
@@ -178,6 +189,19 @@ pub fn refresh_autostart() {
 mod tests {
     use super::*;
     use windows::Win32::UI::WindowsAndMessaging::WM_MOUSEMOVE;
+
+    /// `docs/specs/resident-mode.md` AC-02 (the Windows shell): turning
+    /// resident mode on adds the tray icon and writes the sign-in entry,
+    /// off removes both (the entry here is a fake, never the real value).
+    #[test]
+    fn toggling_resident_mode_adds_or_removes_the_icon_and_the_sign_in_entry() {
+        let mut sign_in = vec![];
+        set_resident(HWND::default(), true, |on| sign_in.push(on));
+        assert!(TRAY_SHOWN.load(Ordering::Relaxed), "icon shown");
+        set_resident(HWND::default(), false, |on| sign_in.push(on));
+        assert!(!TRAY_SHOWN.load(Ordering::Relaxed), "icon removed");
+        assert_eq!(sign_in, [true, false]);
+    }
 
     /// `docs/specs/resident-mode.md` AC-13: the icon has the app name as
     /// tooltip and reports to `WM_TRAY` in the version 4 format; a click,

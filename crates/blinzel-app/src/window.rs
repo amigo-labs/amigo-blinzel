@@ -831,12 +831,7 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::SetResident(on) => {
-            resident::set_autostart(on);
-            if on {
-                resident::add_tray(hwnd);
-            } else {
-                resident::remove_tray(hwnd);
-            }
+            resident::set_resident(hwnd, on, resident::set_autostart);
             vec![]
         }
         Action::TrayMenu { x, y } => match menu::show_tray(hwnd, x, y) {
