@@ -150,6 +150,8 @@ pub(crate) struct FakeCanvas {
     pub frame: Frame,
     /// Frames presented so far.
     pub presented: usize,
+    /// Every thumbnail uploaded to the atlas, in order.
+    pub thumb_planes: Vec<blinzel_core::thumb::Planes>,
 }
 
 impl AtlasPages for FakeCanvas {
@@ -162,8 +164,9 @@ impl AtlasPages for FakeCanvas {
         _: (u32, u32),
         _: (u32, u32),
         _: (u32, u32),
-        _: &blinzel_core::thumb::Planes,
+        planes: &blinzel_core::thumb::Planes,
     ) {
+        self.thumb_planes.push(planes.clone());
     }
 }
 

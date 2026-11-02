@@ -605,3 +605,37 @@ fn an_evicted_thumbnail_is_asked_for_again_when_it_is_needed() {
             .any(|r| cell.contains((r.x + 1.0, r.y + 1.0)))
     );
 }
+
+#[test]
+fn transparent_thumbnails_are_composited_over_the_background_colour() {
+    // AC-11: a fully transparent PNG over a white (not the default) background.
+    let settings = Settings {
+        background: [255, 255, 255],
+        ..Settings::default()
+    };
+    let mut h = Harness::with_settings(settings.clone());
+    let clear = vec![0u8; 64 * 48 * 4];
+    let png = blinzel_core::export::encode_png_bgra(&clear, 64, 48).unwrap();
+    h.write_file("a.png", &png);
+    let white = |h: &Harness| {
+        let planes = &h.app.canvas.thumb_planes;
+        assert_eq!(planes.len(), 1);
+        let p = &planes[0];
+        assert!(p.y.iter().all(|&y| y == 255), "Y of white: {:?}", &p.y[..4]);
+        assert!(p.cbcr.iter().all(|&c| c == 128), "no colour");
+    };
+    h.open("a.png");
+    h.key(Letter('G'));
+    settle(&mut h, 1, 1);
+    white(&h);
+    // Next session, the same background: the same from the cache.
+    let config = h.settings_file();
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, settings.to_text()).unwrap();
+    h.restart();
+    h.open("a.png");
+    h.key(Letter('G'));
+    h.wait_for(|h| h.frame().thumbs.len() == 1);
+    assert_eq!(h.thumb_reads(), [] as [PathBuf; 0]);
+    white(&h);
+}
