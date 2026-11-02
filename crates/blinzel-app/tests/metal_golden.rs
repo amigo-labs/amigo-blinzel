@@ -23,6 +23,7 @@ use blinzel_core::pixel::Image;
 use blinzel_core::testimg;
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
+use objc2_metal::MTLDevice;
 
 const BG: [u8; 3] = [30, 40, 50];
 
@@ -375,4 +376,17 @@ fn colour_transform_lut() {
             },
         );
     }
+}
+
+/// `docs/specs/browsing.md` AC-13: the texture budget is a third of what
+/// Metal recommends for the GPU's working set.
+#[test]
+fn the_texture_budget_is_a_third_of_the_working_set() {
+    let Some(gpu) = setup() else { return };
+    let working_set = gpu.device.recommendedMaxWorkingSetSize();
+    assert!(working_set > 0);
+    assert_eq!(
+        MetalDevice::new(gpu).texture_budget() as u64,
+        working_set / 3
+    );
 }
