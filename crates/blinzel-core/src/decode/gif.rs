@@ -25,7 +25,12 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
     let mut opts = gif::DecodeOptions::new();
     opts.set_color_output(gif::ColorOutput::RGBA);
     let mut dec = opts.read_info(data).map_err(err)?;
-    let (w, h) = (dec.width() as usize, dec.height() as usize);
+    // A 0 × 0 screen takes the first frame's extent, as the still does.
+    let (w, h) = match (dec.width(), dec.height()) {
+        (0, _) | (_, 0) => header_size(data)?,
+        (w, h) => (w as u32, h as u32),
+    };
+    let (w, h) = (w as usize, h as usize);
     check_size(w as u64, h as u64)?;
     let mut canvas = vec![0u8; w * h * 4];
     let mut count = 0;
@@ -107,7 +112,7 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
 }
 
 /// Logical screen size from the header; a 0 × 0 screen takes the first
-/// frame's extent, as [`decode`] does.
+/// frame's extent, as [`decode`] and [`stream_animation`] do.
 pub fn header_size(d: &[u8]) -> Result<(u32, u32)> {
     if d.len() < 10 {
         return Err(DecodeError::Corrupt("GIF header truncated".into()));
@@ -354,5 +359,37 @@ mod tests {
         let img = crate::decode::decode(&data, crate::decode::Request::Full).unwrap();
         assert_eq!((img.width, img.height), (4, 3));
         assert_eq!(img.to_bgra()[3], 0);
+    }
+
+    /// An animation on a 0 × 0 logical screen plays at the first frame's
+    /// extent too, instead of failing as zero-sized
+    /// (docs/specs/animations.md, edge cases).
+    #[test]
+    fn zero_screen_animations_take_the_first_frame_extent() {
+        let mut data = Vec::new();
+        {
+            let palette = [255, 0, 0, 0, 255, 0];
+            let mut enc = gif::Encoder::new(&mut data, 0, 0, &palette).unwrap();
+            for colour in [0u8, 1] {
+                let f = gif::Frame {
+                    left: 1,
+                    top: 1,
+                    width: 3,
+                    height: 2,
+                    delay: 5,
+                    buffer: std::borrow::Cow::Owned(vec![colour; 6]),
+                    ..Default::default()
+                };
+                enc.write_frame(&f).unwrap();
+            }
+        }
+        let anim = decode_animation(&data, usize::MAX).unwrap().unwrap();
+        assert_eq!(anim.frames.len(), 2);
+        let f = &anim.frames[1];
+        assert_eq!((f.image.width, f.image.height), (4, 3));
+        let b = f.image.to_bgra();
+        let at = |x: usize, y: usize| &b[(y * 4 + x) * 4..][..4];
+        assert_eq!(at(0, 0)[3], 0, "outside the frame");
+        assert_eq!(at(3, 2), [0, 255, 0, 255], "the second frame's green");
     }
 }

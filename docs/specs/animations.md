@@ -62,7 +62,7 @@ This spec records what the code does today (reverse engineered on 2026-11-02).
 | -------- | ----------------- |
 | GIF without a NETSCAPE extension | Plays once, then holds the last frame |
 | GIF frame extending beyond the logical screen | Clipped to the canvas |
-| GIF with a 0 × 0 logical screen | The still shows (its size comes from the first frame); the animation stage fails before any frame, so it stays a still |
+| GIF with a 0 × 0 logical screen | Still and animation take the first frame's extent as the canvas (`zero_screen_takes_the_frame_extent`, `zero_screen_animations_take_the_first_frame_extent` in `crates/blinzel-core/src/decode/gif.rs`) |
 | JPEG XL with an animation header but ticks per second 0, or a single keyframe | Shown as a still |
 | User leaves the image while its animation decodes | The job is cancelled; nothing is delivered; the next image is unaffected |
 | A delivery that says "still" after frames were already shown | The frames shown so far keep playing |
