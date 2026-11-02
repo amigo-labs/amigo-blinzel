@@ -96,8 +96,8 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 | AC-15 | `an_unknown_subcommand_prints_the_usage_and_exits_2`, `batch_with_an_unknown_format_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-16 | `.github/workflows/ci.yml`, job `windows`, steps `Generate corpus` … `upload-artifact` | built | |
 | AC-17 | CI step `App benchmark (offscreen, WARP)` (Windows job, fails on a non-zero exit) | built | |
-| AC-18 | — (the CI step prints the report but asserts no fields) | open | |
-| AC-19 | — | open | |
+| AC-18 | `the_report_holds_every_measurement` (`crates/blinzel-app/src/bench.rs`), CI: Windows — written, not run yet | open | |
+| AC-19 | `the_report_holds_every_measurement` (a file that does not probe), `a_failing_step_ends_the_run_with_exit_code_1`, `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`), CI: Windows — written, not run yet | open | |
 
 ## Decisions
 
@@ -108,3 +108,4 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 - 2026-11-02: Every result prints the same line (`line`: group, candidate, file, median, minimum, MP/s or "-" without pixels), as AC-03 says; `natsort`, `alloc-96mb` and `simd` used to print shorter lines without file, minimum or rate. The `simd` lines append the factor against the lowest level (`  2.00x vs none`).
 - 2026-11-02: The `run` test runs the real binary on a small folder (a 2880 × 1620 JPEG named `jpeg-24mp-420.jpg` so the `simd` group runs, a PNG, the AVIF and HEIC fixtures of `blinzel-core`, a broken AVIF). It takes about 75 s in a test build, mostly the own kernels on the 12 MP image AC-10 asks for, because workspace crates are not optimized in the test profile. The JSON machine fields and the result layout are checked exactly by a unit test on `json(host, results)`.
 - 2026-11-02: `compare`, `jpeg-ab`, `thumbs`, `resize` and `batch` keep their measuring code; what decides the output moved into small functions with unit tests (`table`, `ab_args`, `alternate`, `ab_line`, `options` in `thumbs.rs` and `batch.rs`, `cases`, `max_diff`, `runs`), and `tests/cli.rs` runs each command once on small input (`thumbs --count 2`, `batch --edge 64`, `resize --quick --runs 1`). `TMPDIR` points the cache and the batch outputs at the test's folder, so the tests see them deleted. `jpeg-ab` with 0 rounds now says "rounds must be at least 1" instead of panicking.
+- 2026-11-02: AC-18, AC-19: `blinzel.exe --bench` is Windows only, so its tests in `crates/blinzel-app/src/bench.rs` run only in the Windows CI job (`cargo test --workspace --release`, WARP). They were type-checked and clippy-checked here for `x86_64-pc-windows-msvc`, not run; their first Windows CI run is the proof. The folder holds two PNGs (written with the `png` crate, so the test does not need the `turbojpeg` feature) and a broken file named to sort last: the thumbnail grid uses the folder's first image, so a first file that does not probe would end the run. The "bench failed: …" text is `failed(e)`, because a unit test cannot read the process's stderr; a step that fails is the listing of a missing folder.

@@ -43,10 +43,15 @@ pub fn run(dir: &Path, warp: bool, json: Option<&Path>) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("bench failed: {e}");
+            eprintln!("{}", failed(&e));
             1
         }
     }
+}
+
+/// The message of a run that failed.
+fn failed(e: &str) -> String {
+    format!("bench failed: {e}")
 }
 
 fn bench(dir: &Path, warp: bool) -> Result<String, String> {
@@ -339,7 +344,89 @@ fn thumb_grid(
 
 #[cfg(test)]
 mod tests {
-    use super::{bench, run};
+    use super::{bench, failed, run};
+
+    /// A fresh folder under the system temp directory.
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("blinzel-bench-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut enc = png::Encoder::new(&mut out, w, h);
+        enc.set_color(png::ColorType::Rgb);
+        let mut wr = enc.write_header().unwrap();
+        wr.write_image_data(&blinzel_core::testimg::rgb(w, h))
+            .unwrap();
+        wr.finish().unwrap();
+        out
+    }
+
+    /// `docs/specs/benchmark-gate.md` AC-18, AC-19: the report holds every
+    /// file's timings on a 2560 × 1440 target, navigation, listing and the
+    /// thumbnail grid; a file that does not probe is listed with its error
+    /// and the run goes on.
+    #[test]
+    fn the_report_holds_every_measurement() {
+        let dir = temp("report");
+        std::fs::write(dir.join("a.png"), png(640, 480)).unwrap();
+        std::fs::write(dir.join("b.png"), png(320, 240)).unwrap();
+        std::fs::write(dir.join("z-broken.png"), b"not a png").unwrap();
+        let report = bench(&dir, true).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(report.contains("\"screen\": [2560, 1440]"), "{report}");
+        for (file, full) in [("a.png", "[640, 480]"), ("b.png", "[320, 240]")] {
+            let line = report
+                .lines()
+                .find(|l| l.contains(&format!("\"file\": \"{file}\"")))
+                .unwrap_or_else(|| panic!("no {file}: {report}"));
+            assert!(
+                line.contains(&format!("\"full\": {full}, \"stage\": [")),
+                "{line}"
+            );
+            for key in [
+                "read_ms",
+                "probe_ms",
+                "decode_ms",
+                "upload_ms",
+                "render_ms",
+                "total_ms",
+            ] {
+                assert!(line.contains(&format!("\"{key}\": ")), "{key}: {line}");
+            }
+        }
+        let broken = report
+            .lines()
+            .find(|l| l.contains("\"file\": \"z-broken.png\""))
+            .unwrap_or_else(|| panic!("no z-broken.png: {report}"));
+        assert!(broken.contains("\"error\": \""), "{broken}");
+        // Twice the file count, at least 8 presses.
+        assert!(
+            report.contains("\"navigation\": {\"presses\": 8, \"prefetch_hits\": "),
+            "{report}"
+        );
+        assert!(report.contains(", \"latency\": {\"min_ms\": "), "{report}");
+        for key in ["list_10k", "thumb_grid_200"] {
+            let line = report
+                .lines()
+                .find(|l| l.contains(&format!("\"{key}\": {{\"min_ms\": ")))
+                .unwrap_or_else(|| panic!("no {key}: {report}"));
+            assert!(line.contains("\"n\": 5}"), "{line}");
+        }
+    }
+
+    /// AC-19: a step that fails (here listing the folder) ends the run with
+    /// "bench failed: …" and exit code 1.
+    #[test]
+    fn a_failing_step_ends_the_run_with_exit_code_1() {
+        let dir = temp("missing").join("missing");
+        assert!(bench(&dir, true).is_err());
+        assert_eq!(run(&dir, true, None), 1);
+        assert_eq!(failed("no images in x"), "bench failed: no images in x");
+    }
 
     /// `docs/specs/startup.md` AC-14: a folder without images fails with
     /// "no images in <dir>" and exit code 1 (WARP, so it runs on any
