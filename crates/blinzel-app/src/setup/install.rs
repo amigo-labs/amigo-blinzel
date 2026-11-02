@@ -239,6 +239,15 @@ pub fn autostart(layout: &Layout) -> Option<String> {
     registry::get_str(&layout.run, PRODUCT)
 }
 
+/// Points the sign-in value at `exe` when it names another executable
+/// (moved or reinstalled); `true` if it was rewritten.
+pub fn refresh_autostart(layout: &Layout, exe: &Path) -> Result<bool, String> {
+    if autostart(layout).as_deref() == Some(&autostart_command(exe)) {
+        return Ok(false);
+    }
+    set_autostart(layout, Some(exe)).map(|()| true)
+}
+
 fn notify_associations_changed() {
     use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
     unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };

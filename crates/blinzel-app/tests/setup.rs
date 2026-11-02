@@ -47,7 +47,19 @@ fn installs_updates_and_uninstalls_in_a_sandbox() {
     );
     install::set_autostart(&layout, None).unwrap();
     assert_eq!(install::autostart(&layout), None);
-    install::set_autostart(&layout, Some(&layout.exe())).unwrap();
+    // resident-mode.md AC-16: a value left by a moved or reinstalled copy
+    // is rewritten to the running executable, a current one left alone.
+    let moved = root.join("old").join("blinzel.exe");
+    install::set_autostart(&layout, Some(&moved)).unwrap();
+    assert_eq!(install::refresh_autostart(&layout, &layout.exe()), Ok(true));
+    assert_eq!(
+        install::autostart(&layout),
+        Some(install::autostart_command(&layout.exe()))
+    );
+    assert_eq!(
+        install::refresh_autostart(&layout, &layout.exe()),
+        Ok(false)
+    );
 
     install::uninstall(&layout).unwrap();
     assert!(!layout.dir.exists());

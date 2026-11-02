@@ -169,8 +169,8 @@ pub fn refresh_autostart() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    if install::autostart(&layout).as_deref() != Some(&install::autostart_command(&exe)) {
-        set_autostart(true);
+    if let Err(e) = install::refresh_autostart(&layout, &exe) {
+        debug_log(&format!("autostart: {e}"));
     }
 }
 

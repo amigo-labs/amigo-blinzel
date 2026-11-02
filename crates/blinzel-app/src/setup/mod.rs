@@ -70,7 +70,7 @@ pub fn run(mode: Mode) -> i32 {
         }
         Mode::Uninstall { silent } => uninstall(&layout, &exe, silent),
         Mode::UninstallFromTemp { silent, parent } => {
-            wait_for_exit(parent);
+            wait_for_exit(parent, QUIT_WAIT_MS);
             stop_running_instance();
             let r = install::uninstall(&layout);
             if let Err(e) = &r
@@ -122,20 +122,29 @@ fn uninstall(layout: &Layout, exe: &Path, silent: bool) -> i32 {
     }
 }
 
+/// How long the uninstaller waits for each instance it asked to quit.
+const QUIT_WAIT_MS: u32 = 30_000;
+
 /// A resident instance keeps the executable open: ask it to exit first.
 fn stop_running_instance() {
-    for pid in crate::instance::quit_all() {
-        wait_for_exit(pid);
+    stop_instances(crate::instance::quit_all, wait_for_exit);
+}
+
+/// Asks every running instance to quit (`quit_all`), then waits for each
+/// in turn, up to [`QUIT_WAIT_MS`] (`docs/specs/resident-mode.md` AC-16).
+fn stop_instances(quit_all: impl FnOnce() -> Vec<u32>, mut wait: impl FnMut(u32, u32)) {
+    for pid in quit_all() {
+        wait(pid, QUIT_WAIT_MS);
     }
 }
 
-fn wait_for_exit(pid: u32) {
+fn wait_for_exit(pid: u32, ms: u32) {
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
     };
     unsafe {
         if let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
-            let _ = WaitForSingleObject(h, 30_000);
+            let _ = WaitForSingleObject(h, ms);
             let _ = windows::Win32::Foundation::CloseHandle(h);
         }
     }
@@ -183,6 +192,15 @@ mod tests {
             blinzel_i18n::tr_in(blinzel_i18n::FALLBACK, Msg::ErrorOs),
             "amigo-blinzel requires Windows 11 version 24H2 or newer."
         );
+    }
+
+    /// `docs/specs/resident-mode.md` AC-16: before uninstalling, every
+    /// running instance is asked to quit, then each is awaited for 30 s.
+    #[test]
+    fn uninstalling_asks_every_instance_to_quit_and_waits_30_s_each() {
+        let mut waited = vec![];
+        stop_instances(|| vec![7, 9], |pid, ms| waited.push((pid, ms)));
+        assert_eq!(waited, [(7, 30_000), (9, 30_000)]);
     }
 
     fn args(a: &[&str]) -> Vec<String> {
