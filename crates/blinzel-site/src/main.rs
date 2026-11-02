@@ -612,6 +612,172 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
+    /// Four viewers: one with a name to escape and an unmeasured cold
+    /// start, one fastest everywhere, one with no key presses, one with no
+    /// next image and no burst at all; plus a machine key the site does not
+    /// know.
+    const REPORT: &str = r#"{
+      "machine": {"cpu": "Test CPU", "logical_cpus": "16", "ram_gb": "32", "gpu": "Test GPU",
+        "monitor": "1920x1080", "monitors": "2", "os_build": "26100", "os": "Windows 11", "disk": "NVMe"},
+      "viewers": [
+        {"name": "A<&\"b>", "version": "1.0", "open_warm": {"median_ms": 1800.0, "p95_ms": 1900.0},
+         "open_cold": null, "next": {"median_ms": 40.0, "p95_ms": 55.0},
+         "burst": {"presses": 20, "shown": {"median_ms": 10.0, "p95_ms": 10.0}}},
+        {"name": "Fast", "version": "2.0", "open_warm": {"median_ms": 80.0, "p95_ms": 95.0},
+         "open_cold": {"median_ms": 300.0, "p95_ms": 320.0}, "next": {"median_ms": 9.4, "p95_ms": 12.0},
+         "burst": {"presses": 20, "shown": {"median_ms": 20.0, "p95_ms": 20.0}}},
+        {"name": "Mid", "version": "3.0", "open_warm": {"median_ms": 500.0, "p95_ms": 600.0},
+         "open_cold": null, "next": {"median_ms": 20.0, "p95_ms": 30.0},
+         "burst": {"presses": 0, "shown": {"median_ms": 0.0, "p95_ms": 0.0}}},
+        {"name": "NoBurst", "version": "4.0", "open_warm": {"median_ms": 2500.0, "p95_ms": 2600.0},
+         "open_cold": null, "next": null}
+      ]}"#;
+
+    fn report_chart(kind: &str, lang: Lang) -> String {
+        let race = Json::parse(REPORT).unwrap();
+        charts::race(kind, &race, "/race.json", |k| lang.t(k)).unwrap()
+    }
+
+    /// The viewer names in the order a chart lists them.
+    fn order(svg: &str) -> Vec<&str> {
+        svg.split("class=\"label\">")
+            .skip(1)
+            .map(|s| s.split('<').next().unwrap())
+            .collect()
+    }
+
+    /// Time charts list the fastest first, without the viewers that have no
+    /// value; 1000 ms and more read as seconds in the page's language.
+    #[test]
+    fn time_charts_list_the_fastest_first() {
+        let warm = report_chart("open_warm", Lang::De);
+        assert_eq!(
+            order(&warm),
+            ["Fast", "Mid", "A&lt;&amp;&quot;b&gt;", "NoBurst"]
+        );
+        assert!(!warm.contains("A<&"), "unescaped name");
+        for text in ["80 ms", "500 ms", "1,80 s", "2,50 s"] {
+            assert!(warm.contains(&format!(">{text}</text>")), "{text}: {warm}");
+        }
+        let warm = report_chart("open_warm", Lang::En);
+        assert!(warm.contains(">1.80 s</text>") && warm.contains(">2.50 s</text>"));
+        assert_eq!(order(&report_chart("open_cold", Lang::En)), ["Fast"]);
+        let next = report_chart("next", Lang::En);
+        assert_eq!(order(&next), ["Fast", "Mid", "A&lt;&amp;&quot;b&gt;"]);
+        assert!(next.contains(">9 ms</text>"), "{next}");
+    }
+
+    /// The key-repeat chart lists the highest share of images shown first,
+    /// without viewers that have no key presses.
+    #[test]
+    fn burst_chart_lists_the_highest_share_first() {
+        let burst = report_chart("burst", Lang::En);
+        assert_eq!(order(&burst), ["Fast", "A&lt;&amp;&quot;b&gt;"]);
+        assert!(burst.contains(">20 / 20</text>") && burst.contains(">10 / 20</text>"));
+    }
+
+    /// Every bar looks the same: no viewer gets a class, colour or style of
+    /// its own.
+    #[test]
+    fn charts_highlight_no_viewer() {
+        for kind in ["open_warm", "open_cold", "next", "burst"] {
+            let svg = report_chart(kind, Lang::En);
+            let rows = svg.matches("<g class=\"row\">").count();
+            assert_eq!(svg.matches("<g ").count(), rows, "{kind}");
+            assert_eq!(svg.matches("class=\"bar\"").count(), rows, "{kind}");
+            assert_eq!(svg.matches("class=\"track\"").count(), rows, "{kind}");
+            assert!(!svg.contains("style=") && !svg.contains("fill="), "{kind}");
+            for class in svg.split("class=\"").skip(1) {
+                let class = class.split('"').next().unwrap();
+                assert!(
+                    [
+                        "chart-card",
+                        "chart",
+                        "row",
+                        "label",
+                        "value",
+                        "track",
+                        "bar"
+                    ]
+                    .contains(&class),
+                    "{kind}: class {class}"
+                );
+            }
+        }
+    }
+
+    /// A metric no viewer has reads "Nicht gemessen." / "Not measured.".
+    #[test]
+    fn charts_without_values_read_not_measured() {
+        let race = Json::parse(
+            r#"{"machine": {}, "viewers": [{"name": "X", "version": "1", "open_warm": null,
+                "open_cold": null, "next": null, "burst": {"presses": 0}}]}"#,
+        )
+        .unwrap();
+        for (lang, text) in [(Lang::De, "Nicht gemessen."), (Lang::En, "Not measured.")] {
+            for kind in ["open_warm", "open_cold", "next", "burst"] {
+                let html = charts::race(kind, &race, "/race.json", |k| lang.t(k)).unwrap();
+                assert_eq!(html, format!("<p class=\"pending\">{text}</p>"), "{kind}");
+            }
+        }
+        assert!(report_chart("open_warm", Lang::En).contains("<svg"));
+    }
+
+    /// The table lists every viewer in the report with its version and
+    /// median (p95) for open warm, open cold and next image, and links the
+    /// raw report.
+    #[test]
+    fn table_lists_every_viewer_with_median_and_p95() {
+        let table = report_chart("table", Lang::De);
+        let head = "<tr><th>Viewer</th><th>Version</th><th>Öffnen (warm)</th><th>Öffnen (kalt)</th><th>Nächstes Bild</th></tr>";
+        assert!(table.contains(head), "{table}");
+        for row in [
+            "<tr><td>A&lt;&amp;&quot;b&gt;</td><td>1.0</td><td>1,80 s (1,90 s)</td><td>–</td><td>40 ms (55 ms)</td></tr>",
+            "<tr><td>Fast</td><td>2.0</td><td>80 ms (95 ms)</td><td>300 ms (320 ms)</td><td>9 ms (12 ms)</td></tr>",
+            "<tr><td>Mid</td><td>3.0</td><td>500 ms (600 ms)</td><td>–</td><td>20 ms (30 ms)</td></tr>",
+            "<tr><td>NoBurst</td><td>4.0</td><td>2,50 s (2,60 s)</td><td>–</td><td>–</td></tr>",
+        ] {
+            assert!(table.contains(row), "{row}");
+        }
+        assert_eq!(table.matches("<tr><td>").count(), 4);
+        assert!(table.contains("Median (p95) · <a href=\"/race.json\">Rohdaten (JSON)</a>"));
+        let en = report_chart("table", Lang::En);
+        assert!(en.contains("<a href=\"/race.json\">Raw data (JSON)</a>"));
+        assert!(en.contains("<td>1.80 s (1.90 s)</td>"));
+    }
+
+    /// Every machine entry, labelled in the page language where the key is
+    /// known and with the raw key otherwise.
+    #[test]
+    fn machine_block_labels_every_entry() {
+        let labels = [
+            ("cpu", "Prozessor", "Processor"),
+            ("logical_cpus", "Logische Kerne", "Logical cores"),
+            ("ram_gb", "Arbeitsspeicher (GB)", "Memory (GB)"),
+            ("gpu", "Grafik", "Graphics"),
+            ("monitor", "Hauptmonitor", "Main monitor"),
+            ("monitors", "Monitore", "Monitors"),
+            ("os_build", "Windows-Build", "Windows build"),
+            ("os", "Betriebssystem", "Operating system"),
+            ("disk", "disk", "disk"),
+        ];
+        let race = Json::parse(REPORT).unwrap();
+        let Some(Json::Obj(machine)) = race.get("machine") else {
+            panic!("no machine");
+        };
+        for lang in Lang::ALL {
+            let html = report_chart("machine", lang);
+            assert_eq!(html.matches("<dt>").count(), machine.len());
+            for (key, value) in machine {
+                let value = value.as_str().unwrap();
+                let (_, de, en) = labels.iter().find(|l| l.0 == key).unwrap();
+                let label = if lang == Lang::De { de } else { en };
+                let item = format!("<div><dt>{label}</dt><dd>{value}</dd></div>");
+                assert!(html.contains(&item), "{}: {item}", lang.code());
+            }
+        }
+    }
+
     fn copy_dir(from: &Path, to: &Path) {
         fs::create_dir_all(to).unwrap();
         for e in fs::read_dir(from).unwrap() {
