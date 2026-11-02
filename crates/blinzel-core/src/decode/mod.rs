@@ -664,6 +664,11 @@ mod tests {
             check_size(1 << 20, 1 << 20),
             Err(DecodeError::TooLarge { .. })
         ));
+        // Exactly at the limit: 2^30 pixels are fine, one more is too many.
+        assert!(check_size(1 << 15, 1 << 15).is_ok());
+        assert!(
+            check_size((1 << 30) + 1, 1).is_err_and(|e| matches!(e, DecodeError::TooLarge { .. }))
+        );
     }
 
     /// A 1600 × 1200 4:2:0 baseline JPEG of the test pattern.

@@ -108,7 +108,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
 | AC-01 | `detects_formats` (`crates/blinzel-core/src/format.rs`; a 17-byte `BM…` is unknown, 18 bytes BMP), CI: Linux | built | |
-| AC-02 | `unknown_formats_are_unsupported`, `panics_are_contained`, `size_limits` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
+| AC-02 | `unknown_formats_are_unsupported`, `panics_are_contained`, `size_limits` (`crates/blinzel-core/src/decode/mod.rs`; `size_limits` checks the boundary: 2^30 pixels are fine, 2^30 + 1 too large), CI: Linux | built | |
 | AC-03 | `other_formats_and_raw_pixels_go_to_the_platform` (`crates/blinzel-core/src/decode/mod.rs`), `tiff_raws_list_their_jpegs` (`crates/blinzel-core/src/raw.rs`), CI: Linux | built | |
 | AC-04 | `planar_decode_matches_packed`, `dct_scaling_picks_smallest_sufficient_size`, `region_equals_crop_of_full_decode`, `gray_progressive_and_restart` (`crates/blinzel-core/src/decode/jpeg.rs`), CI: Linux | built | |
 | AC-05 | `truncated_files_still_decode_or_fail_cleanly` (`crates/blinzel-core/src/decode/jpeg.rs`), CI: Linux | built | |
