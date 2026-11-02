@@ -408,7 +408,10 @@ fn thumbs_and_batch_measure_the_photo_corpus() {
     let with_tmp = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_blinzel-bench"))
             .args(args)
+            // `std::env::temp_dir` reads TMPDIR on Unix, TMP then TEMP on Windows.
             .env("TMPDIR", &tmp)
+            .env("TMP", &tmp)
+            .env("TEMP", &tmp)
             .output()
             .unwrap()
     };
