@@ -282,23 +282,20 @@ pub fn machine(cap: &crate::capture::Capture) -> Vec<(&'static str, String)> {
         let _ = GlobalMemoryStatusEx(&mut mem);
     }
     let (l, t, r, b) = cap.monitor;
-    vec![
-        ("cpu", blinzel_core::kernels::cpu_name()),
-        (
-            "logical_cpus",
+    crate::report::machine(
+        crate::report::MACHINE_WINDOWS,
+        [
+            blinzel_core::kernels::cpu_name(),
             std::thread::available_parallelism()
                 .map_or(0, |n| n.get())
                 .to_string(),
-        ),
-        (
-            "ram_gb",
             format!("{:.0}", mem.ullTotalPhys as f64 / (1u64 << 30) as f64),
-        ),
-        ("gpu", cap.adapter.clone()),
-        ("monitor", format!("{}x{}", r - l, b - t)),
-        ("monitors", cap.monitors.to_string()),
-        ("os_build", os_build().to_string()),
-    ]
+            cap.adapter.clone(),
+            format!("{}x{}", r - l, b - t),
+            cap.monitors.to_string(),
+            os_build().to_string(),
+        ],
+    )
 }
 
 fn os_build() -> u32 {

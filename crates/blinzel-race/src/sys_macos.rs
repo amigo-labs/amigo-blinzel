@@ -275,33 +275,24 @@ pub fn machine(cap: &crate::capture::Capture) -> Vec<(&'static str, String)> {
         CGDisplayMode::pixel_width(mode.as_deref()),
         CGDisplayMode::pixel_height(mode.as_deref()),
     );
-    vec![
-        (
-            "cpu",
+    crate::report::machine(
+        crate::report::MACHINE_MACOS,
+        [
             sysctl_string(c"machdep.cpu.brand_string").unwrap_or_else(|| "?".into()),
-        ),
-        (
-            "logical_cpus",
             std::thread::available_parallelism()
                 .map_or(0, |n| n.get())
                 .to_string(),
-        ),
-        (
-            "ram_gb",
             format!(
                 "{:.0}",
                 sysctl_u64(c"hw.memsize").unwrap_or(0) as f64 / (1u64 << 30) as f64
             ),
-        ),
-        ("gpu", gpu()),
-        ("monitor", format!("{w}x{h}")),
-        ("monitors", cap.monitors.to_string()),
-        (
-            "os",
+            gpu(),
+            format!("{w}x{h}"),
+            cap.monitors.to_string(),
             format!(
                 "macOS {}",
                 NSProcessInfo::processInfo().operatingSystemVersionString()
             ),
-        ),
-    ]
+        ],
+    )
 }

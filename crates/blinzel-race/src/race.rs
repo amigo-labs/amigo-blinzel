@@ -10,9 +10,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use blinzel_core::timing::{json_num, json_str};
-
 use crate::capture::Capture;
+use crate::report::{self, Result_, last_change};
 use crate::signature::COLORS;
 use crate::sys;
 use crate::viewers::{Viewer, launch};
@@ -22,24 +21,6 @@ pub struct Options {
     pub reps: usize,
     pub cold: bool,
     pub burst: usize,
-}
-
-#[derive(Default)]
-pub struct Burst {
-    pub presses: usize,
-    pub shown: usize,
-    pub settle_ms: f64,
-}
-
-#[derive(Default)]
-pub struct Result_ {
-    pub name: String,
-    pub version: String,
-    pub open_warm: Vec<f64>,
-    pub open_cold: Vec<f64>,
-    pub next: Vec<f64>,
-    pub bursts: Vec<Burst>,
-    pub errors: Vec<String>,
 }
 
 fn sig(i: usize) -> usize {
@@ -94,52 +75,16 @@ fn navigate(cap: &Capture, v: &Viewer, opts: &Options, r: &mut Result_) -> Resul
     }
     std::thread::sleep(Duration::from_millis(500));
     let events = cap.frames.since(t2);
-    let shown = transitions(&events);
-    let settle_ms = match last_change(&events) {
-        Some((at, s)) if s == want => sys::ticks_to_ms(at - t3),
-        _ => {
-            r.errors
-                .push("burst ended on another image (presses dropped)".into());
-            f64::NAN
-        }
-    };
-    r.bursts.push(Burst {
-        presses: opts.burst,
-        shown,
-        settle_ms,
-    });
+    let burst = report::burst(
+        &events,
+        opts.burst,
+        t3,
+        want,
+        sys::ticks_to_ms,
+        &mut r.errors,
+    );
+    r.bursts.push(burst);
     Ok(())
-}
-
-/// When the image shown last first appeared, and its signature.
-fn last_change(events: &[crate::frames::Event]) -> Option<(i64, usize)> {
-    let mut out: Option<(i64, usize)> = None;
-    for e in events {
-        if let Some(s) = e.sig
-            && out.is_none_or(|(_, last)| last != s)
-        {
-            out = Some((e.at, s));
-        }
-    }
-    out
-}
-
-/// Images that appeared: signature changes between presented frames
-/// (consecutive images always differ).
-fn transitions(events: &[crate::frames::Event]) -> usize {
-    let mut last = None;
-    let mut n = 0;
-    for e in events {
-        if let Some(s) = e.sig
-            && last != Some(s)
-        {
-            if last.is_some() {
-                n += 1;
-            }
-            last = Some(s);
-        }
-    }
-    n
 }
 
 pub fn measure(cap: &Capture, v: &Viewer, opts: &Options) -> Result_ {
@@ -179,109 +124,4 @@ pub fn measure(cap: &Capture, v: &Viewer, opts: &Options) -> Result_ {
     }
     sys::close_all(&v.process_name());
     r
-}
-
-/// Median (mean of the middle two for an even count) and 95th percentile
-/// (nearest rank).
-pub fn median_p95(v: &[f64]) -> Option<(f64, f64)> {
-    let mut s: Vec<f64> = v.iter().copied().filter(|x| x.is_finite()).collect();
-    if s.is_empty() {
-        return None;
-    }
-    s.sort_by(f64::total_cmp);
-    let n = s.len();
-    let median = if n % 2 == 1 {
-        s[n / 2]
-    } else {
-        (s[n / 2 - 1] + s[n / 2]) / 2.0
-    };
-    let p95 = s[((0.95 * n as f64).ceil() as usize).clamp(1, n) - 1];
-    Some((median, p95))
-}
-
-fn stats_json(v: &[f64]) -> String {
-    match median_p95(v) {
-        Some((m, p)) => format!(
-            "{{\"median_ms\": {}, \"p95_ms\": {}, \"n\": {}, \"samples_ms\": [{}]}}",
-            json_num(m),
-            json_num(p),
-            v.len(),
-            v.iter()
-                .map(|x| json_num(*x))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        None => "null".into(),
-    }
-}
-
-pub fn to_json(machine: &[(&str, String)], results: &[Result_]) -> String {
-    let m: Vec<String> = machine
-        .iter()
-        .map(|(k, v)| format!("{}: {}", json_str(k), json_str(v)))
-        .collect();
-    let viewers: Vec<String> = results
-        .iter()
-        .map(|r| {
-            let shown: Vec<f64> = r.bursts.iter().map(|b| b.shown as f64).collect();
-            let settle: Vec<f64> = r.bursts.iter().map(|b| b.settle_ms).collect();
-            format!(
-                "    {{\"name\": {}, \"version\": {}, \"open_warm\": {}, \"open_cold\": {}, \"next\": {}, \
-                 \"burst\": {{\"presses\": {}, \"shown\": {}, \"settle\": {}}}, \"errors\": [{}]}}",
-                json_str(&r.name),
-                json_str(&r.version),
-                stats_json(&r.open_warm),
-                stats_json(&r.open_cold),
-                stats_json(&r.next),
-                r.bursts.first().map_or(0, |b| b.presses),
-                stats_json(&shown),
-                stats_json(&settle),
-                r.errors.iter().map(|e| json_str(e)).collect::<Vec<_>>().join(", ")
-            )
-        })
-        .collect();
-    format!(
-        "{{\n  \"machine\": {{{}}},\n  \"viewers\": [\n{}\n  ]\n}}\n",
-        m.join(", "),
-        viewers.join(",\n")
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::frames::Event;
-
-    #[test]
-    fn counts_shown_images() {
-        let ev = |s: Option<usize>| Event { at: 0, sig: s };
-        let events = [
-            ev(Some(1)),
-            ev(None),
-            ev(Some(1)),
-            ev(Some(2)),
-            ev(Some(4)),
-            ev(None),
-            ev(Some(4)),
-            ev(Some(5)),
-        ];
-        assert_eq!(transitions(&events), 3);
-        assert_eq!(transitions(&[]), 0);
-        let at = |q: i64, s: usize| Event {
-            at: q,
-            sig: Some(s),
-        };
-        assert_eq!(
-            last_change(&[at(1, 2), at(2, 3), at(3, 3), at(4, 4), at(5, 4)]),
-            Some((4, 4))
-        );
-    }
-
-    #[test]
-    fn median_and_p95() {
-        let v: Vec<f64> = (1..=20).map(f64::from).collect();
-        assert_eq!(median_p95(&v), Some((10.5, 19.0)));
-        assert_eq!(median_p95(&[3.0, 1.0, 2.0]), Some((2.0, 3.0)));
-        assert_eq!(median_p95(&[f64::NAN]), None);
-    }
 }

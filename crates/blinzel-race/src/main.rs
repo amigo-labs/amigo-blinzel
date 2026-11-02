@@ -23,6 +23,8 @@ mod signature;
 // (ScreenCaptureKit).
 #[cfg(any(windows, target_os = "macos"))]
 mod race;
+#[cfg(any(windows, target_os = "macos", test))]
+mod report;
 
 #[cfg(windows)]
 mod capture;
@@ -93,7 +95,7 @@ mod measure {
     use std::path::PathBuf;
 
     use super::{number, option, usage};
-    use crate::{capture, corpus, race, sys, viewers};
+    use crate::{capture, corpus, race, report, sys, viewers};
 
     pub fn list() -> Result<(), String> {
         for v in viewers::detect() {
@@ -142,14 +144,14 @@ mod measure {
             results.push(r);
         }
         if let Some(out) = option(args, "--json") {
-            std::fs::write(out, race::to_json(&machine, &results)).map_err(|e| e.to_string())?;
+            std::fs::write(out, report::to_json(&machine, &results)).map_err(|e| e.to_string())?;
             println!("wrote {out}");
         }
         Ok(())
     }
 
-    fn print_result(r: &race::Result_) {
-        let f = |v: &[f64]| match race::median_p95(v) {
+    fn print_result(r: &report::Result_) {
+        let f = |v: &[f64]| match report::median_p95(v) {
             Some((m, p)) => format!("{m:7.1} ms (p95 {p:7.1})"),
             None => "      -".into(),
         };
@@ -159,7 +161,7 @@ mod measure {
         println!("  next      {}", f(&r.next));
         println!(
             "  burst     {} of {} images shown (median)",
-            race::median_p95(&shown).map_or(0.0, |x| x.0),
+            report::median_p95(&shown).map_or(0.0, |x| x.0),
             r.bursts.first().map_or(0, |b| b.presses)
         );
         for e in &r.errors {
