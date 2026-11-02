@@ -71,7 +71,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
   | ------ | ---- | ------ | --------------------------- |
   | JPEG | libjpeg-turbo, TurboJPEG 3 API, own FFI (`decode/jpeg.rs`), one decompressor per thread | YCbCr planes, Gray8, BGRA (CMYK/YCCK converted, Adobe inverted) | precision ≠ 8 |
   | PNG | `png` crate, own row-wise RGB/GA → RGBA expansion (`decode/png.rs`) | RGBA8 or Gray8 | — |
-  | GIF | `gif` crate (`decode/gif.rs`) | RGBA8, first frame on the screen; a 0 × 0 screen falls back to the frame's extent | — |
+  | GIF | `gif` crate (`decode/gif.rs`) | RGBA8, first frame on the screen; a 0 × 0 screen falls back to the frame's extent (probe and decode) | — |
   | BMP | own (`decode/bmp.rs`), also RLE4, OS/2 core headers, V3+ alpha masks | BGRA8 | (unsupported compressions are errors) |
   | WebP | `image-webp` (`decode/webp.rs`); `is_lossy_still`, `TINY_LOSSY` for warming WIC | RGBA8 | — |
   | JPEG XL | `jxl-oxide`, own row conversion to RGBA8 (`decode/jxl.rs`) | RGBA8, in the colour space jxl-oxide renders into | CMYK, channels smaller than the image (offset regions), float samples stored as integers |
@@ -92,7 +92,7 @@ Before any pixels are decoded, a probe reads the size, the orientation, the embe
 | -------- | ----------------- |
 | JPEG file named `.png` | Detected and decoded as JPEG |
 | AVIF whose `ftyp` major brand is `mif1` (AVIF only as a compatible brand) | Detected and decoded as AVIF (`mif1_major_brand_with_avif_compatible_is_avif`) |
-| GIF whose logical screen is 0 × 0 | `gif::decode` would use the frame's extent, but the probe rejects the zero size first, so the viewer shows an error |
+| GIF whose logical screen is 0 × 0 | Probe and decoder take the first frame's extent (`zero_screen_takes_the_frame_extent`) |
 | Interlaced PNG | Decoded through a full-frame buffer instead of row by row (no test with an interlaced file) |
 | CMYK JPEG (Adobe, inverted) | libjpeg-turbo decodes CMYK, converted to BGRA (only the conversion is tested) |
 | HEIC/AVIF on Windows without the Store codec | First file: WIC fails, native decodes; later files skip WIC |

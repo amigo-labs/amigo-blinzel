@@ -106,14 +106,27 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
     })
 }
 
-/// Logical screen size from the header.
+/// Logical screen size from the header; a 0 × 0 screen takes the first
+/// frame's extent, as [`decode`] does.
 pub fn header_size(d: &[u8]) -> Result<(u32, u32)> {
     if d.len() < 10 {
         return Err(DecodeError::Corrupt("GIF header truncated".into()));
     }
     let w = u16::from_le_bytes([d[6], d[7]]) as u32;
     let h = u16::from_le_bytes([d[8], d[9]]) as u32;
-    Ok((w, h))
+    if w != 0 && h != 0 {
+        return Ok((w, h));
+    }
+    let err = |e: gif::DecodingError| DecodeError::Corrupt(e.to_string());
+    let mut dec = gif::DecodeOptions::new().read_info(d).map_err(err)?;
+    let f = dec
+        .next_frame_info()
+        .map_err(err)?
+        .ok_or_else(|| DecodeError::Corrupt("no frames".into()))?;
+    Ok((
+        f.left as u32 + f.width as u32,
+        f.top as u32 + f.height as u32,
+    ))
 }
 
 pub fn decode(data: &[u8]) -> Result<Image> {
@@ -329,5 +342,17 @@ mod tests {
         let img = decode(&gif(4, 2, (0, 0, 4, 2), Some(3))).unwrap();
         assert!(img.has_alpha());
         assert!(decode(b"GIF89a\x01\0\x01\0").is_err());
+    }
+
+    /// A 0 × 0 logical screen takes the first frame's extent, in the probe
+    /// as in the decoder (docs/specs/image-formats.md, edge cases).
+    #[test]
+    fn zero_screen_takes_the_frame_extent() {
+        let data = gif(0, 0, (1, 1, 3, 2), None);
+        let probe = crate::decode::probe(&data).unwrap();
+        assert_eq!((probe.width, probe.height), (4, 3));
+        let img = crate::decode::decode(&data, crate::decode::Request::Full).unwrap();
+        assert_eq!((img.width, img.height), (4, 3));
+        assert_eq!(img.to_bgra()[3], 0);
     }
 }
