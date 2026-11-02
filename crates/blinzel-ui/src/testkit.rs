@@ -554,6 +554,18 @@ impl Harness {
         a
     }
 
+    /// Middle-button drag from `from` to `to` in a few steps.
+    pub fn middle_drag(&mut self, from: (f64, f64), to: (f64, f64)) -> Vec<Action> {
+        let a = self.app.mouse_down(from, false, false, true);
+        let a = self.record(a);
+        for k in 1..=4 {
+            let t = k as f64 / 4.0;
+            self.mouse_move((from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t));
+        }
+        self.mouse_up();
+        a
+    }
+
     pub fn double_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
         let a = self.app.double_click(p)?;
         Some(self.record(a))
@@ -766,11 +778,24 @@ impl Harness {
 
     /// Whether the window menu offers `cmd` enabled (it must be in it).
     pub fn menu_enabled(&self, cmd: Cmd) -> bool {
-        fn find(items: &[MenuItem], cmd: Cmd) -> Option<bool> {
+        self.menu_entry(cmd).1
+    }
+
+    /// Whether the window menu shows `cmd` with a check mark.
+    pub fn menu_checked(&self, cmd: Cmd) -> bool {
+        self.menu_entry(cmd).0
+    }
+
+    /// `(checked, enabled)` of `cmd` in the window menu.
+    fn menu_entry(&self, cmd: Cmd) -> (bool, bool) {
+        fn find(items: &[MenuItem], cmd: Cmd) -> Option<(bool, bool)> {
             items.iter().find_map(|i| match i {
                 MenuItem::Item {
-                    cmd: c, enabled, ..
-                } if *c == cmd => Some(*enabled),
+                    cmd: c,
+                    checked,
+                    enabled,
+                    ..
+                } if *c == cmd => Some((*checked, *enabled)),
                 MenuItem::Sub(_, sub) => find(sub, cmd),
                 _ => None,
             })

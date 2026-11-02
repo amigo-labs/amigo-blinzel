@@ -2453,6 +2453,10 @@ mod settings_tests;
 #[path = "app_batch_tests.rs"]
 mod batch_tests;
 
+#[cfg(test)]
+#[path = "app_viewing_tests.rs"]
+mod viewing_tests;
+
 /// Commands on the image shown, which the grid covers.
 fn acts_on_the_shown_image(cmd: Cmd) -> bool {
     matches!(
