@@ -11,8 +11,6 @@ pub struct Settings {
     pub language: Option<String>,
     /// Reuse a running window instead of starting a second one.
     pub single_instance: bool,
-    /// Memory budget for decoded images (MiB, 0 = automatic).
-    pub ram_budget_mb: u32,
     /// Images to prefetch ahead / behind.
     pub prefetch_ahead: u32,
     pub prefetch_behind: u32,
@@ -52,7 +50,6 @@ impl Default for Settings {
             view: ViewOptions::default(),
             language: None,
             single_instance: true,
-            ram_budget_mb: 0,
             prefetch_ahead: 4,
             prefetch_behind: 2,
             background: [0x1E, 0x1E, 0x1E],
@@ -86,6 +83,14 @@ fn unquote(v: &str) -> Option<&str> {
     v.strip_prefix('"').and_then(|v| v.strip_suffix('"'))
 }
 
+/// A quoted value read from the raw line, which may contain `#`: the text
+/// between the first two quotes, followed by nothing or a `# comment`.
+fn unquote_raw(v: &str) -> Option<&str> {
+    let (value, rest) = v.strip_prefix('"')?.split_once('"')?;
+    let rest = rest.trim_start();
+    (rest.is_empty() || rest.starts_with('#')).then_some(value)
+}
+
 /// A path setting: no line breaks or quotes (which a path cannot hold on
 /// Windows and the file could not store), not empty.
 fn path_value(v: Option<&str>) -> Option<String> {
@@ -95,7 +100,7 @@ fn path_value(v: Option<&str>) -> Option<String> {
 
 fn parse_color(s: &str) -> Option<[u8; 3]> {
     let h = s.strip_prefix('#')?;
-    if h.len() != 6 {
+    if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let v = u32::from_str_radix(h, 16).ok()?;
@@ -126,7 +131,6 @@ impl Settings {
                         .map(str::to_owned)
                 }
                 "single_instance" => s.single_instance = value.parse().unwrap_or(s.single_instance),
-                "ram_budget_mb" => s.ram_budget_mb = value.parse().unwrap_or(s.ram_budget_mb),
                 "prefetch_ahead" => {
                     s.prefetch_ahead = value.parse::<u32>().unwrap_or(s.prefetch_ahead).min(32)
                 }
@@ -155,7 +159,7 @@ impl Settings {
             let Some((key, value)) = line.split_once('=') else {
                 continue;
             };
-            let value = unquote(value.trim());
+            let value = unquote_raw(value.trim());
             match key.trim() {
                 "background" => {
                     if let Some(c) = value.and_then(parse_color) {
@@ -188,7 +192,6 @@ impl Settings {
              no_upscale = {}\n\
              language = \"{}\"\n\
              single_instance = {}\n\
-             ram_budget_mb = {}\n\
              prefetch_ahead = {}\n\
              prefetch_behind = {}\n\
              background = \"#{r:02X}{g:02X}{b:02X}\"\n\
@@ -206,7 +209,6 @@ impl Settings {
             self.view.no_upscale,
             self.language.as_deref().unwrap_or("auto"),
             self.single_instance,
-            self.ram_budget_mb,
             self.prefetch_ahead,
             self.prefetch_behind,
             self.auto_update,
@@ -235,7 +237,6 @@ mod tests {
             },
             language: Some("de".into()),
             single_instance: false,
-            ram_budget_mb: 2048,
             prefetch_ahead: 6,
             prefetch_behind: 1,
             background: [0x12, 0xAB, 0xFF],
@@ -271,6 +272,133 @@ mod tests {
         assert_eq!(s.view, ViewOptions::default());
         assert_eq!(s.prefetch_ahead, 32);
         assert_eq!(Settings::parse("language = \"auto\"").language, None);
+    }
+
+    #[test]
+    fn a_missing_file_means_the_documented_defaults() {
+        let s = Settings::parse("");
+        assert_eq!(s, Settings::default());
+        assert_eq!(s.view.mode, ViewMode::FitImageToWindow);
+        assert_eq!(s.view.mode.key(), "fit-image-to-window");
+        assert!(s.view.no_upscale);
+        assert_eq!(s.language, None, "auto");
+        assert!(s.single_instance);
+        assert_eq!((s.prefetch_ahead, s.prefetch_behind), (4, 2));
+        assert_eq!(s.background, [0x1E, 0x1E, 0x1E]);
+        assert!(s.auto_update && !s.resident && s.color_management);
+        assert!(!s.filmstrip && !s.maximized);
+        assert!(s.screenshot_hotkey && s.screenshot_save && s.screenshot_open);
+        assert!(!s.screenshot_edit);
+        assert_eq!(
+            (s.window, &s.screenshot_dir, &s.editor),
+            (None, &None, &None)
+        );
+        let text = s.to_text();
+        for line in [
+            "view_mode = \"fit-image-to-window\"",
+            "no_upscale = true",
+            "language = \"auto\"",
+            "background = \"#1E1E1E\"",
+        ] {
+            assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
+        }
+        for key in ["window", "screenshot_dir", "editor"] {
+            assert!(
+                !text.lines().any(|l| l.starts_with(key)),
+                "{key} in\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply() {
+        let s = Settings::parse(
+            "# amigo-blinzel settings\n\
+             [viewer]\n\
+             screenshot_clipboard = true\n\
+             ram_budget_mb = 2048\n\
+             some_future_key = \"x\"\n\
+             just some words\n\
+             filmstrip = true # show the strip\n\
+             no_upscale = 3\n\
+             prefetch_ahead = \"six\"\n\
+             resident = yes\n\
+             language = de\n\
+             prefetch_behind = 5\n\
+             view_mode = \"actual-size\" # key 3\n\
+             background = \"#102030\" # dark blue\n\
+             auto_update = false\n",
+        );
+        let expected = Settings {
+            view: ViewOptions {
+                mode: ViewMode::ActualSize,
+                no_upscale: true,
+            },
+            filmstrip: true,
+            prefetch_behind: 5,
+            background: [0x10, 0x20, 0x30],
+            auto_update: false,
+            ..Settings::default()
+        };
+        assert_eq!(s, expected);
+    }
+
+    #[test]
+    fn auto_and_empty_language_both_mean_the_system_language() {
+        assert_eq!(Settings::parse("language = \"auto\"").language, None);
+        assert_eq!(Settings::parse("language = \"\"").language, None);
+        let de = Settings::parse("language = \"de\"");
+        assert_eq!(de.language.as_deref(), Some("de"));
+        // The system language is written as "auto".
+        let text = Settings::parse("language = \"\"").to_text();
+        assert!(text.lines().any(|l| l == "language = \"auto\""), "{text}");
+    }
+
+    #[test]
+    fn invalid_background_and_paths_keep_their_defaults() {
+        for bad in [
+            "\"#12345\"",
+            "\"#1234567\"",
+            "\"123456\"",
+            "\"#GGGGGG\"",
+            "\"#+12345\"",
+            "#123456",
+            "\"\"",
+        ] {
+            let s = Settings::parse(&format!("background = {bad}"));
+            assert_eq!(s.background, [0x1E, 0x1E, 0x1E], "background = {bad}");
+        }
+        assert_eq!(
+            Settings::parse("background = \"#1e2f3a\"").background,
+            [0x1E, 0x2F, 0x3A]
+        );
+        for key in ["screenshot_dir", "editor"] {
+            for bad in ["\"\"", r"C:\Bilder", r#""C:\a"b""#, r#""C:\a" "b""#] {
+                let s = Settings::parse(&format!("{key} = {bad}"));
+                assert_eq!(
+                    (&s.screenshot_dir, &s.editor),
+                    (&None, &None),
+                    "{key} = {bad}"
+                );
+            }
+            let s = Settings::parse(&format!(r#"{key} = "D:\Bilder #2\a b""#));
+            let v = if key == "editor" {
+                s.editor
+            } else {
+                s.screenshot_dir
+            };
+            assert_eq!(v.as_deref(), Some(r"D:\Bilder #2\a b"));
+        }
+    }
+
+    #[test]
+    fn ram_budget_mb_is_neither_read_nor_written() {
+        let text = Settings::default().to_text();
+        assert!(!text.contains("ram_budget_mb"), "{text}");
+        // An old file with it loads like one without it.
+        let old = Settings::parse("ram_budget_mb = 2048\nfilmstrip = true\n");
+        assert_eq!(old, Settings::parse("filmstrip = true\n"));
+        assert!(!old.to_text().contains("ram_budget_mb"));
     }
 
     #[test]
