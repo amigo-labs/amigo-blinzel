@@ -402,9 +402,20 @@ pub(crate) fn jpeg(w: u32, h: u32) -> Vec<u8> {
 /// palette, with a NETSCAPE loop count `repeat` (`None`: no extension, it
 /// plays once).
 pub(crate) fn gif(w: u16, h: u16, delays: &[u16], repeat: Option<u16>) -> Vec<u8> {
+    gif_on_screen((w, h), (w, h), delays, repeat)
+}
+
+/// Like [`gif`], but every frame covers only the top left `w` × `h` of a
+/// logical screen of `screen`: a large canvas in a small file.
+pub(crate) fn gif_on_screen(
+    screen: (u16, u16),
+    (w, h): (u16, u16),
+    delays: &[u16],
+    repeat: Option<u16>,
+) -> Vec<u8> {
     let mut out = b"GIF89a".to_vec();
-    out.extend(w.to_le_bytes());
-    out.extend(h.to_le_bytes());
+    out.extend(screen.0.to_le_bytes());
+    out.extend(screen.1.to_le_bytes());
     // A global table of four colours.
     out.extend([0xF1, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]);
     if let Some(n) = repeat {
@@ -414,7 +425,7 @@ pub(crate) fn gif(w: u16, h: u16, delays: &[u16], repeat: Option<u16>) -> Vec<u8
     }
     for (i, delay) in delays.iter().enumerate() {
         // Graphic control (disposal "keep", no transparency), then the
-        // whole canvas without a local table.
+        // frame at the top left without a local table.
         out.extend([0x21, 0xF9, 4, 0x04]);
         out.extend(delay.to_le_bytes());
         out.extend([0, 0, 0x2C, 0, 0, 0, 0]);

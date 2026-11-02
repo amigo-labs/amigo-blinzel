@@ -2,7 +2,7 @@
 //! errors (`docs/specs/animations.md`).
 
 use super::*;
-use crate::testkit::{Harness, gif};
+use crate::testkit::{Harness, gif, gif_on_screen};
 
 /// `n` GIF frames of 50 ms.
 fn frames(n: usize) -> Vec<u16> {
@@ -162,4 +162,36 @@ fn leaving_an_animation_stops_and_drops_it_and_coming_back_plays_it_anew() {
     // Decoded again (its still is cached), from the first frame.
     assert_eq!(uploads(&h), before + 3);
     assert_eq!((shown_frame(&h), anim_timer(&h)), (Some(0), Some(50)));
+}
+
+#[test]
+fn an_animated_jpeg_xl_plays_its_keyframes_at_their_ticks_and_loop_count() {
+    // Three keyframes of 15, 21 and 9 ticks at 500/3 ticks per second,
+    // two plays (made as described in `blinzel-core`'s JPEG XL tests).
+    let data = include_bytes!("../../blinzel-core/testdata/anim-8x6-loop2.jxl");
+    let mut h = open_gif(data, "a.jxl");
+    assert_eq!(anim(&h), Some((3, Some(2), true)));
+    // 30 ms, 42 ms, and 18 ms played as 100 ms; twice, then it holds.
+    let mut seen = vec![(shown_frame(&h), anim_timer(&h))];
+    for _ in 0..6 {
+        tick(&mut h);
+        seen.push((shown_frame(&h), anim_timer(&h)));
+    }
+    let play = [
+        (Some(0), Some(30)),
+        (Some(1), Some(42)),
+        (Some(2), Some(100)),
+    ];
+    assert_eq!(seen, [&play[..], &play[..], &[(Some(2), None)]].concat());
+}
+
+#[test]
+fn the_viewer_decodes_only_the_frames_within_256_mb() {
+    // 1024 × 1024 canvas: 4 MiB per decoded frame, so 64 of the 65 fit.
+    let delays = vec![5; 65];
+    let data = gif_on_screen((1024, 1024), (1, 1), &delays, Some(0));
+    let h = open_gif(&data, "long.gif");
+    assert_eq!(anim(&h), Some((64, None, true)));
+    // The still and the 64 frames that fit; the 65th was not decoded.
+    assert_eq!(uploads(&h), 1 + 64);
 }
