@@ -435,3 +435,23 @@ fn check_for_updates_asks_the_shell_to_check() {
     h.app.settings.auto_update = false;
     assert_eq!(h.command(CheckUpdates), [Action::CheckUpdates]);
 }
+
+/// `docs/specs/release.md` AC-18: the menu entry "Third-party notices"
+/// asks the shell to show the notices.
+#[test]
+fn third_party_notices_menu_entry_asks_the_shell_to_show_them() {
+    let mut h = Harness::new();
+    let entry = menu::items(&h.menu_state())
+        .into_iter()
+        .find_map(|i| match i {
+            MenuItem::Item {
+                cmd: Notices,
+                label,
+                enabled,
+                ..
+            } => Some((label, enabled)),
+            _ => None,
+        });
+    assert_eq!(entry, Some(("Third-party notices".to_string(), true)));
+    assert_eq!(h.command(Notices), [Action::Notices]);
+}
