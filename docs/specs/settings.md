@@ -55,7 +55,7 @@ This spec records what the code does today.
 - Format: a TOML subset, one `key = value` per line; strings in double quotes, booleans `true`/`false`, integers; `window = left,top,right,bottom`. The first pass cuts every line at the first `#`; `background`, `screenshot_dir` and `editor` are read in a second pass from the raw line because they may contain `#`. `to_text` writes every key in a fixed order under a `# amigo-blinzel settings` header, `window`, `screenshot_dir` and `editor` only when set.
 - Writes are whole-file `std::fs::write` after `create_dir_all`; errors are ignored.
 - Readers: the shells read the file once at startup (language before anything else); `App::reload_settings` re-reads it when a hidden resident instance wakes; the updaters re-read `auto_update` before checking.
-- `ram_budget_mb` is parsed and written but nothing reads it; it is to be removed (AC-16, Decisions).
+- `ram_budget_mb` was parsed and written but nothing read it; it is gone from `Settings` (AC-16).
 
 ## Edge cases
 
@@ -78,21 +78,27 @@ This spec records what the code does today.
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | — | open | |
-| AC-02 | — (`roundtrip` checks that the defaults read back, not their values) | open | |
+| AC-01 | `the_settings_folder_follows_each_platforms_convention`, `this_platforms_settings_folder_is_the_one_tested` (`crates/blinzel-ui/src/dirs.rs`) | built | |
+| AC-02 | `a_missing_file_means_the_documented_defaults` (`crates/blinzel-core/src/settings.rs`), `a_missing_or_unreadable_file_loads_the_defaults` (`crates/blinzel-ui/src/settings_store.rs`) | built | |
 | AC-03 | `roundtrip` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
-| AC-04 | `tolerates_garbage`, `old_screenshot_clipboard_key_is_ignored` (`crates/blinzel-core/src/settings.rs`), CI: Linux | open (reworded 2026-11-02) | |
+| AC-04 | `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply`, `tolerates_garbage`, `old_screenshot_clipboard_key_is_ignored` (`crates/blinzel-core/src/settings.rs`) | built | |
 | AC-05 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
 | AC-06 | `roundtrip` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
-| AC-07 | — (`tolerates_garbage` covers `"auto"` only, not `""`) | open | |
+| AC-07 | `auto_and_empty_language_both_mean_the_system_language` (`crates/blinzel-core/src/settings.rs`) | built | |
 | AC-08 | — | open | |
-| AC-09 | — | open | |
+| AC-09 | `invalid_background_and_paths_keep_their_defaults` (`crates/blinzel-core/src/settings.rs`) | built | |
 | AC-10 | — | open | |
 | AC-11 | — | open | |
 | AC-12 | — | open | |
 | AC-13 | — | open | |
 | AC-14 | — | open | |
 | AC-15 | — | open | |
-| AC-16 | — | open | |
+| AC-16 | `ram_budget_mb_is_neither_read_nor_written`, `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply` (`crates/blinzel-core/src/settings.rs`) | built | |
 
 ## Decisions
+
+- `ram_budget_mb` (AC-16, decided 2026-11-02): the field is removed from `blinzel_core::settings::Settings`, so `parse` treats the key like any unknown key and `to_text` no longer writes it; nothing read it.
+- A quoted value read from the raw line (`background`, `screenshot_dir`, `editor`) may be followed by a `# comment` (AC-04): the value is the text between the first two quotes. Before, `background = "#102030" # dark` fell back to the default.
+- `background` must be six hex digits after `#` (AC-09): `u32::from_str_radix` alone also took a sign, so `"#+12345"` was read as a colour.
+- AC-01 green at once: the paths were right; `dirs::config` and `dirs::cache` now take the platform and the environment as parameters internally (`config_in`, `cache_in`), so the Windows and macOS conventions are tested on Linux too.
+- AC-02 and AC-07 green at once: the defaults and the meaning of `"auto"` / `""` already held; the tests pin the documented values.
