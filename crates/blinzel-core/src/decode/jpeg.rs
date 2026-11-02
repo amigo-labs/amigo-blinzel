@@ -575,6 +575,60 @@ pub fn encode_bgra(
     take_output(&tj, rc, out, size)
 }
 
+/// JPEGs the viewer never writes but has to read.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Unusual {
+    /// Four components (Adobe CMYK).
+    Cmyk,
+    /// Three components stored as RGB (Adobe transform 0).
+    Rgb,
+    /// YCbCr with 4:1:1 subsampling.
+    S411,
+}
+
+/// Encodes the test pattern of `width × height` as an [`Unusual`] JPEG.
+#[cfg(test)]
+pub(crate) fn encode_unusual(kind: Unusual, width: u32, height: u32) -> Vec<u8> {
+    const CS_RGB: c_int = 0;
+    const SAMP_411: c_int = 5;
+    let rgb = crate::testimg::rgb(width, height);
+    let (pixels, pf, bpp, colorspace, samp) = match kind {
+        Unusual::Cmyk => (
+            rgb.chunks(3)
+                .flat_map(|p| [255 - p[0], 255 - p[1], 255 - p[2], 0])
+                .collect(),
+            ffi::PF_CMYK,
+            4,
+            ffi::CS_CMYK,
+            ffi::SAMP_444,
+        ),
+        Unusual::Rgb => (rgb, ffi::PF_RGB, 3, CS_RGB, ffi::SAMP_444),
+        Unusual::S411 => (rgb, ffi::PF_RGB, 3, ffi::CS_YCBCR, SAMP_411),
+    };
+    let tj = Tj::new(ffi::INIT_COMPRESS).unwrap();
+    tj.set(ffi::P_QUALITY, 90).unwrap();
+    tj.set(ffi::P_SUBSAMP, samp).unwrap();
+    tj.set(ffi::P_COLORSPACE, colorspace).unwrap();
+    let mut out: *mut c_uchar = std::ptr::null_mut();
+    let mut size: usize = 0;
+    // SAFETY: `pixels` holds `height` rows of `width * bpp` bytes in the
+    // format `pf`; TurboJPEG allocates `out`, which `take_output` frees.
+    let rc = unsafe {
+        ffi::tj3Compress8(
+            tj.0,
+            pixels.as_ptr(),
+            width as c_int,
+            (width * bpp) as c_int,
+            height as c_int,
+            pf,
+            &mut out,
+            &mut size,
+        )
+    };
+    take_output(&tj, rc, out, size).unwrap()
+}
+
 /// Copies a TurboJPEG-allocated output buffer into a Vec and frees it.
 fn take_output(tj: &Tj, rc: c_int, out: *mut c_uchar, size: usize) -> Result<Vec<u8>> {
     if rc != 0 {

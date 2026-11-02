@@ -93,9 +93,9 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 | AC-10 | `refuses_missing_or_short_buffers_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-11 | `truncated_data_decodes_partially_without_panicking` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-12 | `decode_with_threads_matches_the_turbojpeg_path` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
-| AC-13 | — (no test tells which decoder ran) | open | |
-| AC-14 | — | open | |
-| AC-15 | — (no CI job builds without `turbojpeg`) | open | |
+| AC-13 | `one_thread_and_regions_decode_with_libjpeg_turbo` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
+| AC-14 | `files_blinzel_jpeg_declines_go_to_libjpeg_turbo` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
+| AC-15 | `without_libjpeg_turbo_blinzel_jpeg_decodes_alone` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
 | AC-16 | — | open | |
 | AC-17 | — (`blinzel-bench run` and `jpeg-ab` measure but assert no speed ratio) | open | |
 
@@ -103,3 +103,6 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 
 - 2026-11-02: Extracted from the code (`/spec-extract`). The design spec's "pipeline of entropy decode and IDCT" exists only for progressive files (scans pipelined across threads); sequential files decode and transform each block in one pass.
 - 2026-11-02: AC-09 and AC-10 already held in `decode_planes`; their tests were green at once. They went red with the `is_supported`/scale check and the buffer check disabled, so they guard the behavior. The unsupported files are a real baseline file with only the frame marker and precision byte patched, so without the check the decoder would write output.
+- 2026-11-02: The JPEG choice is one function, `decode_jpeg(data, req, threads, turbo)`, and `decode_inner` passes `cfg!(feature = "turbojpeg")` as `turbo`. AC-15 is tested through `turbo = false` in the default build, because no gate or CI job builds without the feature and the test files come from libjpeg-turbo's encoder; `cargo check -p blinzel-core --no-default-features` stays green.
+- 2026-11-02: Which decoder ran shows in the result, not in a hook: libjpeg-turbo scales in eighths (3/8 for at least 401 of 1600 pixels), blinzel-jpeg rounds up to 1/2; and libjpeg-turbo's cropped region differs in its pixels from a crop of blinzel-jpeg's full image (the tests assert that difference, so they cannot pass by accident).
+- 2026-11-02: AC-13 to AC-15 already held; their tests were green at once and went red with the thread condition, the region exclusion, the libjpeg-turbo fallback or the YCbCr check of `own_jpeg::decode` disabled. The over-the-limit case of AC-14 checks the outcome (libjpeg-turbo's `TooLarge`): a file over 2^30 pixels that blinzel-jpeg could otherwise decode would need a gigabyte of output, so the header-only file is declined by blinzel-jpeg for missing tables as well.

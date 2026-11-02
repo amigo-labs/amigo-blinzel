@@ -268,17 +268,7 @@ pub fn decode_with(data: &[u8], req: Request, threads: usize) -> Result<Image> {
 
 fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
     match format::detect(data) {
-        Format::Jpeg => {
-            // Benchmark gate: blinzel-jpeg wins with several threads,
-            // libjpeg-turbo on one thread and for regions (it skips the
-            // rest of the image).
-            let own =
-                !cfg!(feature = "turbojpeg") || (threads > 1 && !matches!(req, Request::Region(_)));
-            if own && let Some(img) = own_jpeg::decode(data, req, threads) {
-                return finish(img, req);
-            }
-            decode_jpeg_fallback(data, req)
-        }
+        Format::Jpeg => decode_jpeg(data, req, threads, cfg!(feature = "turbojpeg")),
         Format::Png => finish(png::decode(data)?, req),
         Format::Gif => finish(gif::decode(data)?, req),
         Format::Bmp => finish(bmp::decode(data)?, req),
@@ -289,6 +279,22 @@ fn decode_inner(data: &[u8], req: Request, threads: usize) -> Result<Image> {
         Format::Avif => finish(avif::decode(data, threads)?, req),
         Format::Tiff => finish(tiff::decode(data, threads)?, req),
         other => Err(DecodeError::Unsupported(other)),
+    }
+}
+
+/// The JPEG decoder choice (docs/specs/jpeg-decoder.md); `turbo` says
+/// whether the build has libjpeg-turbo.
+fn decode_jpeg(data: &[u8], req: Request, threads: usize, turbo: bool) -> Result<Image> {
+    // Benchmark gate: blinzel-jpeg wins with several threads, libjpeg-turbo
+    // on one thread and for regions (it skips the rest of the image).
+    let own = !turbo || (threads > 1 && !matches!(req, Request::Region(_)));
+    if own && let Some(img) = own_jpeg::decode(data, req, threads) {
+        return finish(img, req);
+    }
+    if turbo {
+        decode_jpeg_fallback(data, req)
+    } else {
+        Err(DecodeError::Unsupported(Format::Jpeg))
     }
 }
 
@@ -658,5 +664,140 @@ mod tests {
             check_size(1 << 20, 1 << 20),
             Err(DecodeError::TooLarge { .. })
         ));
+    }
+
+    /// A 1600 × 1200 4:2:0 baseline JPEG of the test pattern.
+    #[cfg(feature = "turbojpeg")]
+    fn jpeg_1600() -> Vec<u8> {
+        let rgb = crate::testimg::rgb(1600, 1200);
+        jpeg::encode_rgb(&rgb, 1600, 1200, Default::default()).unwrap()
+    }
+
+    /// libjpeg-turbo scales in eighths, blinzel-jpeg only to 1/8, 1/4, 1/2
+    /// and 8/8: at least 401 pixels of 1600 are 3/8 with one, 1/2 with the
+    /// other, so the size tells which decoder ran.
+    #[cfg(feature = "turbojpeg")]
+    const FIT_3_8: Request = Request::Fit { w: 401, h: 10 };
+
+    /// Both failed alike, or both are images of the same size, kind and
+    /// pixels.
+    #[cfg(feature = "turbojpeg")]
+    fn same(a: &Result<Image>, b: &Result<Image>) -> bool {
+        match (a, b) {
+            (Ok(a), Ok(b)) => {
+                (a.width, a.height, a.full_width, a.full_height, a.region)
+                    == (b.width, b.height, b.full_width, b.full_height, b.region)
+                    && std::mem::discriminant(&a.pixels) == std::mem::discriminant(&b.pixels)
+                    && a.to_bgra() == b.to_bgra()
+            }
+            (Err(a), Err(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// One thread decodes with libjpeg-turbo at its DCT scales in eighths,
+    /// a region is cropped by libjpeg-turbo with any number of threads
+    /// (AC-13).
+    #[cfg(feature = "turbojpeg")]
+    #[test]
+    fn one_thread_and_regions_decode_with_libjpeg_turbo() {
+        let data = jpeg_1600();
+        for (req, size) in [
+            (FIT_3_8, (600, 450)),
+            (Request::Fit { w: 801, h: 10 }, (1000, 750)),
+            (Request::Fit { w: 1201, h: 10 }, (1400, 1050)),
+            (Request::Full, (1600, 1200)),
+        ] {
+            let img = decode_with(&data, req, 1).unwrap();
+            assert_eq!((img.width, img.height), size, "{req:?}");
+            assert!(same(&Ok(img), &jpeg::decode(&data, req)), "{req:?}");
+        }
+        // Several threads: blinzel-jpeg, at its next larger scale.
+        let img = decode_with(&data, FIT_3_8, 4).unwrap();
+        assert_eq!((img.width, img.height), (800, 600));
+
+        let own_full = own_jpeg::decode(&data, Request::Full, 1).unwrap();
+        for r in [
+            PixelRect::new(37, 11, 100, 50),
+            PixelRect::new(1500, 1100, 100, 100),
+        ] {
+            let turbo = jpeg::decode(&data, Request::Region(r));
+            // The two crops differ, so the result tells which decoder ran.
+            assert!(!same(&crop_to_bgra(&own_full, r), &turbo), "{r:?}");
+            for threads in [1, 4] {
+                let img = decode_with(&data, Request::Region(r), threads);
+                assert!(same(&img, &turbo), "{r:?} with {threads} threads");
+            }
+        }
+    }
+
+    /// `data` with a run of `FF 00` (stuffed one bits, an invalid Huffman
+    /// code) written over the middle of its entropy-coded data.
+    #[cfg(feature = "turbojpeg")]
+    fn with_corrupt_entropy(data: &[u8]) -> Vec<u8> {
+        let sos = data.windows(2).position(|w| w == [0xFF, 0xDA]).unwrap();
+        let mut d = data.to_vec();
+        let mut at = sos + (data.len() - sos) / 2;
+        while d[at - 1] == 0xFF || d[at] == 0x00 {
+            at += 1;
+        }
+        for pair in d[at..at + 64].chunks_mut(2) {
+            pair.copy_from_slice(&[0xFF, 0x00]);
+        }
+        d
+    }
+
+    /// What blinzel-jpeg declines with several threads goes to
+    /// libjpeg-turbo, which decodes it or reports its own error (AC-14).
+    #[cfg(feature = "turbojpeg")]
+    #[test]
+    fn files_blinzel_jpeg_declines_go_to_libjpeg_turbo() {
+        use jpeg::{Unusual, encode_unusual};
+        let base = jpeg::encode_rgb(&crate::testimg::rgb(96, 64), 96, 64, Default::default());
+        let cases = [
+            ("CMYK", encode_unusual(Unusual::Cmyk, 96, 64), true),
+            ("RGB", encode_unusual(Unusual::Rgb, 96, 64), true),
+            ("4:1:1", encode_unusual(Unusual::S411, 96, 64), true),
+            ("too large", jpeg_header(32768, 32769, 8, 0xC0), false),
+            ("corrupt", with_corrupt_entropy(&base.unwrap()), true),
+        ];
+        for (name, data, decodes) in cases {
+            for req in [Request::Full, Request::Fit { w: 20, h: 10 }] {
+                assert!(own_jpeg::decode(&data, req, 4).is_none(), "{name}");
+                let turbo = jpeg::decode(&data, req);
+                assert_eq!(turbo.is_ok(), decodes, "{name} {req:?}: {:?}", turbo.err());
+                let img = decode_with(&data, req, 4);
+                assert!(same(&img, &turbo), "{name} {req:?}: {:?}", img.err());
+            }
+        }
+    }
+
+    /// Without libjpeg-turbo blinzel-jpeg decodes every JPEG it supports
+    /// on any number of threads, a region at full size and cropped, and
+    /// declines the rest as not decoded natively (AC-15).
+    #[cfg(feature = "turbojpeg")]
+    #[test]
+    fn without_libjpeg_turbo_blinzel_jpeg_decodes_alone() {
+        use jpeg::{Unusual, encode_unusual};
+        let data = jpeg_1600();
+        let own_full = own_jpeg::decode(&data, Request::Full, 1).unwrap();
+        let r = PixelRect::new(37, 11, 100, 50);
+        let declined =
+            [Unusual::Cmyk, Unusual::Rgb, Unusual::S411].map(|k| encode_unusual(k, 96, 64));
+        for threads in [1, 4] {
+            let img = decode_jpeg(&data, FIT_3_8, threads, false).unwrap();
+            assert_eq!((img.width, img.height), (800, 600), "{threads} threads");
+            let img = decode_jpeg(&data, Request::Full, threads, false);
+            assert!(same(
+                &img,
+                &Ok(own_jpeg::decode(&data, Request::Full, 1).unwrap())
+            ));
+            let img = decode_jpeg(&data, Request::Region(r), threads, false);
+            assert!(same(&img, &crop_to_bgra(&own_full, r)), "{threads} threads");
+            for d in &declined {
+                let img = decode_jpeg(d, Request::Full, threads, false);
+                assert_eq!(unsupported(img), Some(Format::Jpeg));
+            }
+        }
     }
 }
