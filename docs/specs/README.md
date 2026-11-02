@@ -2,36 +2,35 @@
 
 One feature spec per feature, with testable acceptance criteria (ACs) and the tests that prove them. Written with `/spec`, built with `/spec-build`, accepted with `/spec-check` (`.claude/rules/specs.md`). The goal, the decisions, the architecture and the measurements they build on are in the design spec [`blinzel.md`](blinzel.md).
 
-All specs below were extracted from the code on 2026-11-02 (`/spec-extract`). They describe what the code does today. An AC is **proven** when an existing test checks exactly that behavior. Tests marked `CI: windows` / `CI: macos` run only in that CI job, and `manual` ACs need a person on that platform. None of them is `implemented` yet: every spec still has ACs without a test. `/spec-build <name>` writes the missing tests (and fixes what they find), and `/spec-check <name>` then accepts the spec.
+All specs below were extracted from the code on 2026-11-02 (`/spec-extract`). They describe what the code does today. An AC is **proven** when an existing test checks exactly that behavior. Tests marked `CI: windows` / `CI: macos` run only in that CI job, and `manual` ACs need a person on that platform. Specs that `/spec-check` has accepted move to [Done](#done); every spec in the order below still has ACs without a test. `/spec-build <name>` writes the missing tests (and fixes what they find), and `/spec-check <name>` then accepts the spec.
 
 ## Order
 
-The first three carry decisions of 2026-11-02 that change behavior, so they come first. The rest are in the order of the product: viewing first, distribution last.
+The specs that carry decisions of 2026-11-02 that change behavior come first. The rest are in the order of the product: viewing first, distribution last.
 
 | # | Spec | ACs proven | CI-only | Manual | Next |
 | - | ---- | ---------- | ------- | ------ | ---- |
 | 1 | [selection-and-export](selection-and-export.md) | 17 / 22 | 2 | 2 | `/spec-build`: the clipboard block is left (AC-09 Windows, AC-10 Linux, AC-11 macOS); then the manual checks AC-04, AC-15 |
 | 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements), then `/spec-check` |
-| 3 | [settings](settings.md) | 15 / 16 | 1 | 0 | push for the Windows CI run of AC-14 (`tests/placement.rs`), then `/spec-check` |
-| 4 | [startup](startup.md) | 3 / 14 | 6 | 3 | `/spec-build` |
-| 5 | [browsing](browsing.md) | 8 / 21 | 3 | 1 | `/spec-build` |
-| 6 | [viewing](viewing.md) | 7 / 22 | 0 | 2 | `/spec-build` |
-| 7 | [image-formats](image-formats.md) | 16 / 24 | 4 | 0 | `/spec-build` |
-| 8 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
-| 9 | [animations](animations.md) | 4 / 14 | 0 | 1 | `/spec-build` |
-| 10 | [color-management](color-management.md) | 10 / 19 | 3 | 2 | `/spec-build` |
-| 11 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design); then `/spec-check` |
-| 12 | [localization](localization.md) | 7 / 17 | 1 | 0 | `/spec-build` |
-| 13 | [platform-shells](platform-shells.md) | 8 / 24 | 11 | 5 | `/spec-build` |
-| 14 | [resident-mode](resident-mode.md) | 3 / 23 | 13 | 0 | `/spec-build` |
-| 15 | [screenshots](screenshots.md) | 8 / 23 | 8 | 1 | `/spec-build` |
-| 16 | [installation](installation.md) | 11 / 21 | 7 | 3 | `/spec-build` |
-| 17 | [updates](updates.md) | 9 / 23 | 2 | 1 | `/spec-build` |
-| 18 | [release](release.md) | 5 / 18 | 9 | 3 | `/spec-build` |
-| 19 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
-| 20 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
-| 21 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **208 / 426** | | | |
+| 3 | [startup](startup.md) | 3 / 14 | 6 | 3 | `/spec-build` |
+| 4 | [browsing](browsing.md) | 8 / 21 | 3 | 1 | `/spec-build` |
+| 5 | [viewing](viewing.md) | 7 / 22 | 0 | 2 | `/spec-build` |
+| 6 | [image-formats](image-formats.md) | 16 / 24 | 4 | 0 | `/spec-build` |
+| 7 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
+| 8 | [animations](animations.md) | 4 / 14 | 0 | 1 | `/spec-build` |
+| 9 | [color-management](color-management.md) | 10 / 19 | 3 | 2 | `/spec-build` |
+| 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design); then `/spec-check` |
+| 11 | [localization](localization.md) | 7 / 17 | 1 | 0 | `/spec-build` |
+| 12 | [platform-shells](platform-shells.md) | 8 / 24 | 11 | 5 | `/spec-build` |
+| 13 | [resident-mode](resident-mode.md) | 3 / 23 | 13 | 0 | `/spec-build` |
+| 14 | [screenshots](screenshots.md) | 8 / 23 | 8 | 1 | `/spec-build` |
+| 15 | [installation](installation.md) | 11 / 21 | 7 | 3 | `/spec-build` |
+| 16 | [updates](updates.md) | 9 / 23 | 2 | 1 | `/spec-build` |
+| 17 | [release](release.md) | 5 / 18 | 9 | 3 | `/spec-build` |
+| 18 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
+| 19 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
+| 20 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
+| | **Total** | **193 / 410** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
@@ -39,6 +38,7 @@ Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, 
 
 | Spec | Completed |
 | ---- | --------- |
+| [settings](settings.md) (16 / 16 ACs proven, AC-14 by the Windows CI job) | 2026-11-02 |
 
 ## Defects found during the extraction
 
