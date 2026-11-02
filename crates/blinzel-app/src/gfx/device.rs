@@ -105,19 +105,20 @@ impl Gfx {
                     unsafe { dxgi.SetMaximumFrameLatency(1)? };
                     let adapter = unsafe { dxgi.GetAdapter()? };
                     let factory: IDXGIFactory2 = unsafe { adapter.GetParent()? };
-                    let flags = adapter
+                    let desc = adapter
                         .cast::<IDXGIAdapter1>()
                         .ok()
                         // SAFETY: a plain query of the adapter just created.
-                        .and_then(|a| unsafe { a.GetDesc1() }.ok())
-                        .map_or(0, |d| d.Flags);
+                        .and_then(|a| unsafe { a.GetDesc1() }.ok());
+                    let (flags, vendor, device_id) =
+                        desc.map_or((0, 0, 0), |d| (d.Flags, d.VendorId, d.DeviceId));
                     return Ok(Gfx {
                         device,
                         context,
                         factory,
                         adapter,
                         feature_level,
-                        warp: runs_on_warp(driver, flags),
+                        warp: runs_on_warp(driver, flags, vendor, device_id),
                     });
                 }
                 Err(e) => last_err = Some(e),
@@ -167,13 +168,20 @@ impl Gfx {
     }
 }
 
+/// Microsoft's PCI vendor id and the "Microsoft Basic Render Driver"'s
+/// device id, the documented way to recognise it: on CI runners it does not
+/// set `DXGI_ADAPTER_FLAG_SOFTWARE`.
+const BASIC_RENDER_DRIVER: (u32, u32) = (0x1414, 0x8c);
+
 /// Whether a device created with `driver` on an adapter with
-/// `adapter_flags` (`DXGI_ADAPTER_DESC1::Flags`) renders with WARP: the WARP
-/// driver type, or the hardware type on the "Microsoft Basic Render
-/// Driver" of a machine without a GPU driver, a software adapter that is
-/// WARP too.
-fn runs_on_warp(driver: D3D_DRIVER_TYPE, adapter_flags: u32) -> bool {
-    driver == D3D_DRIVER_TYPE_WARP || adapter_flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
+/// `adapter_flags` (`DXGI_ADAPTER_DESC1::Flags`), `vendor` and `device_id`
+/// renders with WARP: the WARP driver type, or the hardware type on a
+/// software adapter such as the "Microsoft Basic Render Driver" of a
+/// machine without a GPU driver, which is WARP too.
+fn runs_on_warp(driver: D3D_DRIVER_TYPE, adapter_flags: u32, vendor: u32, device_id: u32) -> bool {
+    driver == D3D_DRIVER_TYPE_WARP
+        || adapter_flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
+        || (vendor, device_id) == BASIC_RENDER_DRIVER
 }
 
 /// Half of what Windows grants the process (`os_budget`, DXGI), else half
@@ -237,10 +245,24 @@ mod tests {
     #[test]
     fn the_basic_render_driver_counts_as_warp() {
         let software = DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32;
-        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, 0));
-        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, software));
-        assert!(runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, software));
-        assert!(!runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, 0));
+        let nvidia = (0x10de, 0x2684);
+        let (brd_vendor, brd_device) = (0x1414, 0x8c);
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, 0, nvidia.0, nvidia.1));
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, software, 0, 0));
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, software, 0, 0));
+        assert!(runs_on_warp(
+            D3D_DRIVER_TYPE_HARDWARE,
+            0,
+            brd_vendor,
+            brd_device
+        ));
+        assert!(!runs_on_warp(
+            D3D_DRIVER_TYPE_HARDWARE,
+            0,
+            nvidia.0,
+            nvidia.1
+        ));
+        assert!(!runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, 0, brd_vendor, 0x8d));
         // Whatever this machine has: the Basic Render Driver is WARP.
         let gfx = Gfx::create(false).expect("a Direct3D 11 device");
         if gfx.adapter_name() == "Microsoft Basic Render Driver" {
