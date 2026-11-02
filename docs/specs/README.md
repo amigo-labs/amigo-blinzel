@@ -12,7 +12,7 @@ The first three carry decisions of 2026-11-02 that change behavior, so they come
 | - | ---- | ---------- | ------- | ------ | ---- |
 | 1 | [selection-and-export](selection-and-export.md) | 17 / 22 | 2 | 2 | `/spec-build`: the clipboard block is left (AC-09 Windows, AC-10 Linux, AC-11 macOS); then the manual checks AC-04, AC-15 |
 | 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements), then `/spec-check` |
-| 3 | [settings](settings.md) | 3 / 16 | 1 | 0 | `/spec-build` (decided: `ram_budget_mb` is dropped, AC-16) |
+| 3 | [settings](settings.md) | 15 / 16 | 1 | 0 | push for the Windows CI run of AC-14 (`tests/placement.rs`), then `/spec-check` |
 | 4 | [startup](startup.md) | 3 / 14 | 6 | 3 | `/spec-build` |
 | 5 | [browsing](browsing.md) | 8 / 21 | 3 | 1 | `/spec-build` |
 | 6 | [viewing](viewing.md) | 7 / 22 | 0 | 2 | `/spec-build` |
@@ -31,7 +31,7 @@ The first three carry decisions of 2026-11-02 that change behavior, so they come
 | 19 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 20 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
 | 21 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **189 / 426** | | | |
+| | **Total** | **201 / 426** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
