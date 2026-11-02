@@ -580,12 +580,8 @@ impl Shell {
                 vec![]
             }
             Action::SetScreenshotHotkey(on) => {
-                if !hotkey::set(on) {
-                    tell(
-                        &mut self.app,
-                        &mut self.notice_until,
-                        tr(Msg::HotkeyTakenMac).into(),
-                    );
+                if let Some(text) = hotkey::notice(hotkey::set(on)) {
+                    tell(&mut self.app, &mut self.notice_until, text.into());
                 }
                 vec![]
             }
@@ -802,9 +798,7 @@ impl Shell {
                 }
                 vec![]
             }
-            UserEvent::Hotkey => vec![Action::Capture {
-                whole_screen: false,
-            }],
+            UserEvent::Hotkey => vec![hotkey::ON_PRESS],
             UserEvent::Frozen(r, whole_screen) => {
                 let gpu = app.device.gpu.clone();
                 let r = r.and_then(|shots| {
@@ -1311,9 +1305,11 @@ define_class!(
             with_shell(|s| {
                 if s.app.settings.resident {
                     set_resident(mtm, true);
-                    if s.app.settings.screenshot_hotkey && !hotkey::set(true) {
-                        tell(&mut s.app, &mut s.notice_until, tr(Msg::HotkeyTakenMac).into());
-                    }
+                }
+                if hotkey::wanted(&s.app.settings)
+                    && let Some(text) = hotkey::notice(hotkey::set(true))
+                {
+                    tell(&mut s.app, &mut s.notice_until, text.into());
                 }
                 if s.start_hidden {
                     s.hide();
@@ -1833,16 +1829,13 @@ pub fn run() -> i32 {
     let args = parse_args();
     if let Some(out) = &args.capture_test {
         NSApplication::sharedApplication(mtm);
-        return match screenshot::capture_test(mtm, out) {
-            Ok((w, h)) => {
-                println!("{}: {w}x{h}", out.display());
-                0
-            }
-            Err(e) => {
-                eprintln!("amigo-blinzel: {e}");
-                1
-            }
-        };
+        let (code, line) = screenshot::capture_test_exit(out, &screenshot::capture_test(mtm, out));
+        if code == 0 {
+            println!("{line}");
+        } else {
+            eprintln!("{line}");
+        }
+        return code;
     }
     let settings = settings_store::load();
     // The login item of a copy whose resident mode was turned off since.

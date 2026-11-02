@@ -28,7 +28,8 @@ use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSBackingStoreType, NSCursor, NSEvent,
     NSEventModifierFlags, NSScreen, NSScreenSaverWindowLevel, NSTrackingArea,
-    NSTrackingAreaOptions, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSTrackingAreaOptions, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel,
+    NSWindowStyleMask,
 };
 use objc2_core_foundation::{
     CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType, CGPoint, CGRect, CGSize,
@@ -365,7 +366,6 @@ pub fn frozen(
     hidden: bool,
 ) -> Result<(), String> {
     let p = pointer(mtm);
-    let under = |f: &Frozen| f.display.frame.contains(p);
     if whole_screen {
         let frames: Vec<Rect> = shots.iter().map(|f| f.display.frame).collect();
         let f = &shots[snip::monitor_under(&frames, p).unwrap_or(0)];
@@ -377,16 +377,12 @@ pub fn frozen(
     let mut key = None;
     let mut panels = Vec::with_capacity(shots.len());
     for (index, f) in shots.into_iter().enumerate() {
-        let cursor = if under(&f) {
-            key = Some(index);
-            let local = to_display_pixels(
-                Rect::new(p.0, p.1, 0.0, 0.0),
-                f.display.frame,
-                f.display.scale,
-            );
-            (local.x, local.y)
-        } else {
-            (-1.0, -1.0)
+        let cursor = match cursor_on(&f.display, p) {
+            Some(c) => {
+                key = Some(index);
+                c
+            }
+            None => (-1.0, -1.0),
         };
         // Not shown yet: a failure drops the panels made so far.
         panels.push(open_panel(mtm, gpu, device, f, index, cursor)?);
@@ -404,6 +400,15 @@ pub fn frozen(
     PANELS.with(|ps| *ps.borrow_mut() = panels);
     NSCursor::crosshairCursor().set();
     Ok(())
+}
+
+/// The pointer `p` (global Quartz points) in the pixels of `d`, if it is
+/// on that display.
+fn cursor_on(d: &Display, p: (f64, f64)) -> Option<(f64, f64)> {
+    d.frame.contains(p).then(|| {
+        let local = to_display_pixels(Rect::new(p.0, p.1, 0.0, 0.0), d.frame, d.scale);
+        (local.x, local.y)
+    })
 }
 
 // ----------------------------------------------------------------- overlay
@@ -449,16 +454,12 @@ fn open_panel(
     drop(image);
     let c = frozen.display.cocoa;
     let frame = NSRect::new(NSPoint::new(c.x, c.y), NSSize::new(c.w, c.h));
-    let window = SnipWindow::new(mtm, frame);
-    window.setLevel(NSScreenSaverWindowLevel);
+    let (style, level, behavior) = panel_style();
+    let window = SnipWindow::new(mtm, frame, style);
+    window.setLevel(level);
     window.setOpaque(true);
     window.setHasShadow(false);
-    window.setCollectionBehavior(
-        NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::Stationary
-            | NSWindowCollectionBehavior::IgnoresCycle,
-    );
+    window.setCollectionBehavior(behavior);
     // SAFETY: the panel list keeps the window.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setAcceptsMouseMovedEvents(true);
@@ -486,12 +487,7 @@ fn open_panel(
     window.setContentView(Some(&view));
     window.makeFirstResponder(Some(&view));
     let canvas = MetalCanvas::new(gpu.clone(), Target::Layer(layer), (w, h));
-    let snip = Snip::new(
-        (w, h),
-        vec![Rect::new(0.0, 0.0, w as f64, h as f64)],
-        frozen.windows.clone(),
-        cursor,
-    );
+    let snip = snip_of(&frozen, cursor);
     let mut panel = Panel {
         window,
         canvas,
@@ -501,6 +497,32 @@ fn open_panel(
     };
     render(&mut panel);
     Ok(panel)
+}
+
+/// How each display's panel sits: borderless at screen-saver level (above
+/// the menu bar and the Dock), on every Space and over full-screen apps,
+/// outside the window cycle.
+fn panel_style() -> (NSWindowStyleMask, NSWindowLevel, NSWindowCollectionBehavior) {
+    (
+        NSWindowStyleMask::Borderless,
+        NSScreenSaverWindowLevel,
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::Stationary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    )
+}
+
+/// The overlay of one frozen display: its picture is the only monitor, so
+/// a selection stays on that display.
+fn snip_of(f: &Frozen, cursor: (f64, f64)) -> Snip {
+    let (w, h) = f.size;
+    Snip::new(
+        (w, h),
+        vec![Rect::new(0.0, 0.0, w as f64, h as f64)],
+        f.windows.clone(),
+        cursor,
+    )
 }
 
 fn render(p: &mut Panel) {
@@ -592,11 +614,11 @@ define_class!(
 );
 
 impl SnipWindow {
-    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, frame: NSRect, style: NSWindowStyleMask) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(());
         // SAFETY: NSWindow's designated initializer.
         unsafe {
-            msg_send![super(this), initWithContentRect: frame, styleMask: NSWindowStyleMask::Borderless, backing: NSBackingStoreType::Buffered, defer: false]
+            msg_send![super(this), initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
         }
     }
 }
@@ -744,11 +766,19 @@ pub fn save(bgra: Vec<u8>, w: u32, h: u32, settings: &Settings) {
         });
 }
 
+/// `Ok` where this process may record the screen (`preflight`), else why
+/// not.
+fn may_record(preflight: bool) -> Result<(), String> {
+    if preflight {
+        Ok(())
+    } else {
+        Err("screen recording is not allowed for this process".into())
+    }
+}
+
 /// The main display into `out` as PNG, at once (CI): its size.
 pub fn capture_test(mtm: MainThreadMarker, out: &Path) -> Result<(u32, u32), String> {
-    if !CGPreflightScreenCaptureAccess() {
-        return Err("screen recording is not allowed for this process".into());
-    }
+    may_record(CGPreflightScreenCaptureAccess())?;
     let displays = displays(mtm);
     let main = displays.first().copied().ok_or("no display")?;
     let shot = grab(&[main])?.pop().ok_or("no display")?;
@@ -762,9 +792,178 @@ pub fn capture_test(mtm: MainThreadMarker, out: &Path) -> Result<(u32, u32), Str
     Ok((w, h))
 }
 
+/// The exit code of `--capture-test` and its line: the PNG's size for
+/// stdout and 0, or the reason for stderr and 1.
+pub fn capture_test_exit(out: &Path, r: &Result<(u32, u32), String>) -> (i32, String) {
+    match r {
+        Ok((w, h)) => (0, format!("{}: {w}x{h}", out.display())),
+        Err(e) => (1, format!("amigo-blinzel: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::macos::shell::Delegate;
+    use objc2::runtime::AnyClass;
+    use objc2::{ClassType, sel};
+    use objc2_app_kit::{NSMainMenuWindowLevel, NSStatusWindowLevel};
+    use objc2_core_graphics::{
+        CGBitmapContextCreateImage, CGDisplayBounds, CGError, CGGetActiveDisplayList,
+        CGMainDisplayID, kCGColorSpaceDisplayP3,
+    };
+
+    /// `docs/specs/screenshots.md` AC-08: every display gets its own
+    /// borderless panel above the menu bar; the pointer is on one of them,
+    /// and a drag towards the next display stops at its edge.
+    #[test]
+    fn each_display_gets_a_panel_above_the_menu_bar_and_keeps_its_selection() {
+        let (style, level, behavior) = panel_style();
+        assert_eq!(style, NSWindowStyleMask::Borderless);
+        assert_eq!(level, NSScreenSaverWindowLevel);
+        assert!(level > NSMainMenuWindowLevel && level > NSStatusWindowLevel);
+        assert!(behavior.contains(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+        ));
+        // A Retina main display and a 1x display right of it.
+        let main = Display {
+            id: 1,
+            frame: Rect::new(0.0, 0.0, 1512.0, 982.0),
+            cocoa: Rect::new(0.0, 0.0, 1512.0, 982.0),
+            scale: 2.0,
+        };
+        let right = Display {
+            id: 2,
+            frame: Rect::new(1512.0, 0.0, 1920.0, 1080.0),
+            cocoa: Rect::new(1512.0, -98.0, 1920.0, 1080.0),
+            scale: 1.0,
+        };
+        assert_eq!(cursor_on(&main, (100.0, 50.0)), Some((200.0, 100.0)));
+        assert_eq!(cursor_on(&main, (2000.0, 500.0)), None);
+        assert_eq!(cursor_on(&right, (2000.0, 500.0)), Some((488.0, 500.0)));
+        let frozen = Frozen {
+            display: main,
+            bgra: Vec::new(),
+            size: main.pixels(),
+            windows: Vec::new(),
+        };
+        let mut s = snip_of(&frozen, (2900.0, 1000.0));
+        s.mouse_down((2900.0, 1000.0));
+        // Released over the display on the right: the part stops at the
+        // edge of this one (3024 pixels wide).
+        assert_eq!(
+            s.mouse_up((3500.0, 1200.0)),
+            Outcome::Done(Rect::new(2900.0, 1000.0, 124.0, 200.0))
+        );
+    }
+
+    /// A 2 × 2 picture of `rgb` in colour space `name`.
+    fn picture_in(name: &CFString, rgb: [u8; 3]) -> CFRetained<CGImage> {
+        let space = CGColorSpace::with_name(Some(name)).unwrap();
+        let mut data = [rgb[0], rgb[1], rgb[2], 255].repeat(4);
+        // SAFETY: `data` holds 2 rows of 8 bytes and outlives the context.
+        let ctx = unsafe {
+            CGBitmapContextCreate(
+                data.as_mut_ptr().cast::<c_void>(),
+                2,
+                2,
+                8,
+                8,
+                Some(&space),
+                CGImageAlphaInfo::NoneSkipLast.0,
+            )
+        }
+        .unwrap();
+        CGBitmapContextCreateImage(Some(&ctx)).unwrap()
+    }
+
+    /// `docs/specs/screenshots.md` AC-08: a display's picture is converted
+    /// to sRGB (a Display P3 red gets redder), an sRGB one stays as it is.
+    #[test]
+    fn a_frozen_picture_is_converted_to_srgb() {
+        // SAFETY: Core Graphics' constant names.
+        let (p3, srgb) = unsafe { (kCGColorSpaceDisplayP3, kCGColorSpaceSRGB) };
+        let px = to_bgra(&picture_in(p3, [200, 60, 60]), (2, 2)).unwrap();
+        assert_eq!(px.len(), 16);
+        // P3 (200, 60, 60) is about sRGB (219, 42, 52).
+        let (b, g, r, a) = (px[0], px[1], px[2], px[3]);
+        assert!(
+            (212..=226).contains(&r) && (34..=50).contains(&g) && (44..=60).contains(&b),
+            "{r} {g} {b}"
+        );
+        assert_eq!(a, 255);
+        let px = to_bgra(&picture_in(srgb, [200, 60, 60]), (2, 2)).unwrap();
+        for (got, want) in px[..4].iter().zip([60u8, 60, 200, 255]) {
+            assert!(got.abs_diff(want) <= 1, "{:?}", &px[..4]);
+        }
+    }
+
+    /// `docs/specs/screenshots.md` AC-08: every display is frozen, at its
+    /// own size (the CI runner grants Screen Recording, see AC-23).
+    #[test]
+    fn every_display_is_frozen() {
+        // Connects to the window server first, as the app does through
+        // NSApplication: ScreenCaptureKit needs that connection.
+        let main = CGMainDisplayID();
+        assert!(CGPreflightScreenCaptureAccess(), "screen recording");
+        let mut ids = [0u32; 16];
+        let mut n = 0u32;
+        // SAFETY: room for 16 ids and a valid count pointer.
+        let err = unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut n) };
+        assert_eq!(err, CGError::Success);
+        let displays: Vec<Display> = ids[..n as usize]
+            .iter()
+            .map(|&id| {
+                let frame = rect(CGDisplayBounds(id));
+                Display {
+                    id,
+                    frame,
+                    cocoa: frame,
+                    scale: 1.0,
+                }
+            })
+            .collect();
+        assert!(displays.iter().any(|d| d.id == main));
+        let shots = grab(&displays).unwrap();
+        assert_eq!(shots.len(), displays.len());
+        for (f, d) in shots.iter().zip(&displays) {
+            assert_eq!((f.display.id, f.size), (d.id, d.pixels()));
+            assert_eq!(f.bgra.len(), f.size.0 as usize * f.size.1 as usize * 4);
+        }
+    }
+
+    /// `docs/specs/screenshots.md` AC-14: a right click on a panel closes
+    /// the overlay (its view answers it instead of passing it on), and so
+    /// does the app losing the foreground (⌘Tab, a click into another app).
+    #[test]
+    fn a_right_click_or_losing_the_foreground_cancels_the_overlay() {
+        let imp = |class: &AnyClass, name| {
+            class
+                .instance_method(name)
+                .map(|m| m.implementation() as usize)
+        };
+        let right = sel!(rightMouseDown:);
+        assert!(imp(SnipView::class(), right).is_some());
+        assert_ne!(imp(SnipView::class(), right), imp(NSView::class(), right));
+        assert!(imp(Delegate::class(), sel!(applicationDidResignActive:)).is_some());
+    }
+
+    /// `docs/specs/screenshots.md` AC-23: `--capture-test` exits with 0
+    /// and the PNG's size, without Screen Recording with 1 and the reason.
+    #[test]
+    fn the_capture_test_exits_0_with_its_size_else_1() {
+        let out = Path::new("capture.png");
+        assert!(may_record(true).is_ok());
+        assert_eq!(
+            capture_test_exit(out, &Ok((1920, 1080))),
+            (0, "capture.png: 1920x1080".to_string())
+        );
+        let (code, line) = capture_test_exit(out, &may_record(false).map(|()| (0, 0)));
+        assert_eq!(code, 1);
+        assert!(line.contains("screen recording is not allowed"), "{line}");
+        assert_eq!(capture_test_exit(out, &Err("no display".into())).0, 1);
+    }
 
     #[test]
     fn quartz_frames_count_down_from_the_main_display() {

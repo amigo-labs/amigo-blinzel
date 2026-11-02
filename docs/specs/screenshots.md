@@ -64,7 +64,7 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 - Commands: `Cmd::{Capture, CaptureScreen, ToggleScreenshotHotkey, ToggleScreenshotSave, ToggleScreenshotOpen, ToggleScreenshotEdit, ScreenshotFolder, OpenWith, EditWith, ChooseEditor}`; `blinzel_ui::menu::SCREENSHOTS`; `App::on_screenshot`, `edit_action`.
 - Windows (`crates/blinzel-app/src/screenshot.rs`): `RegisterHotKey` with `VK_SNAPSHOT` (ids 1 and 2, `MOD_NOREPEAT`), GDI `BitBlt` with `SRCCOPY | CAPTUREBLT` of `SM_*VIRTUALSCREEN`, windows from `EnumWindows` (visible, not minimized, not cloaked, not `Progman`/`WorkerW`, ≥ 8 px, `DWMWA_EXTENDED_FRAME_BOUNDS`), overlay class `BlinzelSnip` (`WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP`, cloaked until the first present), result to the main window as `WM_SCREENSHOT`; clipboard `clipboard::put_shot` (10 tries, 20 ms apart).
 - macOS (`macos/screenshot.rs`, `macos/hotkey.rs`): Carbon `RegisterEventHotKey` (kVK_ANSI_1, cmd + shift; no accessibility permission), `SCScreenshotManager` per display, `CGWindowListCopyWindowInfo` for windows, `CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess`, one `SnipWindow` panel per display at `NSScreenSaverWindowLevel`.
-- CI: Windows job step "Screenshot capture test" checks the PNG signature and ≥ 640 × 480; the macOS job's step of the same name is `continue-on-error` (the runner may not grant Screen Recording).
+- CI: the Windows and macOS jobs' steps "Screenshot capture test" check the exit code, the PNG signature and ≥ 640 × 480 (the macOS runner grants Screen Recording).
 
 ## Edge cases
 
@@ -88,17 +88,17 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 | AC-01 | `menu_settings_offers_each_platforms_entries` (`crates/blinzel-ui/src/app_settings_tests.rs`), `the_tray_menu_shows_opens_takes_screenshots_and_exits` (`crates/blinzel-ui/src/app_resident_tests.rs`), `screenshot_actions_do_nothing_on_linux` (`crates/blinzel-app/src/linux/shell.rs`) | built |        |
 | AC-02 | `print_and_ctrl_shift_print_open_the_overlay_in_resident_mode` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet | open   |        |
 | AC-03 | `a_taken_print_key_is_retried_for_a_minute_then_reported` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet; the notice's way (balloon while hidden, `hint_pending` for the next wake, 9 s in the window) has no test | open   |        |
-| AC-04 |      | open   |        |
+| AC-04 | `cmd_shift_1_opens_the_overlay_or_says_the_menu_bar_icon_still_works` (`crates/blinzel-app/src/macos/hotkey.rs`), CI: macOS — written, not run yet | open   |        |
 | AC-05 | `turning_the_screenshot_key_on_turns_resident_mode_on_too` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) | built |        |
 | AC-06 | `the_tray_entries_take_the_screen_or_open_the_overlay` (`crates/blinzel-ui/src/app_screenshot_tests.rs`), `the_whole_screen_is_the_monitor_under_the_pointer` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-07 | `a_screenshot_freezes_the_virtual_desktop_under_a_cloaked_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet | open   |        |
-| AC-08 |      | open   |        |
+| AC-08 | `each_display_gets_a_panel_above_the_menu_bar_and_keeps_its_selection`, `a_frozen_picture_is_converted_to_srgb`, `every_display_is_frozen` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS — written, not run yet | open   |        |
 | AC-09 | `quartz_frames_count_down_from_the_main_display`, `windows_map_into_display_pixels`, `crops_rows` (`crates/blinzel-app/src/macos/screenshot.rs`), macOS CI job | built |        |
 | AC-10 | `a_click_takes_the_frontmost_window_or_the_monitor` (`crates/blinzel-ui/src/snip.rs`), Linux CI job and all others | built |        |
 | AC-11 | `drags_a_region_in_any_direction` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-12 | `enter_takes_the_monitor_escape_cancels`, `arrows_move_the_pointer_and_enter_finishes_a_drag` (`crates/blinzel-ui/src/snip.rs`) | built |        |
 | AC-13 | `arrows_move_the_pointer_and_enter_finishes_a_drag` (`crates/blinzel-ui/src/snip.rs`) | built |        |
-| AC-14 | `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet; the macOS half has no test | open   |        |
+| AC-14 | `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/screenshot.rs`), CI: Windows — written, not run yet; `a_right_click_or_losing_the_foreground_cancels_the_overlay` (`crates/blinzel-app/src/macos/screenshot.rs`), CI: macOS — written, not run yet | open   |        |
 | AC-15 | `a_shot_that_misses_the_clipboard_or_its_file_says_why` (`crates/blinzel-ui/src/app_screenshot_tests.rs`) covers the notice; `a_screenshot_goes_on_the_clipboard_as_dibv5_and_png` (`crates/blinzel-app/src/clipboard.rs`), CI: Windows — written, not run yet; `a_screenshot_goes_on_the_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`), CI: macOS — written, not run yet | open   |        |
 | AC-16 | `destination_follows_the_settings` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
 | AC-17 | `writes_free_names_and_sweeps_old_shots` (`crates/blinzel-core/src/screenshot.rs`) | built |        |
@@ -107,7 +107,7 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 | AC-20 | `a_shot_opens_in_the_viewer_or_says_it_was_copied_then_goes_to_the_editor` (`crates/blinzel-ui/src/app_screenshot_tests.rs`), `edit_asks_for_an_editor_first` (`crates/blinzel-ui/src/app.rs`) | built |        |
 | AC-21 |      | open   |        |
 | AC-22 | CI step "Screenshot capture test" (Windows job, `.github/workflows/ci.yml`) | built |        |
-| AC-23 | CI step "Screenshot capture test" (macOS job) is `continue-on-error`, so it asserts nothing | open |        |
+| AC-23 | `the_capture_test_exits_0_with_its_size_else_1` (`crates/blinzel-app/src/macos/screenshot.rs`) and the CI step "Screenshot capture test" (macOS job: exit code, PNG signature, ≥ 640 × 480), CI: macOS — written, not run yet | open |        |
 
 ## Decisions
 
@@ -122,3 +122,8 @@ M12 (`blinzel.md` §12): the resident instance takes screenshots in the style of
 - AC-07: the overlay's window is `overlay_window(origin, size)`: the test grabs the CI desktop (`grab`, `SRCCOPY | CAPTUREBLT` through `capture_rop`), opens the overlay's window over it and reads its rect (the virtual screen, 1:1), its extended style (`WS_EX_TOPMOST`, `WS_EX_TOOLWINDOW`, `WS_EX_NOREDIRECTIONBITMAP`) and `DWMWA_CLOAKED`; it is never shown. Uncloaking after the first present is `open_overlay`'s, which needs the viewer's Direct3D device, and stays untested.
 - AC-14 (Windows): what closes the overlay is `cancels(msg, wp)`: `WM_RBUTTONUP`, or `WM_ACTIVATE` with `WA_INACTIVE` in its low word.
 - AC-02, AC-07, AC-14: the tests type-check for `x86_64-pc-windows-msvc` (clippy clean) and run only in the Windows CI job, whose first run is the proof.
+- AC-04: the key is `combo()` (kVK_ANSI_1 with cmdKey | shiftKey), which `hotkey::set` registers; when it belongs registered is `hotkey::wanted` (resident mode and the key setting), used at launch; what a press does is `ON_PRESS` (`Action::Capture { whole_screen: false }`), shown or hidden; the notice after registering is `hotkey::notice(registered)`, used at launch and by `SetScreenshotHotkey`. No test registers a real Carbon hot key: Carbon's event target belongs to the main thread, and the tests run on others.
+- AC-08: each panel's window is `panel_style()` (borderless, `NSScreenSaverWindowLevel`, on every Space and over full-screen apps, outside the window cycle), its overlay `snip_of(frozen)` with that display's picture as the only monitor, the pointer's place on it `cursor_on`. The sRGB conversion is `to_bgra`, tested with a Display P3 picture; `every_display_is_frozen` grabs every active display through ScreenCaptureKit off the main thread, as the app does. A panel itself needs the main thread (AppKit), which no test has, so the panels are never opened in a test. The drag and the pointer ran green in a standalone copy on Linux, and red with the overlay twice as wide and with the pointer ignoring the Retina scale.
+- AC-14 (macOS): the panel's view answers `rightMouseDown:` itself (NSView would pass it on) with `close()`, and the app delegate's `applicationDidResignActive:` closes the overlay when another app comes to the front; the test checks both through the Objective-C runtime. A panel losing key status alone does not cancel: moving the pointer to another display makes that display's panel key.
+- AC-23: what `--capture-test` prints and returns is `capture_test_exit` (0 and the size, or 1 and the reason); no permission is `may_record(false)`. The exit-code mapping ran green in a standalone copy on Linux, and red with an error exiting 0. The last three macOS CI runs wrote a 1920 × 1080 PNG, so the step's `continue-on-error` is gone and it checks the PNG like the Windows step.
+- AC-04, AC-08, AC-14, AC-23 (macOS): the tests type-check for `aarch64-apple-darwin` (clippy clean) and run only in the macOS CI job, whose first run is the proof.
