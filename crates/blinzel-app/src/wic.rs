@@ -542,7 +542,15 @@ mod tests {
         );
 
         // A real file only WIC reads: an icon holding a PNG.
-        let red = [[0u8, 0, 255, 255]; 4].concat();
+        // One half-transparent pixel keeps the PNG RGBA: Windows reads only
+        // 32-bit RGBA PNGs inside an icon (an opaque one would be RGB).
+        let red = [
+            [0u8, 0, 255, 255],
+            [0, 0, 255, 255],
+            [0, 0, 255, 255],
+            [0, 0, 255, 128],
+        ]
+        .concat();
         let png = blinzel_core::export::encode_png_bgra(&red, 2, 2).unwrap();
         let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
         ico.extend((png.len() as u32).to_le_bytes());

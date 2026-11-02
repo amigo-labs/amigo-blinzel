@@ -313,7 +313,15 @@ mod tests {
         );
 
         // A PNG decodes natively (RGBA), not through ImageIO (BGRA).
-        let red = [[0u8, 0, 255, 255]; 4].concat();
+        // One half-transparent pixel keeps the PNG RGBA: Windows reads only
+        // 32-bit RGBA PNGs inside an icon (an opaque one would be RGB).
+        let red = [
+            [0u8, 0, 255, 255],
+            [0, 0, 255, 255],
+            [0, 0, 255, 255],
+            [0, 0, 255, 128],
+        ]
+        .concat();
         let png = blinzel_core::export::encode_png_bgra(&red, 2, 2).unwrap();
         let img = decode_any_with(&png, Request::Full, 1).unwrap();
         assert_eq!(
