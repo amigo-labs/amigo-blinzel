@@ -84,7 +84,7 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 | ----- | ---- | ------ | ------ |
 | AC-01 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-02 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
-| AC-03 | — (no test checks the changelog link or the language switch link) | open | |
+| AC-03 | `pages_link_the_changelog_and_the_other_language` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-04 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-05 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-06 | `builds_the_site` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
@@ -95,11 +95,11 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 | AC-11 | `charts_sort_without_highlight` (`crates/blinzel-site/src/charts.rs`, Linux CI) | built | |
 | AC-12 | `expands_placeholders` (`main.rs`), `charts_sort_without_highlight` (`charts.rs`), Linux CI | built | |
 | AC-13 | `pages_need_title_and_description` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
-| AC-14 | — | open | |
-| AC-15 | `expands_placeholders` checks only the x64 URL | open | |
+| AC-14 | `invalid_race_report_fails_naming_the_file` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
+| AC-15 | `download_placeholders_resolve_to_latest_release` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-16 | — (`website/src/site.js`, no browser test) | open | |
 | AC-17 | — (`website/src/lang.js`, no browser test) | open | |
-| AC-18 | `builds_the_site` (entry count and file presence; `robots.txt` content not checked) | open | |
+| AC-18 | `sitemap_lists_every_page_and_robots_names_it` (`crates/blinzel-site/src/main.rs`, Linux CI) | built | |
 | AC-19 | manual | open | |
 | AC-20 | manual | open | |
 | AC-21 | manual | open | |
@@ -107,3 +107,4 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 ## Decisions
 
 - 2026-11-02: Extracted from the code. The design spec's separate pages (features, comparison, benchmarks, methodology, download, changelog) are sections of the start page; the changelog is the GitHub releases page, not a page generated from `CHANGELOG.md`.
+- 2026-11-02: AC-03, AC-14, AC-15 and AC-18 were already met by the code, so their new tests were green at once; each was proven by breaking the code on purpose (footer link, language switch URL, the file name in the JSON error, two download file names, the `Sitemap:` line, one language and one page in the sitemap), which turned it red.

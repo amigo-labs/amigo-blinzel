@@ -373,14 +373,137 @@ mod tests {
         assert!(expand("{{version", Lang::De, &races).is_err());
     }
 
-    /// The real website sources build, with and without measurements.
+    /// The download placeholders resolve to the stable URLs of the latest
+    /// release, and the start page of each language offers every file.
     #[test]
-    fn builds_the_site() {
+    fn download_placeholders_resolve_to_latest_release() {
+        let base = "https://github.com/amigo-labs/amigo-blinzel/releases/latest/download/";
+        let files = [
+            ("x64", "amigo-blinzel-setup-x64.exe"),
+            ("arm64", "amigo-blinzel-setup-arm64.exe"),
+            ("macos", "amigo-blinzel-macos.dmg"),
+            ("linux-x64", "amigo-blinzel-linux-x64.tar.gz"),
+            ("linux-arm64", "amigo-blinzel-linux-arm64.tar.gz"),
+            ("sums", "SHA256SUMS"),
+        ];
+        for (key, file) in files {
+            let s = expand(&format!("{{{{download:{key}}}}}"), Lang::En, &[]).unwrap();
+            assert_eq!(s, format!("{base}{file}"), "{key}");
+        }
+        let tmp = fresh_site("download");
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let html = fs::read_to_string(dist.join(lang.code()).join("index.html")).unwrap();
+            for (_, file) in files {
+                assert!(html.contains(&format!("href=\"{base}{file}\"")), "{file}");
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A report that exists but is broken stops the build, naming the file.
+    #[test]
+    fn invalid_race_report_fails_naming_the_file() {
+        let tmp = fresh_site("invalid");
+        fs::write(tmp.join("data/race.json"), "{\"machine\": ").unwrap();
+        let e = build(&tmp).expect_err("broken race.json builds");
+        assert!(e.contains("race.json") && e.contains("invalid JSON"), "{e}");
+        fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
+        fs::write(tmp.join("data/race-macos.json"), "not json").unwrap();
+        let e = build(&tmp).expect_err("broken race-macos.json builds");
+        assert!(e.contains("race-macos.json"), "{e}");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Every page links the releases page as its changelog and the same
+    /// page in the other language.
+    #[test]
+    fn pages_link_the_changelog_and_the_other_language() {
+        let tmp = fresh_site("links");
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let other = lang.other();
+            for p in PAGES {
+                let html =
+                    fs::read_to_string(dist.join(lang.code()).join(format!("{p}.html"))).unwrap();
+                let changes = format!("<a href=\"{RELEASES_PAGE}\">{}</a>", lang.t("changes"));
+                assert!(html.contains(&changes), "{}/{p}: {changes}", lang.code());
+                let switch = format!(
+                    "<a class=\"lang\" href=\"{}\" hreflang=\"{}\" lang=\"{1}\">{}</a>",
+                    url(other, p),
+                    other.code(),
+                    other.t("lang_name")
+                );
+                assert!(html.contains(&switch), "{}/{p}: {switch}", lang.code());
+            }
+        }
+        assert_eq!(
+            (Lang::De.t("changes"), Lang::En.t("changes")),
+            ("Änderungen", "Changes")
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// One sitemap entry per page and language, each naming both language
+    /// versions, and a robots.txt that points to the sitemap.
+    #[test]
+    fn sitemap_lists_every_page_and_robots_names_it() {
+        let tmp = fresh_site("sitemap");
+        let dist = build(&tmp).unwrap();
+        let sitemap = fs::read_to_string(dist.join("sitemap.xml")).unwrap();
+        let entries: Vec<&str> = sitemap.split("<url>").skip(1).collect();
+        let mut locs: Vec<String> = Vec::new();
+        for entry in &entries {
+            let entry = entry.split("</url>").next().unwrap();
+            let loc = entry
+                .strip_prefix("<loc>")
+                .and_then(|e| e.split("</loc>").next())
+                .unwrap_or_else(|| panic!("no <loc>: {entry}"));
+            let (lang, slug) = Lang::ALL
+                .iter()
+                .flat_map(|&l| PAGES.iter().map(move |&s| (l, s)))
+                .find(|&(l, s)| loc == format!("{SITE}{}", url(l, s)))
+                .unwrap_or_else(|| panic!("unknown page {loc}"));
+            assert_eq!(entry.matches("<xhtml:link").count(), 2, "{loc}");
+            for alt in Lang::ALL {
+                let link = format!(
+                    "<xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\"/>",
+                    alt.code(),
+                    url(alt, slug)
+                );
+                assert!(entry.contains(&link), "{loc}: {link}");
+            }
+            locs.push(url(lang, slug));
+        }
+        locs.sort();
+        locs.dedup();
+        assert_eq!(locs.len(), entries.len(), "a page is listed twice");
+        assert_eq!(locs.len(), Lang::ALL.len() * PAGES.len());
+        let robots = fs::read_to_string(dist.join("robots.txt")).unwrap();
+        assert!(
+            robots
+                .lines()
+                .any(|l| l == format!("Sitemap: {SITE}/sitemap.xml")),
+            "{robots}"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A copy of the real website sources in its own temp folder, without
+    /// measurements.
+    fn fresh_site(tag: &str) -> PathBuf {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let tmp = std::env::temp_dir().join(format!("blinzel-site-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("blinzel-site-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("data")).unwrap();
         copy_dir(&root.join("website/src"), &tmp.join("src"));
+        tmp
+    }
+
+    /// The real website sources build, with and without measurements.
+    #[test]
+    fn builds_the_site() {
+        let tmp = fresh_site("build");
         let dist = build(&tmp).unwrap();
         let html = fs::read_to_string(dist.join("de/index.html")).unwrap();
         assert!(html.contains("Referenzmessung"));
