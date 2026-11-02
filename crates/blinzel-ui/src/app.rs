@@ -2375,6 +2375,17 @@ impl<B: Backend> App<B> {
         self.invalidate();
     }
 
+    /// A message for the user: the notice on the window (`None`), or,
+    /// while the window is hidden, `text` back for the tray balloon or the
+    /// menu bar title (`docs/specs/resident-mode.md` AC-22).
+    pub fn tell(&mut self, text: String) -> Option<String> {
+        if self.hidden {
+            return Some(text);
+        }
+        self.show_notice(text);
+        None
+    }
+
     fn draw_notice(&mut self) {
         let Some(text) = self.notice.clone() else {
             return;

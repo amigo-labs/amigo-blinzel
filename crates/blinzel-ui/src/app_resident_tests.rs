@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::menu::{self, MenuItem};
-use crate::testkit::Harness;
+use crate::testkit::{Harness, LUT_SOURCES};
 use Cmd::*;
 use blinzel_core::bufpool;
 use blinzel_core::icc::{Profile, Trc, colorants, matrix_profile};
@@ -181,4 +181,45 @@ fn the_tray_menu_shows_opens_takes_screenshots_and_exits() {
     let a = h.app.open_chosen(h.images.join("a.png"));
     assert_eq!(a.last(), Some(&Action::Wake { opened: true }));
     assert_eq!(h.current_name().as_deref(), Some("a.png"));
+}
+
+/// AC-20 (the App half): the `--resident` warm-up decodes, uploads and
+/// presents a generated 3072 × 2048 JPEG once and, with colour management
+/// on, builds exactly one transform, from Display P3; with it off, none.
+#[test]
+fn warming_up_presents_a_photo_once_and_builds_one_p3_transform() {
+    let p3 = Profile::new(matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3"));
+    for color_management in [true, false] {
+        let mut h = Harness::with_settings(Settings {
+            color_management,
+            ..Settings::default()
+        });
+        let presented = h.app.canvas.presented;
+        let luts = LUT_SOURCES.lock().unwrap().len();
+        h.app.warm_up(2);
+        assert_eq!(*h.app.device.uploads.lock().unwrap(), [(3072, 2048)]);
+        assert_eq!(h.app.canvas.presented, presented + 1, "presented once");
+        let drawn: Vec<_> = h.frame().images.iter().map(|i| i.full_size).collect();
+        assert_eq!(drawn, [(3072, 2048)]);
+        let built = LUT_SOURCES.lock().unwrap()[luts..].to_vec();
+        let want = if color_management {
+            vec![Some(p3.clone())]
+        } else {
+            vec![]
+        };
+        assert_eq!(built, want, "colour management {color_management}");
+    }
+}
+
+/// AC-22 (the App half): a message for the user is the window's notice,
+/// and while the window is hidden it goes back to the shell for the tray
+/// balloon or the menu bar title instead.
+#[test]
+fn a_message_while_hidden_goes_to_the_tray_instead_of_the_notice() {
+    let mut h = Harness::with_images(&["a.png"]);
+    assert_eq!(h.app.tell("copied".into()), None);
+    assert_eq!(h.app.notice.as_deref(), Some("copied"));
+    h.app.hide();
+    assert_eq!(h.app.tell("taken".into()).as_deref(), Some("taken"));
+    assert!(h.app.notice.is_none(), "no notice on a hidden window");
 }
