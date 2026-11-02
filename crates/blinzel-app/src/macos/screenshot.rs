@@ -9,7 +9,7 @@
 //! displays may differ in scale, so their pictures do not share pixels.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::c_void;
+use std::ffi::{OsString, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
@@ -18,7 +18,7 @@ use blinzel_core::geom::{Orientation, Rect};
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 use blinzel_core::screenshot as core_shot;
 use blinzel_core::settings::Settings;
-use blinzel_i18n::{Msg, tr, trf};
+use blinzel_i18n::{Lang, Msg, fill, tr, tr_in, trf};
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
 use blinzel_ui::snip::{self, Outcome, Snip};
@@ -702,22 +702,29 @@ pub fn failure(reason: &str) -> String {
     trf(Msg::ScreenshotFailed, &[("reason", &reason)])
 }
 
-/// The folder from the settings, else ~/Pictures/Screenshots.
 fn folder(settings: &Settings) -> PathBuf {
+    folder_in(settings, std::env::var_os("HOME"))
+}
+
+/// The folder from the settings, else ~/Pictures/Screenshots in `home`.
+fn folder_in(settings: &Settings, home: Option<OsString>) -> PathBuf {
     if let Some(d) = &settings.screenshot_dir {
         return PathBuf::from(d);
     }
-    std::env::var_os("HOME")
-        .map(|h| Path::new(&h).join("Pictures/Screenshots"))
+    home.map(|h| Path::new(&h).join("Pictures/Screenshots"))
         .unwrap_or_else(|| std::env::temp_dir().join("Screenshots"))
 }
 
-/// "Screenshot 2026-10-26 071530" in the UI language.
 fn file_stem() -> String {
+    file_stem_at(blinzel_i18n::lang(), &NSDate::now())
+}
+
+/// "Screenshot 2026-10-26 071530" in `lang`, for `date` in local time.
+fn file_stem_at(lang: Lang, date: &NSDate) -> String {
     let f = NSDateFormatter::new();
     f.setDateFormat(Some(ns_string!("yyyy-MM-dd HHmmss")));
-    let date = f.stringFromDate(&NSDate::now()).to_string();
-    trf(Msg::ScreenshotName, &[("date", &date)])
+    let date = f.stringFromDate(date).to_string();
+    fill(tr_in(lang, Msg::ScreenshotName), &[("date", &date)])
 }
 
 /// Encodes the picked part and writes the file the settings ask for in
@@ -803,5 +810,40 @@ mod tests {
         let (px, w, h) = f.crop(Rect::new(1.0, 1.0, 2.0, 1.0));
         assert_eq!((w, h), (2, 1));
         assert_eq!(px, (16..24).collect::<Vec<u8>>());
+    }
+
+    /// `docs/specs/screenshots.md` AC-18: the folder chosen in the menu,
+    /// else ~/Pictures/Screenshots.
+    #[test]
+    fn the_folder_is_the_chosen_one_else_pictures_screenshots() {
+        let chosen = Settings {
+            screenshot_dir: Some("/Volumes/Shots".into()),
+            ..Settings::default()
+        };
+        let home = || Some(OsString::from("/Users/ada"));
+        assert_eq!(folder_in(&chosen, home()), Path::new("/Volumes/Shots"));
+        let none = Settings::default();
+        assert_eq!(
+            folder_in(&none, home()),
+            Path::new("/Users/ada/Pictures/Screenshots")
+        );
+    }
+
+    /// `docs/specs/screenshots.md` AC-18: the file is named after the
+    /// local time in the UI language.
+    #[test]
+    fn the_file_is_named_after_the_time_in_the_ui_language() {
+        // 2026-07-15 12:00:00 UTC: the 14th to the 16th in any time zone.
+        let date = NSDate::dateWithTimeIntervalSince1970(1_784_116_800.0);
+        for (lang, name) in [(Lang::En, "Screenshot "), (Lang::De, "Bildschirmfoto ")] {
+            let stem = file_stem_at(lang, &date);
+            let rest = stem.strip_prefix(name).expect(&stem);
+            assert!(rest.starts_with("2026-07-1"), "{stem}");
+            let shape: String = rest
+                .chars()
+                .map(|c| if c.is_ascii_digit() { 'd' } else { c })
+                .collect();
+            assert_eq!(shape, "dddd-dd-dd dddddd", "{stem}");
+        }
     }
 }
