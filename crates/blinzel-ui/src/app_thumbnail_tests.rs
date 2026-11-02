@@ -639,3 +639,30 @@ fn transparent_thumbnails_are_composited_over_the_background_colour() {
     assert_eq!(h.thumb_reads(), [] as [PathBuf; 0]);
     white(&h);
 }
+
+/// The pack file's length after the viewer made one thumbnail into a
+/// cache whose pack was `len` bytes long (a sparse file) before.
+fn pack_after_one_thumbnail(len: u64) -> u64 {
+    let mut h = Harness::new();
+    h.write_png("a.png", 64, 48);
+    let dir = h.app.services.cache_dir().unwrap().join("thumbs");
+    std::fs::create_dir_all(&dir).unwrap();
+    let pack = dir.join("thumbs.pack");
+    std::fs::File::create(&pack).unwrap().set_len(len).unwrap();
+    h.open("a.png");
+    h.key(Letter('G'));
+    settle(&mut h, 1, 1);
+    std::fs::metadata(&pack).unwrap().len()
+}
+
+#[test]
+fn the_viewer_opens_its_thumbnail_cache_with_a_one_gib_limit() {
+    // AC-08: 1 MiB below 1 GiB, a thumbnail is appended; 16 bytes below,
+    // it starts a new generation.
+    let gib = 1u64 << 30;
+    let below = gib - (1 << 20);
+    let appended = pack_after_one_thumbnail(below);
+    assert!(appended > below && appended <= gib, "appended: {appended}");
+    let renewed = pack_after_one_thumbnail(gib - 16);
+    assert!(renewed < 1 << 20, "new generation: {renewed}");
+}
