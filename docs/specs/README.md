@@ -21,7 +21,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 9 | [color-management](color-management.md) | 15 / 19 | 3 | 2 | the first CI runs of AC-03's macOS ImageIO clause (`macos/imageio.rs`) and AC-11's Windows half (`color.rs`), both written; the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
 | 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | `/spec-check` round 3 (round 2's blockers fixed: tile tags, Linux multi-file drops, mutation-proof tests); the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design) |
 | 11 | [localization](localization.md) | 15 / 17 | 2 | 0 | the first Windows CI runs of AC-10's Windows half (`run.rs`) and AC-16 (`menu.rs`, `gfx/text.rs`, `platform/mod.rs`), both written; then `/spec-check` |
-| 12 | [platform-shells](platform-shells.md) | 8 / 24 | 11 | 5 | `/spec-build` |
+| 12 | [platform-shells](platform-shells.md) | 12 / 24 | 11 | 5 | `/spec-build` for AC-03, AC-04, AC-08 (Windows `window.rs`) and AC-21 (macOS trash); the first Windows CI runs of AC-01 (`platform/os.rs`, `setup/mod.rs`), AC-02 (`tests/manifest.rs`) and AC-10 (smoke step), all written; the manual checks AC-05, AC-06, AC-13, AC-20, AC-22; then `/spec-check` |
 | 13 | [resident-mode](resident-mode.md) | 3 / 23 | 13 | 0 | `/spec-build` |
 | 14 | [screenshots](screenshots.md) | 8 / 23 | 8 | 1 | `/spec-build` |
 | 15 | [installation](installation.md) | 11 / 21 | 7 | 3 | `/spec-build` |
@@ -30,7 +30,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 18 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 19 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
 | 20 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **230 / 410** | | | |
+| | **Total** | **234 / 410** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
