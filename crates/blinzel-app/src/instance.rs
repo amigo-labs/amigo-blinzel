@@ -61,10 +61,21 @@ pub fn hidden(except: Option<HWND>) -> Option<HWND> {
 /// The instance a launch should hand over to: any with one window per
 /// app, else only a hidden resident one.
 pub fn target(single_instance: bool, resident: bool) -> Option<HWND> {
+    pick(single_instance, resident, running, || hidden(None))
+}
+
+/// [`target`] over the lookups: `running` finds any instance's window,
+/// `hidden` a hidden resident one (`docs/specs/browsing.md` AC-15).
+fn pick<W>(
+    single_instance: bool,
+    resident: bool,
+    running: impl FnOnce() -> Option<W>,
+    hidden: impl FnOnce() -> Option<W>,
+) -> Option<W> {
     if single_instance {
         running()
     } else if resident {
-        hidden(None)
+        hidden()
     } else {
         None
     }
@@ -166,6 +177,20 @@ mod tests {
             cbData: (data.len() * 2) as u32,
             lpData: data.as_ptr() as *mut _,
         }
+    }
+
+    /// `docs/specs/browsing.md` AC-15: with "Open images in the same
+    /// window" a launch goes to any running window; without it only to a
+    /// hidden resident one (`resident-mode.md`), else it opens its own.
+    #[test]
+    fn a_launch_goes_to_a_running_window_only_in_the_same_window_mode() {
+        let running = || Some(1);
+        let hidden = || Some(2);
+        assert_eq!(pick(true, false, running, hidden), Some(1));
+        assert_eq!(pick(true, true, running, hidden), Some(1));
+        assert_eq!(pick(true, false, || None, hidden), None, "none running");
+        assert_eq!(pick(false, false, running, hidden), None, "its own window");
+        assert_eq!(pick(false, true, running, hidden), Some(2));
     }
 
     #[test]
