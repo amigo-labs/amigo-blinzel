@@ -133,34 +133,47 @@ pub fn on_first_frame() {
 /// Starts the daily background check. A resident instance runs for days,
 /// so it looks again every hour and reads the setting each time.
 pub fn schedule() {
-    if core::RELEASE_KEY.is_none() || installed_layout().is_none() {
+    if core::RELEASE_KEY.is_none() {
         return;
     }
-    let _ = std::thread::Builder::new()
-        .name("blinzel-update".into())
-        .spawn(|| {
-            std::thread::sleep(Duration::from_secs(10));
-            loop {
-                if blinzel_ui::settings_store::load().auto_update {
-                    check_if_due();
-                }
-                std::thread::sleep(Duration::from_secs(3600));
-            }
-        });
-}
-
-fn check_if_due() {
     let Some(layout) = installed_layout() else {
         return;
     };
-    let mut state = load_state(&layout);
-    if !core::check_due(state.last_check, now()) {
-        return;
+    let _ = std::thread::Builder::new()
+        .name("blinzel-update".into())
+        .spawn(move || auto_checks(&mut Auto(layout)));
+}
+
+/// A Windows instance may keep running for days (resident mode): it looks
+/// every hour whether a check is due.
+fn auto_checks(shell: &mut impl core::AutoCheck) {
+    core::auto_checks(shell, true);
+}
+
+/// The automatic check of the installed copy.
+struct Auto(Layout);
+
+impl core::AutoCheck for Auto {
+    fn sleep(&mut self, d: Duration) -> bool {
+        std::thread::sleep(d);
+        true
     }
-    state.last_check = Some(now());
-    save_state(&layout, &state);
-    if let Err(e) = check_and_install(&layout) {
-        debug_log(&format!("update: {e}"));
+    fn auto_update(&mut self) -> bool {
+        blinzel_ui::settings_store::load().auto_update
+    }
+    fn now(&mut self) -> u64 {
+        now()
+    }
+    fn load(&mut self) -> State {
+        load_state(&self.0)
+    }
+    fn save(&mut self, state: &State) {
+        save_state(&self.0, state);
+    }
+    fn check(&mut self) {
+        if let Err(e) = check_and_install(&self.0) {
+            debug_log(&format!("update: {e}"));
+        }
     }
 }
 
@@ -457,6 +470,49 @@ impl Drop for Handle<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A shell for [`auto_checks`] that counts its looks and never waits.
+    #[derive(Default)]
+    struct Looks {
+        sleeps: Vec<u64>,
+        looks: u32,
+    }
+
+    impl core::AutoCheck for Looks {
+        fn sleep(&mut self, d: Duration) -> bool {
+            self.sleeps.push(d.as_secs());
+            self.sleeps.len() < 4
+        }
+        fn auto_update(&mut self) -> bool {
+            self.looks += 1;
+            false
+        }
+        fn now(&mut self) -> u64 {
+            0
+        }
+        fn load(&mut self) -> State {
+            State::default()
+        }
+        fn save(&mut self, _: &State) {}
+        fn check(&mut self) {}
+    }
+
+    /// updates AC-12: a Windows instance looks 10 s after start and then
+    /// every hour, reading the setting each time.
+    #[test]
+    fn a_running_instance_looks_every_hour() {
+        let mut l = Looks::default();
+        auto_checks(&mut l);
+        assert_eq!(l.sleeps, [10, 3600, 3600, 3600]);
+        assert_eq!(l.looks, 3);
+    }
+
+    /// updates AC-14: the test executable is not the installed
+    /// `blinzel.exe`, so it never checks.
+    #[test]
+    fn a_copy_outside_the_installation_does_not_update() {
+        assert!(installed_layout().is_none());
+    }
 
     #[test]
     fn hashes_with_cng() {

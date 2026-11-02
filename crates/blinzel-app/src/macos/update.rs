@@ -163,6 +163,17 @@ pub fn check_now(notice: impl FnOnce(String) + Send + 'static) {
 mod tests {
     use super::*;
 
+    /// AC-14: the test executable runs outside an app bundle, so it is no
+    /// installation and "Check for updates" says so.
+    #[test]
+    fn a_copy_outside_a_bundle_does_not_update() {
+        assert!(installed().is_none());
+        let (tx, rx) = std::sync::mpsc::channel();
+        check_now(move |text| tx.send(text).unwrap());
+        let text = rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+        assert_eq!(text, "Update failed: not running from an app bundle");
+    }
+
     /// AC-04: the macOS updater fetches the zipped universal bundle.
     #[test]
     fn fetches_the_zipped_bundle() {

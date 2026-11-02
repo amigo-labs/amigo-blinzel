@@ -1912,6 +1912,46 @@ mod tests {
     use blinzel_core::geom::{Orientation, PixelRect};
     use blinzel_ui::app::ClipSource;
 
+    /// `docs/specs/updates.md` AC-15: "Check for updates" is in the
+    /// application menu, out of the image menus.
+    #[test]
+    fn check_for_updates_is_in_the_application_menu() {
+        let state = MenuState {
+            mode: blinzel_core::layout::ViewMode::FitWindowToImage,
+            no_upscale: false,
+            fullscreen: false,
+            has_image: false,
+            has_selection: false,
+            is_cropped: false,
+            has_neighbours: false,
+            has_images: false,
+            language: None,
+            resident: false,
+            auto_update: false,
+            single_instance: false,
+            color_management: false,
+            filmstrip: false,
+            grid: false,
+            screenshot_hotkey: false,
+            screenshot_save: false,
+            screenshot_open: false,
+            screenshot_edit: false,
+        };
+        let has = |items: &[MenuItem]| {
+            items.iter().any(|i| {
+                matches!(
+                    i,
+                    MenuItem::Item {
+                        cmd: Cmd::CheckUpdates,
+                        ..
+                    }
+                )
+            })
+        };
+        let (app, rest) = menu_bar_trees(&state);
+        assert!(has(&app));
+        assert!(!has(&rest));
+    }
     /// `docs/specs/resident-mode.md` AC-19: a `--resident` start with
     /// resident mode off removes the LaunchAgent and exits, like the
     /// Windows shell removes its Run value.

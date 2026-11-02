@@ -36,6 +36,10 @@ pub trait Installation {
     fn forget_previous(&self);
     /// The installed program (started again after a rollback).
     fn program(&self) -> PathBuf;
+    /// HTTPS GET of at most `limit` bytes.
+    fn fetch(&self, url: &str, limit: usize) -> Result<Vec<u8>, String> {
+        crate::curl::get(url, limit)
+    }
 }
 
 pub fn arch() -> &'static str {
@@ -121,33 +125,54 @@ pub fn on_first_frame(i: Option<impl Installation + Send + 'static>) {
         });
 }
 
-/// Starts the daily background check.
-pub fn schedule(i: Option<impl Installation + Send + 'static>) {
+/// Starts the daily background check; `false` when this is no installed
+/// copy (or the build has no release key) and nothing was started.
+pub fn schedule(i: Option<impl Installation + Send + 'static>) -> bool {
     let Some(i) = i else {
-        return;
+        return false;
     };
     if core::RELEASE_KEY.is_none() {
-        return;
+        return false;
     }
-    let _ = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("blinzel-update".into())
-        .spawn(move || {
-            std::thread::sleep(Duration::from_secs(10));
-            if !blinzel_ui::settings_store::load().auto_update {
-                return;
-            }
-            let mut state = load_state(&i);
-            if !core::check_due(state.last_check, now()) {
-                return;
-            }
-            state.last_check = Some(now());
-            save_state(&i, &state);
-            if let Err(e) = check_and_install(&i)
-                && std::env::var_os("BLINZEL_DEBUG").is_some()
-            {
-                eprintln!("blinzel: update: {e}");
-            }
-        });
+        .spawn(move || auto_checks(&mut Auto(i)))
+        .is_ok()
+}
+
+/// A Linux or macOS process looks once whether a check is due; it does
+/// not keep running for days like a resident Windows instance.
+fn auto_checks(shell: &mut impl core::AutoCheck) {
+    core::auto_checks(shell, false);
+}
+
+/// The automatic check of an installed copy.
+struct Auto<I>(I);
+
+impl<I: Installation> core::AutoCheck for Auto<I> {
+    fn sleep(&mut self, d: Duration) -> bool {
+        std::thread::sleep(d);
+        true
+    }
+    fn auto_update(&mut self) -> bool {
+        blinzel_ui::settings_store::load().auto_update
+    }
+    fn now(&mut self) -> u64 {
+        now()
+    }
+    fn load(&mut self) -> State {
+        load_state(&self.0)
+    }
+    fn save(&mut self, state: &State) {
+        save_state(&self.0, state);
+    }
+    fn check(&mut self) {
+        if let Err(e) = check_and_install(&self.0)
+            && std::env::var_os("BLINZEL_DEBUG").is_some()
+        {
+            eprintln!("blinzel: update: {e}");
+        }
+    }
 }
 
 /// What a check found.
@@ -184,7 +209,7 @@ fn check_and_install(i: &impl Installation) -> Result<Outcome, String> {
         running_version(),
         core::RELEASE_KEY,
         MAX_DOWNLOAD,
-        crate::curl::get,
+        |url, limit| i.fetch(url, limit),
         |d| Ok(core::sha256(d)),
     )?;
     let (version, download) = match found {
@@ -223,6 +248,123 @@ mod tests {
         fn program(&self) -> PathBuf {
             self.0.join("blinzel")
         }
+    }
+
+    /// An installed copy (state in `dir`) whose downloads come from a
+    /// release of the running version; it records the URLs asked for.
+    struct Served {
+        dir: PathBuf,
+        asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl Installation for Served {
+        fn asset(&self) -> String {
+            "blinzel-test".into()
+        }
+        fn state_file(&self) -> PathBuf {
+            self.dir.join("update-state")
+        }
+        fn install(&self, _: &[u8]) -> Result<(), String> {
+            Err("nothing to install".into())
+        }
+        fn rollback(&self) -> bool {
+            false
+        }
+        fn forget_previous(&self) {}
+        fn program(&self) -> PathBuf {
+            self.dir.join("blinzel")
+        }
+        fn fetch(&self, url: &str, _: usize) -> Result<Vec<u8>, String> {
+            self.asked.lock().unwrap().push(url.into());
+            let asset = |name: &str| {
+                format!(r#"{{"name": "{name}", "browser_download_url": "https://x/{name}"}}"#)
+            };
+            let json = format!(
+                r#"{{"tag_name": "v{}", "draft": false, "prerelease": false, "assets": [{}, {}, {}]}}"#,
+                running_version(),
+                asset("blinzel-test"),
+                asset(core::SUMS),
+                asset(core::SUMS_SIG)
+            );
+            Ok(json.into_bytes())
+        }
+    }
+
+    /// The notice a manual check hands over, waited for.
+    fn manual_check(i: Result<impl Installation + Send + 'static, String>) -> String {
+        let (tx, rx) = std::sync::mpsc::channel();
+        check_now(i, move |text| tx.send(text).unwrap());
+        rx.recv_timeout(Duration::from_secs(20)).unwrap()
+    }
+
+    /// AC-15: "Check for updates" checks at once, though the last check is
+    /// only seconds old, and leaves the schedule alone.
+    #[test]
+    fn a_manual_check_ignores_the_schedule() {
+        let dir = std::env::temp_dir().join(format!("blinzel-manual-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let asked = std::sync::Arc::default();
+        let served = Served {
+            dir: dir.clone(),
+            asked: std::sync::Arc::clone(&asked),
+        };
+        let recent = State {
+            last_check: Some(now()),
+            ..State::default()
+        };
+        save_state(&served, &recent);
+        assert_eq!(
+            manual_check(Ok(served)),
+            format!("amigo-blinzel {} is up to date.", running_version())
+        );
+        assert_eq!(*asked.lock().unwrap(), [core::latest_release_url()]);
+        assert_eq!(load_state(&Fake(dir.clone())), recent);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AC-14: a copy that is not installed starts no automatic check, and a
+    /// manual check fails with the reason.
+    #[test]
+    fn a_copy_that_is_not_installed_never_checks() {
+        assert!(!schedule(None::<Fake>));
+        assert_eq!(
+            manual_check(Err::<Fake, _>("not installed".into())),
+            "Update failed: not installed"
+        );
+    }
+
+    /// A shell for [`auto_checks`] that counts its looks and never waits.
+    #[derive(Default)]
+    struct Looks {
+        sleeps: Vec<u64>,
+        looks: u32,
+    }
+
+    impl core::AutoCheck for Looks {
+        fn sleep(&mut self, d: Duration) -> bool {
+            self.sleeps.push(d.as_secs());
+            self.sleeps.len() < 100
+        }
+        fn auto_update(&mut self) -> bool {
+            self.looks += 1;
+            false
+        }
+        fn now(&mut self) -> u64 {
+            0
+        }
+        fn load(&mut self) -> State {
+            State::default()
+        }
+        fn save(&mut self, _: &State) {}
+        fn check(&mut self) {}
+    }
+
+    /// AC-12: Linux and macOS look once, 10 s after start.
+    #[test]
+    fn a_process_looks_once_ten_seconds_after_start() {
+        let mut l = Looks::default();
+        auto_checks(&mut l);
+        assert_eq!((l.sleeps, l.looks), (vec![10], 1));
     }
 
     /// AC-05, AC-15: what "Check for updates" says for each result.

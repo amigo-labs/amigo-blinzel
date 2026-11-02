@@ -107,6 +107,17 @@ fn swap(installed: &Path, new: &Path, old: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// AC-14: the test executable is not the one `--install` placed, so
+    /// it is no installation and "Check for updates" says so.
+    #[test]
+    fn a_copy_outside_the_installation_does_not_update() {
+        assert!(installed().is_none());
+        let (tx, rx) = std::sync::mpsc::channel();
+        check_now(move |text| tx.send(text).unwrap());
+        let text = rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+        assert_eq!(text, "Update failed: not installed (blinzel --install)");
+    }
+
     /// AC-04: the Linux updater fetches the bare executable of its own
     /// architecture.
     #[test]
