@@ -26,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use blinzel_core::settings::Settings;
 use blinzel_ui::app::Action;
 use blinzel_ui::backend::{CursorKind, Key};
-use blinzel_ui::chrome::Button;
+use blinzel_ui::chrome::{Button, Chrome};
 use blinzel_ui::settings_store;
 
 use crate::backend::{
@@ -100,24 +100,30 @@ fn nc_calc_size(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         return LRESULT(0);
     }
     let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) }.max(96);
-    let (bx, by) = frame_borders(dpi);
     let params = unsafe { &mut *(lp.0 as *mut NCCALCSIZE_PARAMS) };
-    let r = &mut params.rgrc[0];
-    r.left += bx;
-    r.right -= bx;
-    r.bottom -= by;
-    if is_maximized(hwnd) {
-        // Maximized windows hang over the monitor edge by the border.
-        r.top += by;
-    }
+    params.rgrc[0] = client_area(params.rgrc[0], frame_borders(dpi), is_maximized(hwnd));
     LRESULT(0)
+}
+
+/// The client area of the frameless `window`: no caption, the invisible
+/// side and bottom resize borders `(bx, by)` stay frame. A maximized
+/// window hangs over the monitor edge by the border on all four sides, so
+/// it loses the top one too.
+fn client_area(window: RECT, (bx, by): (i32, i32), maximized: bool) -> RECT {
+    RECT {
+        left: window.left + bx,
+        top: if maximized {
+            window.top + by
+        } else {
+            window.top
+        },
+        right: window.right - bx,
+        bottom: window.bottom - by,
+    }
 }
 
 fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
     let def = unsafe { DefWindowProcW(hwnd, WM_NCHITTEST, WPARAM(0), lp) }.0 as u32;
-    if def != HTCLIENT || app.fullscreen {
-        return def;
-    }
     let mut pt = POINT {
         x: lo_word(lp.0),
         y: hi_word(lp.0),
@@ -125,21 +131,45 @@ fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
     unsafe {
         let _ = ScreenToClient(hwnd, &mut pt);
     }
-    let p = (pt.x as f64, pt.y as f64);
-    let maximized = is_maximized(hwnd);
-    if !maximized {
-        let (bx, by) = frame_borders(app.dpi);
+    let frame = Frame {
+        borders: frame_borders(app.dpi),
+        maximized: is_maximized(hwnd),
+        fullscreen: app.fullscreen,
+        dragging: app.is_dragging(),
+    };
+    hit_zone(def, pt, &frame, &app.chrome())
+}
+
+/// The window state a hit test depends on.
+struct Frame {
+    /// Invisible resize border thickness (x, y).
+    borders: (i32, i32),
+    maximized: bool,
+    fullscreen: bool,
+    /// A selection drag runs.
+    dragging: bool,
+}
+
+/// What the point `pt` (client coordinates) of the frameless window is:
+/// `def` is `DefWindowProcW`'s answer (the side and bottom borders), the
+/// top border and the caption strip with its buttons come from here.
+fn hit_zone(def: u32, pt: POINT, frame: &Frame, chrome: &Chrome) -> u32 {
+    if def != HTCLIENT || frame.fullscreen {
+        return def;
+    }
+    if !frame.maximized {
+        let (bx, by) = frame.borders;
         if pt.y < by {
             return if pt.x < bx * 2 {
                 HTTOPLEFT
-            } else if pt.x >= app.client.0 as i32 - bx * 2 {
+            } else if pt.x >= chrome.client.0 as i32 - bx * 2 {
                 HTTOPRIGHT
             } else {
                 HTTOP
             };
         }
     }
-    let chrome = app.chrome();
+    let p = (pt.x as f64, pt.y as f64);
     if p.1 < chrome.caption_height() {
         return match chrome.hit(p) {
             Some(Button::Close) => HTCLOSE,
@@ -148,7 +178,7 @@ fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
             Some(Button::Menu) => HTCLIENT,
             // Free caption strip: drag the window, but not while a
             // selection drag runs.
-            None if !app.is_dragging() => HTCAPTION,
+            None if !frame.dragging => HTCAPTION,
             None => HTCLIENT,
         };
     }
@@ -1247,6 +1277,107 @@ mod tests {
 
     use crate::backend::{D3dCanvas, D3dDevice, Loader, WinHost, WinServices};
     use crate::gfx::{Gfx, Renderer, SwapChain};
+
+    /// An 800 × 600 window at 100 % (with 8 px resize borders below); the
+    /// caption buttons are 46 × 32: close from x 754, maximize from 708,
+    /// minimize from 662, ☰ up to 46.
+    fn chrome() -> Chrome {
+        Chrome {
+            scale: 1.0,
+            client: (800.0, 600.0),
+            rtl: false,
+            system_buttons: false,
+        }
+    }
+
+    fn frame(maximized: bool, fullscreen: bool, dragging: bool) -> Frame {
+        Frame {
+            borders: (8, 8),
+            maximized,
+            fullscreen,
+            dragging,
+        }
+    }
+
+    fn hit(f: &Frame, def: u32, x: i32, y: i32) -> u32 {
+        hit_zone(def, POINT { x, y }, f, &chrome())
+    }
+
+    /// AC-03 (`docs/specs/platform-shells.md`): the plain window has no
+    /// caption, keeps the system's side and bottom borders, resizes at the
+    /// top border (diagonally in its outer corners) and moves on the free
+    /// caption strip, except while a selection drag runs.
+    #[test]
+    fn the_plain_window_resizes_at_the_top_and_moves_on_the_free_strip() {
+        let window = RECT {
+            left: 100,
+            top: 50,
+            right: 900,
+            bottom: 650,
+        };
+        let client = RECT {
+            left: 108,
+            top: 50,
+            right: 892,
+            bottom: 642,
+        };
+        assert_eq!(client_area(window, (8, 8), false), client);
+
+        let f = frame(false, false, false);
+        for def in [HTLEFT, HTRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT] {
+            assert_eq!(hit(&f, def, 400, 300), def, "the system's border");
+        }
+        assert_eq!(hit(&f, HTCLIENT, 400, 0), HTTOP);
+        assert_eq!(hit(&f, HTCLIENT, 400, 7), HTTOP);
+        assert_eq!(hit(&f, HTCLIENT, 0, 3), HTTOPLEFT);
+        assert_eq!(hit(&f, HTCLIENT, 15, 3), HTTOPLEFT);
+        assert_eq!(hit(&f, HTCLIENT, 16, 3), HTTOP);
+        assert_eq!(hit(&f, HTCLIENT, 784, 3), HTTOPRIGHT);
+        assert_eq!(hit(&f, HTCLIENT, 799, 3), HTTOPRIGHT);
+        assert_eq!(hit(&f, HTCLIENT, 400, 8), HTCAPTION);
+        assert_eq!(hit(&f, HTCLIENT, 400, 31), HTCAPTION);
+        assert_eq!(hit(&f, HTCLIENT, 400, 32), HTCLIENT, "below the strip");
+        assert_eq!(hit(&f, HTCLIENT, 20, 16), HTCLIENT, "☰");
+        assert_eq!(hit(&f, HTCLIENT, 680, 16), HTMINBUTTON);
+        assert_eq!(hit(&f, HTCLIENT, 730, 16), HTMAXBUTTON);
+        assert_eq!(hit(&f, HTCLIENT, 780, 16), HTCLOSE);
+
+        let dragging = frame(false, false, true);
+        assert_eq!(hit(&dragging, HTCLIENT, 400, 16), HTCLIENT);
+        assert_eq!(hit(&dragging, HTCLIENT, 780, 16), HTCLOSE);
+    }
+
+    /// AC-04: maximized, the content stays on the monitor and the top edge
+    /// does not resize; in full screen nothing is a caption.
+    #[test]
+    fn maximized_stays_on_the_monitor_and_full_screen_has_no_caption() {
+        // A maximized window on a 1920 × 1080 monitor hangs 8 px over
+        // each edge.
+        let window = RECT {
+            left: -8,
+            top: -8,
+            right: 1928,
+            bottom: 1088,
+        };
+        let monitor = RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        assert_eq!(client_area(window, (8, 8), true), monitor);
+
+        let max = frame(true, false, false);
+        assert_eq!(hit(&max, HTCLIENT, 400, 0), HTCAPTION);
+        assert_eq!(hit(&max, HTCLIENT, 100, 3), HTCAPTION);
+        assert_eq!(hit(&max, HTCLIENT, 790, 0), HTCLOSE, "the corner closes");
+        assert_eq!(hit(&max, HTCLIENT, 20, 0), HTCLIENT, "☰");
+
+        let full = frame(false, true, false);
+        for (x, y) in [(400, 0), (400, 16), (5, 3), (680, 16), (730, 16), (780, 16)] {
+            assert_eq!(hit(&full, HTCLIENT, x, y), HTCLIENT, "({x}, {y})");
+        }
+    }
 
     fn cloaked(hwnd: HWND) -> bool {
         let mut c = 0u32;
