@@ -140,6 +140,31 @@ pub fn retry(wanted: bool, free: impl FnOnce() -> bool, left: u32) -> Retry {
     }
 }
 
+/// How long the [`hotkey_taken`] notice stays in the window.
+pub const HINT_MS: u32 = 9000;
+
+/// Where the [`hotkey_taken`] notice goes after [`Retry::GiveUp`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum HintRoute {
+    /// The window is hidden: a tray balloon with this text, and the notice
+    /// again in the window at the next wake (a notification may be off).
+    Balloon(String),
+    /// In the window for this many milliseconds.
+    Window(u32),
+}
+
+/// Routes the notice from `told`, `App::tell`'s answer (the text back
+/// while the window is hidden); a balloon also marks it for the next wake.
+pub fn route_hint(told: Option<String>) -> HintRoute {
+    match told {
+        Some(text) => {
+            hint_pending(true);
+            HintRoute::Balloon(text)
+        }
+        None => HintRoute::Window(HINT_MS),
+    }
+}
+
 /// Marks (or clears) the [`hotkey_taken`] notice for the next wake.
 pub fn hint_pending(on: bool) {
     HOTKEY_HINT.store(on, Ordering::Relaxed);
@@ -809,6 +834,19 @@ mod tests {
         assert_eq!(retry(true, || true, 0), Retry::Stop, "the last try got it");
         assert_eq!(retry(true, || true, 5), Retry::Stop);
         assert_eq!(retry(false, || panic!("not tried"), 0), Retry::Stop);
+    }
+
+    /// AC-03: while hidden the notice is a balloon and due once at the
+    /// next wake; otherwise it shows 9 s in the window.
+    #[test]
+    fn the_print_key_notice_is_a_balloon_while_hidden_and_9_s_in_the_window() {
+        hint_pending(false);
+        assert_eq!(route_hint(None), HintRoute::Window(9000));
+        assert!(!take_hint(), "nothing due for the next wake");
+        let text = hotkey_taken();
+        assert_eq!(route_hint(Some(text.clone())), HintRoute::Balloon(text));
+        assert!(take_hint(), "due at the next wake");
+        assert!(!take_hint(), "once");
     }
 
     /// AC-07: the whole virtual desktop is frozen (layered windows

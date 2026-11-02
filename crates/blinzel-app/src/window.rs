@@ -479,15 +479,10 @@ fn handle(
                     let _ = KillTimer(Some(hwnd), TIMER_HOTKEY);
                 }
                 if retry == screenshot::Retry::GiveUp {
-                    match app.tell(screenshot::hotkey_taken()) {
-                        // Now in the tray, and again in the window: a
-                        // notification may be switched off.
-                        Some(text) => {
-                            resident::balloon(hwnd, &text);
-                            screenshot::hint_pending(true);
-                        }
-                        None => unsafe {
-                            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                    match screenshot::route_hint(app.tell(screenshot::hotkey_taken())) {
+                        screenshot::HintRoute::Balloon(text) => resident::balloon(hwnd, &text),
+                        screenshot::HintRoute::Window(ms) => unsafe {
+                            SetTimer(Some(hwnd), TIMER_NOTICE, ms, None);
                         },
                     }
                 }
@@ -848,7 +843,7 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             if !screenshot::set_hotkey(hwnd, on) {
                 with_app(|a| a.show_notice(screenshot::hotkey_taken()));
                 unsafe {
-                    SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                    SetTimer(Some(hwnd), TIMER_NOTICE, screenshot::HINT_MS, None);
                 }
             }
             vec![]
@@ -1060,7 +1055,7 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
     if screenshot::take_hint() {
         with_app(|a| a.show_notice(screenshot::hotkey_taken()));
         unsafe {
-            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+            SetTimer(Some(hwnd), TIMER_NOTICE, screenshot::HINT_MS, None);
         }
     }
     if !was_hidden {
