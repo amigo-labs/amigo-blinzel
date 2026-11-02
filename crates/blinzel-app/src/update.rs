@@ -167,11 +167,7 @@ fn check_if_due() {
 /// An update was installed while this process kept running the previous
 /// version (resident mode): it should hand over to the new executable.
 pub fn restart_pending() -> bool {
-    installed_layout().is_some_and(|l| {
-        load_state(&l)
-            .pending
-            .is_some_and(|p| p != running_version())
-    })
+    installed_layout().is_some_and(|l| load_state(&l).restart_pending(running_version()))
 }
 
 /// Starts the installed (updated) executable as the new resident instance.

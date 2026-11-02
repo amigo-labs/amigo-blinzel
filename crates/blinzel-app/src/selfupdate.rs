@@ -102,11 +102,7 @@ pub fn on_start(i: Option<impl Installation>) -> bool {
 /// An update was installed while this process kept running the previous
 /// version (resident mode): it should hand over to the new program.
 pub fn restart_pending(i: Option<impl Installation>) -> bool {
-    i.is_some_and(|i| {
-        load_state(&i)
-            .pending
-            .is_some_and(|p| p != running_version())
-    })
+    i.is_some_and(|i| load_state(&i).restart_pending(running_version()))
 }
 
 /// Called once after the first frame: the running version works.
@@ -215,4 +211,53 @@ fn check_and_install(i: &impl Installation) -> Result<Outcome, String> {
     state.failed_starts = 0;
     save_state(i, &state);
     Ok(Outcome::Installed(version))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An installed copy whose update state lives in `0`.
+    struct Fake(PathBuf);
+
+    impl Installation for Fake {
+        fn asset(&self) -> String {
+            String::new()
+        }
+        fn state_file(&self) -> PathBuf {
+            self.0.join("update-state")
+        }
+        fn install(&self, _: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
+        fn rollback(&self) -> bool {
+            false
+        }
+        fn forget_previous(&self) {}
+        fn program(&self) -> PathBuf {
+            self.0.join("blinzel")
+        }
+    }
+
+    /// `docs/specs/resident-mode.md` AC-21: a hiding window hands over only
+    /// when an installed update's version differs from the running one;
+    /// no installation, no state or the running version pending: it stays.
+    #[test]
+    fn a_hiding_window_restarts_only_for_another_installed_version() {
+        let dir = std::env::temp_dir().join(format!("blinzel-selfupdate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fake = || Some(Fake(dir.clone()));
+        assert!(!restart_pending(None::<Fake>), "not an installed copy");
+        assert!(!restart_pending(fake()), "nothing installed");
+        let pending = |v: Version| State {
+            pending: Some(v),
+            ..State::default()
+        };
+        save_state(&Fake(dir.clone()), &pending(running_version()));
+        assert!(!restart_pending(fake()), "the running version");
+        let other = Version::parse("999.0.0").unwrap();
+        save_state(&Fake(dir.clone()), &pending(other));
+        assert!(restart_pending(fake()), "another version installed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
