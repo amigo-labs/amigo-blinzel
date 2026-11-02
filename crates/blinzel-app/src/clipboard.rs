@@ -133,11 +133,20 @@ pub fn put_shot(hwnd: HWND, bgra: &[u8], w: u32, h: u32, png: &[u8]) -> bool {
     }
     unsafe {
         let ok = EmptyClipboard().is_ok()
-            && set(CF_DIBV5.0 as u32, &dibv5(bgra, w, h))
-            && set(png_format(), png);
+            && shot_formats(bgra, w, h, png)
+                .iter()
+                .all(|(format, bytes)| set(*format, bytes));
         let _ = CloseClipboard();
         ok
     }
+}
+
+/// A screenshot's clipboard formats: DIBV5 of its pixels, and its PNG.
+fn shot_formats(bgra: &[u8], w: u32, h: u32, png: &[u8]) -> [(u32, Vec<u8>); 2] {
+    [
+        (CF_DIBV5.0 as u32, dibv5(bgra, w, h)),
+        (png_format(), png.to_vec()),
+    ]
 }
 
 /// Renders all formats before we lose the data (window closing).
@@ -411,5 +420,19 @@ mod tests {
             let _ = CloseClipboard();
         }
         check(&dib, &encoded, &px, pw, ph);
+    }
+
+    /// `docs/specs/screenshots.md` AC-15: a screenshot goes on the
+    /// clipboard as DIBV5 (bottom-up, with alpha, sRGB) and as its PNG.
+    #[test]
+    fn a_screenshot_goes_on_the_clipboard_as_dibv5_and_png() {
+        let (w, h) = (5u32, 3u32);
+        let bgra: Vec<u8> = (0..w * h * 4).map(|i| (i * 7) as u8).collect();
+        let encoded = png(&bgra, w, h).unwrap();
+        let [(dib_format, dib), (png_id, png_bytes)] = shot_formats(&bgra, w, h, &encoded);
+        assert_eq!(dib_format, CF_DIBV5.0 as u32);
+        assert_eq!(png_id, png_format());
+        assert_eq!(png_bytes, encoded, "the shot's own PNG");
+        check(&dib, &png_bytes, &bgra, w, h);
     }
 }
