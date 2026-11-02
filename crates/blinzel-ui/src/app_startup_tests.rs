@@ -1,11 +1,24 @@
 //! App-level tests of the cold start: when the cloaked window becomes
-//! visible (`docs/specs/startup.md`).
+//! visible and the measurement mode `--exit-after-first-frame`
+//! (`docs/specs/startup.md`).
 
 use super::*;
 use crate::testkit::Harness;
 
 fn uncloaked(h: &Harness) -> bool {
     h.actions().contains(&Action::Uncloak) && !h.app.cloaked
+}
+
+fn quit(h: &Harness) -> bool {
+    h.actions().contains(&Action::Quit)
+}
+
+/// A harness whose App measures the first frame into `<temp>/startup.json`.
+fn measuring() -> (Harness, PathBuf) {
+    let mut h = Harness::new();
+    let out = h.images.parent().unwrap().join("startup.json");
+    h.app.exit_after_first_frame = Some(out.clone());
+    (h, out)
 }
 
 // ------------------------------------------------------- the cloaked window
@@ -76,4 +89,64 @@ fn a_hidden_resident_window_is_not_shown_by_a_frame() {
     let a = h.render();
     assert!(!a.contains(&Action::Uncloak), "{a:?}");
     assert!(h.app.cloaked);
+}
+
+// ------------------------------------------------------------- measurement
+
+/// AC-09, AC-11: the first frame writes the report and quits with code 0;
+/// the report names the adapter, whether it is software, and the marks.
+#[test]
+fn measuring_the_first_frame_writes_the_report_and_quits() {
+    let (mut h, out) = measuring();
+    h.write_png("a.png", 64, 48);
+    h.open("a.png");
+    assert!(quit(&h));
+    assert_eq!(h.app.exit_code(), 0);
+    let report = std::fs::read_to_string(&out).unwrap();
+    assert!(report.starts_with('{') && report.ends_with('}'), "{report}");
+    assert!(report.contains("\"adapter\": \"test\""), "{report}");
+    assert!(report.contains("\"warp\": true"), "{report}");
+    assert!(report.contains("\"marks\": {"), "{report}");
+    assert!(report.contains("\"first_present\": "), "{report}");
+}
+
+/// Defect "`--exit-after-first-frame` with an undecodable file never
+/// exits": it writes the report and quits with code 1.
+#[test]
+fn measuring_an_undecodable_file_writes_the_report_and_exits_with_1() {
+    let (mut h, out) = measuring();
+    h.write_file("broken.png", b"not an image");
+    h.open("broken.png");
+    assert!(quit(&h));
+    assert_eq!(h.app.exit_code(), 1);
+    let report = std::fs::read_to_string(&out).unwrap();
+    assert!(report.contains("\"marks\": {"), "{report}");
+}
+
+/// The same for a file that does not exist, and for no file at all.
+#[test]
+fn measuring_without_an_image_exits_with_1() {
+    let (mut h, out) = measuring();
+    h.open("missing.png");
+    assert!(quit(&h));
+    assert_eq!(h.app.exit_code(), 1);
+    assert!(out.exists());
+    drop(h);
+
+    let (mut h, out) = measuring();
+    h.render();
+    assert!(quit(&h));
+    assert_eq!(h.app.exit_code(), 1);
+    assert!(out.exists());
+}
+
+/// Without the measurement mode a broken file neither quits nor sets an
+/// exit code.
+#[test]
+fn a_broken_file_does_not_quit_without_the_measurement_mode() {
+    let mut h = Harness::new();
+    h.write_file("broken.png", b"not an image");
+    h.open("broken.png");
+    assert!(!quit(&h));
+    assert_eq!(h.app.exit_code(), 0);
 }

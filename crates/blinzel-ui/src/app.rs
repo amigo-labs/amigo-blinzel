@@ -270,7 +270,11 @@ pub struct App<B: Backend> {
     pub clip: Option<ClipSource>,
     first_image_shown: bool,
     sized_for: Option<u64>,
+    /// Measurement mode: the startup report goes here after the first frame,
+    /// then the App quits (`docs/specs/startup.md` AC-09).
     pub exit_after_first_frame: Option<PathBuf>,
+    /// The process exit code once the App has quit.
+    exit_code: i32,
     /// Short message shown at the bottom (saved, errors), cleared by timer.
     pub notice: Option<String>,
     /// The menu drawn by the UI itself (platforms without native popup
@@ -342,6 +346,7 @@ impl<B: Backend> App<B> {
             first_image_shown: false,
             sized_for: None,
             exit_after_first_frame: None,
+            exit_code: 0,
             notice: None,
             popup: None,
             dialog: None,
@@ -364,6 +369,12 @@ impl<B: Backend> App<B> {
 
     pub fn invalidate(&self) {
         self.host.invalidate();
+    }
+
+    /// The exit code for the process after [`Action::Quit`]: 1 when the
+    /// measurement mode found no image to show, else 0.
+    pub fn exit_code(&self) -> i32 {
+        self.exit_code
     }
 
     // ------------------------------------------------------------- resident
@@ -1193,20 +1204,33 @@ impl<B: Backend> App<B> {
             self.first_image_shown = true;
             timing::mark("first_present");
             self.host.first_frame_shown();
-            if let Some(out) = &self.exit_after_first_frame {
-                // The adapter tells a real GPU from WARP / Basic Render
-                // Driver, which costs hundreds of ms per frame.
-                let json = format!(
-                    "{{\"adapter\": {}, \"warp\": {}, \"marks\": {}}}",
-                    timing::json_str(&self.device.adapter_name()),
-                    self.device.is_software(),
-                    timing::marks_json()
-                );
-                let _ = std::fs::write(out, json);
+            if self.write_startup_report() {
                 actions.push(Action::Quit);
             }
+        } else if nothing_to_wait_for && !self.first_image_shown && self.write_startup_report() {
+            // A measurement without an image fails instead of waiting.
+            self.exit_code = 1;
+            actions.push(Action::Quit);
         }
         actions
+    }
+
+    /// In measurement mode writes the startup report; returns whether it is
+    /// on.
+    fn write_startup_report(&self) -> bool {
+        let Some(out) = &self.exit_after_first_frame else {
+            return false;
+        };
+        // The adapter tells a real GPU from WARP / Basic Render Driver,
+        // which costs hundreds of ms per frame.
+        let json = format!(
+            "{{\"adapter\": {}, \"warp\": {}, \"marks\": {}}}",
+            timing::json_str(&self.device.adapter_name()),
+            self.device.is_software(),
+            timing::marks_json()
+        );
+        let _ = std::fs::write(out, json);
+        true
     }
 
     fn selection_shapes(&self, l: &Layout, sel: &Rect, out: &mut Vec<Shape>) {
