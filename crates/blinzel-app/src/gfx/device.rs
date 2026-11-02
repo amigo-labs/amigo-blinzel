@@ -147,22 +147,36 @@ impl Gfx {
 
     /// Bytes of video memory we allow ourselves to keep in textures.
     pub fn texture_budget(&self) -> usize {
-        const MIN: usize = 256 << 20;
-        const MAX: usize = 3 << 30;
         let os_budget = self.adapter.cast::<IDXGIAdapter3>().ok().and_then(|a3| {
             let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
             unsafe { a3.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info) }
                 .ok()?;
             Some(info.Budget as usize)
         });
-        let budget = match os_budget {
-            Some(b) if b > 0 => b / 2,
-            _ => unsafe { self.adapter.GetDesc() }
-                .map(|d| (d.DedicatedVideoMemory.max(d.SharedSystemMemory / 4)) / 2)
-                .unwrap_or(MIN),
-        };
-        budget.clamp(MIN, MAX)
+        texture_budget(os_budget, || {
+            unsafe { self.adapter.GetDesc() }
+                .ok()
+                .map(|d| (d.DedicatedVideoMemory, d.SharedSystemMemory))
+        })
     }
+}
+
+/// Half of what Windows grants the process (`os_budget`, DXGI), else half
+/// of the adapter's (dedicated, shared) memory, counting a quarter of the
+/// shared; clamped to 256 MiB … 3 GiB (`docs/specs/browsing.md` AC-13).
+fn texture_budget(
+    os_budget: Option<usize>,
+    adapter: impl FnOnce() -> Option<(usize, usize)>,
+) -> usize {
+    const MIN: usize = 256 << 20;
+    const MAX: usize = 3 << 30;
+    let budget = match os_budget {
+        Some(b) if b > 0 => b / 2,
+        _ => adapter()
+            .map(|(dedicated, shared)| dedicated.max(shared / 4) / 2)
+            .unwrap_or(MIN),
+    };
+    budget.clamp(MIN, MAX)
 }
 
 fn load_create_device() -> windows::core::Result<CreateDeviceFn> {
@@ -174,5 +188,32 @@ fn load_create_device() -> windows::core::Result<CreateDeviceFn> {
             unsafe extern "system" fn() -> isize,
             CreateDeviceFn,
         >(proc))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::texture_budget;
+
+    const MIB: usize = 1 << 20;
+    const GIB: usize = 1 << 30;
+
+    fn no_adapter() -> Option<(usize, usize)> {
+        panic!("the OS budget is enough")
+    }
+
+    #[test]
+    fn texture_budget_is_half_the_os_budget_clamped() {
+        assert_eq!(texture_budget(Some(4 * GIB), no_adapter), 2 * GIB);
+        assert_eq!(texture_budget(Some(16 * GIB), no_adapter), 3 * GIB);
+        assert_eq!(texture_budget(Some(100 * MIB), no_adapter), 256 * MIB);
+    }
+
+    #[test]
+    fn texture_budget_falls_back_to_the_adapter_memory() {
+        assert_eq!(texture_budget(None, || Some((2 * GIB, 4 * GIB))), GIB);
+        assert_eq!(texture_budget(Some(0), || Some((0, 8 * GIB))), GIB);
+        assert_eq!(texture_budget(None, || Some((0, 0))), 256 * MIB);
+        assert_eq!(texture_budget(None, || None), 256 * MIB);
     }
 }
