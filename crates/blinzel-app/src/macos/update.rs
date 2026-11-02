@@ -139,16 +139,46 @@ pub fn restart_pending() -> bool {
 /// Starts the installed (updated) bundle as the new resident instance.
 pub fn start_installed_resident() {
     if let Some(i) = installed() {
-        let _ = Command::new("/usr/bin/open")
-            .args(["-n", "-g"])
-            .arg(&i.bundle)
-            .args(["--args", "--resident"])
-            .spawn();
+        let _ = resident_start(&i.bundle).spawn();
     }
+}
+
+/// `open -n -g <bundle> --args --resident`: a new instance of `bundle`,
+/// in the background, started hidden.
+fn resident_start(bundle: &Path) -> Command {
+    let mut c = Command::new("/usr/bin/open");
+    c.args(["-n", "-g"])
+        .arg(bundle)
+        .args(["--args", "--resident"]);
+    c
 }
 
 /// "Check for updates" from the menu; the result goes to `notice`.
 pub fn check_now(notice: impl FnOnce(String) + Send + 'static) {
     let i = installed().ok_or_else(|| "not running from an app bundle".to_string());
     selfupdate::check_now(i, notice);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `docs/specs/resident-mode.md` AC-21: the installed update starts as
+    /// a new, hidden instance of the bundle.
+    #[test]
+    fn an_installed_update_starts_as_a_new_hidden_instance() {
+        let c = resident_start(Path::new("/Applications/amigo-blinzel.app"));
+        assert_eq!(c.get_program(), "/usr/bin/open");
+        let args: Vec<_> = c.get_args().map(|a| a.to_str().unwrap()).collect();
+        assert_eq!(
+            args,
+            [
+                "-n",
+                "-g",
+                "/Applications/amigo-blinzel.app",
+                "--args",
+                "--resident"
+            ]
+        );
+    }
 }
