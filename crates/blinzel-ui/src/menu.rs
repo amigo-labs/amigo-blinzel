@@ -616,11 +616,16 @@ pub(crate) fn items_for(s: &MenuState, p: Platform) -> Vec<MenuItem> {
 
 /// The tray icon's menu (resident mode).
 pub fn tray_items() -> Vec<MenuItem> {
+    tray_items_with(SCREENSHOTS)
+}
+
+/// The tray menu, with the screenshot entries where the platform has them.
+pub(crate) fn tray_items_with(screenshots: bool) -> Vec<MenuItem> {
     let mut m = vec![
         MenuItem::item(Cmd::ShowWindow, tr(Msg::TrayShow), None, false, true),
         MenuItem::item(Cmd::Open, tr(Msg::MenuOpen), None, false, true),
     ];
-    if SCREENSHOTS {
+    if screenshots {
         m.extend([
             MenuItem::Separator,
             MenuItem::item(Cmd::Capture, tr(Msg::TrayCapture), None, false, true),

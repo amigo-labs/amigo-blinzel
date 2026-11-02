@@ -409,6 +409,36 @@ impl<B: Backend> App<B> {
         blinzel_core::bufpool::global().set_max_retained(0);
     }
 
+    /// Shows the window again (`Action::Wake`): a hidden instance reloads
+    /// the settings unless the file just `opened` did, stays cloaked until
+    /// its first frame and then takes the foreground, and gets its buffer
+    /// pool back. Returns whether it was hidden; a visible window is only
+    /// activated by the shell (`docs/specs/resident-mode.md` AC-09, AC-10).
+    pub fn wake(&mut self, opened: bool) -> bool {
+        if !self.hidden {
+            return false;
+        }
+        if !opened {
+            self.reload_settings();
+        }
+        self.hidden = false;
+        self.cloaked = true;
+        self.activate_on_uncloak = true;
+        timing::mark("wake");
+        blinzel_core::bufpool::global()
+            .set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
+        true
+    }
+
+    /// A file chosen in the open dialog: opened, and the window woken, as
+    /// the dialog may come from the tray menu of a hidden instance
+    /// (`docs/specs/resident-mode.md` AC-12).
+    pub fn open_chosen(&mut self, path: PathBuf) -> Vec<Action> {
+        let mut actions = self.open(path);
+        actions.push(Action::Wake { opened: true });
+        actions
+    }
+
     /// A hidden instance waking up: another window may have changed the
     /// settings meanwhile.
     pub fn reload_settings(&mut self) {
@@ -2567,6 +2597,10 @@ mod startup_tests;
 #[cfg(test)]
 #[path = "app_animation_tests.rs"]
 mod animation_tests;
+
+#[cfg(test)]
+#[path = "app_resident_tests.rs"]
+mod resident_tests;
 
 #[cfg(test)]
 #[path = "app_language_tests.rs"]
