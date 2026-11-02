@@ -262,6 +262,30 @@ const NOTICE: Duration = Duration::from_millis(3500);
 /// Folder changes are collected this long before relisting.
 const DIR_SETTLE: Duration = Duration::from_millis(150);
 
+/// When the shown folder is listed again: [`DIR_SETTLE`] after its last
+/// change (`docs/specs/browsing.md` AC-14).
+#[derive(Default)]
+struct DirSettle {
+    due: Option<Instant>,
+}
+
+impl DirSettle {
+    /// The folder changed at `now`.
+    fn changed(&mut self, now: Instant) {
+        self.due = Some(now + DIR_SETTLE);
+    }
+
+    /// Whether the folder is to be listed again at `now` (once per
+    /// settled change).
+    fn take_due(&mut self, now: Instant) -> bool {
+        let due = self.due.is_some_and(|t| t <= now);
+        if due {
+            self.due = None;
+        }
+        due
+    }
+}
+
 struct Shell {
     args: Args,
     proxy: EventLoopProxy<UserEvent>,
@@ -279,7 +303,7 @@ struct Shell {
     chrome_pressed: Option<Button>,
     clipboard: Option<arboard::Clipboard>,
     notice_until: Option<Instant>,
-    dir_due: Option<Instant>,
+    dir_due: DirSettle,
     /// Fractional wheel steps of touchpads (in 1/120).
     wheel_rest: f64,
     /// The files of a drop still being reported.
@@ -722,8 +746,7 @@ impl Shell {
                 app.notice = None;
                 app.invalidate();
             }
-            if self.dir_due.is_some_and(|t| t <= now) {
-                self.dir_due = None;
+            if self.dir_due.take_due(now) {
                 app.on_dir_changed();
             }
         }
@@ -734,7 +757,7 @@ impl Shell {
             .values()
             .copied()
             .chain(self.notice_until)
-            .chain(self.dir_due)
+            .chain(self.dir_due.due)
             .min();
         el.set_control_flow(match next {
             Some(t) => ControlFlow::WaitUntil(t),
@@ -1051,7 +1074,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             UserEvent::Wake(Wake::Loaded) => app.on_loaded(),
             UserEvent::Wake(Wake::List) => app.on_list(),
             UserEvent::Wake(Wake::DirChanged) => {
-                self.dir_due = Some(Instant::now() + DIR_SETTLE);
+                self.dir_due.changed(Instant::now());
                 vec![]
             }
             UserEvent::Wake(Wake::Thumbs) => {
@@ -1193,7 +1216,7 @@ pub fn run() -> i32 {
         chrome_pressed: None,
         clipboard: None,
         notice_until: None,
-        dir_due: None,
+        dir_due: DirSettle::default(),
         wheel_rest: 0.0,
         dropped: Dropped::default(),
         exiting: false,
@@ -1506,6 +1529,15 @@ mod tests {
     /// for about 150 ms before it is listed again.
     #[test]
     fn folder_changes_settle_for_150_ms_before_relisting() {
-        assert_eq!(DIR_SETTLE, Duration::from_millis(150));
+        let ms = Duration::from_millis;
+        let t0 = Instant::now();
+        let mut settle = DirSettle::default();
+        assert!(!settle.take_due(t0), "nothing changed");
+        settle.changed(t0);
+        assert!(!settle.take_due(t0), "not at once");
+        assert!(!settle.take_due(t0 + ms(149)), "not before 150 ms");
+        assert!(settle.take_due(t0 + ms(150)), "listed at 150 ms");
+        assert!(!settle.take_due(t0 + ms(300)), "once per change");
+        assert_eq!(settle.due, None, "no timer left");
     }
 }
