@@ -373,6 +373,24 @@ mod tests {
         );
     }
 
+    /// AC-10, AC-11: less than 4 px is a click, 4 px a drag (3 and 4 px
+    /// along one axis, so per axis and straight line agree).
+    #[test]
+    fn a_release_3_px_away_is_a_click_and_4_px_away_a_drag() {
+        let mut s = snip();
+        s.mouse_down((200.0, 200.0));
+        assert_eq!(
+            s.mouse_up((203.0, 200.0)),
+            Outcome::Done(Rect::new(100.0, 100.0, 400.0, 300.0)),
+            "the window under the pointer"
+        );
+        s.mouse_down((200.0, 200.0));
+        assert_eq!(
+            s.mouse_up((204.0, 201.0)),
+            Outcome::Done(Rect::new(200.0, 200.0, 4.0, 1.0))
+        );
+    }
+
     #[test]
     fn enter_takes_the_monitor_escape_cancels() {
         let mut s = snip();
