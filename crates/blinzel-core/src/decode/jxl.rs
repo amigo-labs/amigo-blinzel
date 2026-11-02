@@ -360,6 +360,16 @@ mod tests {
         }
     }
 
+    /// AC-03: the probe yields the profile of the colour space the image is
+    /// rendered into (cjxl -d 0 from a PNG tagged Display P3), none for sRGB.
+    #[test]
+    fn probe_yields_the_rendered_colour_space() {
+        let p3 = include_bytes!("../../testdata/p3-8x6.jxl");
+        let icc = crate::decode::probe(p3).unwrap().icc.expect("profile");
+        assert!(!icc.srgb);
+        assert!(crate::decode::probe(&LOSSY).unwrap().icc.is_none());
+    }
+
     #[test]
     fn lossy_matches_the_generic_stream() {
         let (size, o, icc) = info(&LOSSY).unwrap();

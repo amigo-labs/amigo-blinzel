@@ -259,6 +259,22 @@ mod tests {
         out.into_inner()
     }
 
+    /// AC-03: the probe yields the ICC profile tag.
+    #[test]
+    fn probe_reads_the_icc_profile_tag() {
+        use crate::icc::{Trc, colorants, matrix_profile};
+        let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3 test");
+        let (w, h) = (6, 4);
+        let mut out = Cursor::new(Vec::new());
+        let mut enc = TiffEncoder::new(&mut out).unwrap();
+        let mut img = enc.new_image::<colortype::RGB8>(w, h).unwrap();
+        img.encoder().write_tag(Tag::IccProfile, &p3[..]).unwrap();
+        img.write_data(&crate::testimg::rgb(w, h)).unwrap();
+        let data = out.into_inner();
+        let icc = crate::decode::probe(&data).unwrap().icc.expect("profile");
+        assert_eq!(&icc.bytes[..], &p3[..]);
+    }
+
     #[test]
     fn strips_decode_in_parallel() {
         let (w, h) = (37, 23);

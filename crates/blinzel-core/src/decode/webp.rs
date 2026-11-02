@@ -300,6 +300,22 @@ mod tests {
         assert!(decode(b"RIFF\0\0\0\0WEBPVP8 ").is_err());
     }
 
+    /// AC-03: the probe yields the ICC chunk's profile.
+    #[test]
+    fn probe_reads_the_icc_chunk() {
+        use crate::icc::{Trc, colorants, matrix_profile};
+        let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3 test");
+        let (w, h) = (5, 4);
+        let mut data = Vec::new();
+        let mut enc = image_webp::WebPEncoder::new(&mut data);
+        enc.set_icc_profile(p3.clone());
+        let rgba = crate::testimg::rgba(w, h);
+        enc.encode(&rgba, w, h, image_webp::ColorType::Rgba8)
+            .unwrap();
+        let icc = crate::decode::probe(&data).unwrap().icc.expect("profile");
+        assert_eq!(&icc.bytes[..], &p3[..]);
+    }
+
     /// The probe reads the EXIF orientation, with or without JPEG's
     /// `Exif\0\0` in front of the TIFF data (AC-17).
     #[test]

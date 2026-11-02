@@ -87,7 +87,7 @@ This spec records what the code does today.
 | ----- | ---- | ------ | ------ |
 | AC-01 | `reads_profiles_from_jpeg`, `reads_profiles_from_png` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
 | AC-02 | `display_p3_gets_a_profile`, `decodes_8_and_10_bit` (`crates/blinzel-core/src/decode/avif.rs`), CI: Linux | built | |
-| AC-03 | — (WebP, TIFF and JPEG XL tests check only files without a profile; no HEIC or ImageIO profile test) | open | |
+| AC-03 | `probe_reads_the_icc_chunk` (`crates/blinzel-core/src/decode/webp.rs`), `probe_reads_the_icc_profile_tag` (`decode/tiff.rs`), `probe_reads_the_colour_profile` (`decode/heif.rs`), `heic_profile_comes_from_the_container` (`decode/avif.rs`), `probe_yields_the_rendered_colour_space` (`decode/jxl.rs`), CI: Linux; the macOS ImageIO clause has no test yet | open | |
 | AC-04 | `recognises_srgb_by_primaries_and_curve`, `parametric_srgb_curve_counts` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
 | AC-05 | `caches_per_profile_and_skips_srgb` (`crates/blinzel-ui/src/color.rs`), CI: Linux | built | |
 | AC-06 | `caches_per_profile_and_skips_srgb` (`crates/blinzel-ui/src/color.rs`), CI: Linux | built | |
@@ -111,3 +111,5 @@ This spec records what the code does today.
 - The harness's colour engine builds an identity LUT instead of none, and the fake canvas records whether a frame drew an image through a LUT: App tests can see conversion without a real colour engine; the engine's own output is proven by AC-07, AC-08.
 - AC-14 is checked inside the X11 test: both change the process environment, and the X11 one needs a published profile for the Wayland check to mean anything (without an X server the target is sRGB anyway).
 - AC-18 proves the "cannot build" cases against Little CMS; the Windows Color System's refusal of such profiles has no test of its own (AC-08's test file covers only RGB profiles).
+- AC-03 found a defect: the container reader treated HEIC's `hvcC` as an unknown essential property and refused the primary item, so the profile WIC and ImageIO probes take from the container was always lost for HEIC. `hvcC` is now ignored like `av1C`; `heic_profile_comes_from_the_container` was red before the fix.
+- AC-03's fixtures: `testdata/p3-64x48.heic` is `rgb-64x48.heic` with a Display P3 `colr prof` box added by the batch engine's `avif_with_icc`; `testdata/p3-8x6.jxl` is `cjxl -d 0` of an 8 × 6 PNG tagged with `matrix_profile(DISPLAY_P3, Trc::Srgb, "Display P3 test")`.
