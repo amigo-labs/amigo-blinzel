@@ -600,14 +600,26 @@ fn verify_own_jpeg(data: &[u8], threads: usize) -> Result<(), String> {
             Pixels::Ycc { y, cb, cr, .. } => vec![y, cb, cr],
             Pixels::Packed { plane, .. } => vec![plane],
         };
-        for (c, ((buf, l), t)) in ours.iter().zip(&layouts).zip(&theirs).enumerate() {
-            let w = l.width.min(t.width) as usize;
-            for y in 0..l.height.min(t.height) {
-                if buf[y as usize * l.stride..][..w] != t.row(y)[..w] {
-                    return Err(format!(
-                        "blinzel-jpeg differs from libjpeg-turbo at {scale}/8, component {c}, row {y}"
-                    ));
-                }
+        compare_planes(scale, &ours, &layouts, &theirs)?;
+    }
+    Ok(())
+}
+
+/// Compares blinzel-jpeg's planes (`ours`, laid out by `layouts`) with
+/// libjpeg-turbo's row by row; the first differing row is the error.
+fn compare_planes(
+    scale: u32,
+    ours: &[PoolBuf],
+    layouts: &[blinzel_jpeg::PlaneLayout],
+    theirs: &[blinzel_core::pixel::Plane],
+) -> Result<(), String> {
+    for (c, ((buf, l), t)) in ours.iter().zip(layouts).zip(theirs).enumerate() {
+        let w = l.width.min(t.width) as usize;
+        for y in 0..l.height.min(t.height) {
+            if buf[y as usize * l.stride..][..w] != t.row(y)[..w] {
+                return Err(format!(
+                    "blinzel-jpeg differs from libjpeg-turbo at {scale}/8, component {c}, row {y}"
+                ));
             }
         }
     }
@@ -1104,5 +1116,67 @@ mod tests {
         assert!(!zune_wins(&stats(118.5, 120.1), &stats(169.3, 170.7)));
         // Unoptimized C: slower in every run.
         assert!(zune_wins(&stats(230.0, 236.0), &stats(158.7, 163.4)));
+    }
+
+    fn jpeg_full(candidate: &str, file: &str, stats: Stats) -> Result_ {
+        Result_ {
+            group: "jpeg-full".into(),
+            candidate: candidate.into(),
+            file: file.into(),
+            megapixels: 24.0,
+            stats,
+        }
+    }
+
+    #[test]
+    fn check_fails_on_a_blinzel_jpeg_mismatch() {
+        let results = [
+            jpeg_full("turbojpeg YCbCr planes", "a.jpg", stats(118.5, 120.1)),
+            jpeg_full("zune-jpeg RGBA", "a.jpg", stats(169.3, 170.7)),
+        ];
+        assert!(check(&results, &[]).is_ok());
+        let e = check(&results, &["a.jpg: blinzel-jpeg differs".into()]).unwrap_err();
+        assert!(e.contains("a.jpg: blinzel-jpeg differs"), "{e}");
+    }
+
+    #[test]
+    fn check_fails_on_a_zune_jpeg_win_and_names_file_medians_minima_and_cause() {
+        let results = [
+            jpeg_full(
+                "turbojpeg YCbCr planes",
+                "jpeg-24mp-420.jpg",
+                stats(230.0, 236.0),
+            ),
+            jpeg_full("zune-jpeg RGBA", "jpeg-24mp-420.jpg", stats(158.7, 163.4)),
+        ];
+        let e = check(&results, &[]).unwrap_err();
+        for part in ["jpeg-24mp-420.jpg", "236.0", "230.0", "163.4", "158.7"] {
+            assert!(e.contains(part), "{part} missing from {e}");
+        }
+        assert!(e.contains("built without optimization"), "{e}");
+    }
+
+    #[test]
+    fn a_differing_plane_row_fails_the_comparison() {
+        use blinzel_core::pixel::Plane;
+        let layout = blinzel_jpeg::PlaneLayout {
+            width: 4,
+            height: 3,
+            stride: 8,
+            rows: 3,
+        };
+        let mut ours = PoolBuf::new(layout.stride * layout.rows);
+        ours.fill(7);
+        let mut theirs = Plane::new(4, 3, 1);
+        theirs.data.fill(7);
+        assert!(compare_planes(1, &[ours], &[layout], &[theirs]).is_ok());
+
+        let mut ours = PoolBuf::new(layout.stride * layout.rows);
+        ours.fill(7);
+        ours[2 * layout.stride + 3] = 8;
+        let mut theirs = Plane::new(4, 3, 1);
+        theirs.data.fill(7);
+        let e = compare_planes(1, &[ours], &[layout], &[theirs]).unwrap_err();
+        assert!(e.contains("1/8, component 0, row 2"), "{e}");
     }
 }
