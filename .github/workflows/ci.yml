@@ -64,13 +64,16 @@ jobs:
       # measurement itself needs a real Mac with screen recording permission.
       - run: cargo run -q -p blinzel-race -- list
       # ScreenCaptureKit needs the Screen Recording permission, which the
-      # runner may not grant: informative only.
+      # runner grants: the main display as a PNG of at least 640 x 480.
       - name: Screenshot capture test
-        continue-on-error: true
         run: |
           cargo build --release -p blinzel-app
           ./target/release/blinzel --capture-test capture.png
-          file capture.png
+          sig=$(od -An -tx1 -N8 capture.png | tr -d ' \n')
+          w=$((16#$(od -An -tx1 -j16 -N4 capture.png | tr -d ' \n')))
+          h=$((16#$(od -An -tx1 -j20 -N4 capture.png | tr -d ' \n')))
+          echo "capture.png: $w x $h, $(wc -c < capture.png | tr -d ' ') bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$sig" = 89504e470d0a1a0a && test "$w" -ge 640 && test "$h" -ge 480
       # The app bundle starts, shows a test image and exits.
       - name: App bundle and smoke test (window, first frame)
         run: |
