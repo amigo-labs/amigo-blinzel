@@ -483,6 +483,87 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Runs `job` over `source` alone (written to `dir/{name}`) and
+    /// returns the output file.
+    fn run_one(dir: &Path, name: &str, source: &[u8], job: &Job) -> Vec<u8> {
+        let src = dir.join(name);
+        std::fs::write(&src, source).unwrap();
+        let out = Mutex::new(None);
+        run(
+            job,
+            &[src.into()],
+            &Native,
+            &Options::default(),
+            &|p| match p {
+                Progress::Done { output, .. } => *out.lock().unwrap() = Some(output),
+                Progress::Failed { error, .. } => panic!("{error}"),
+            },
+            &AtomicBool::new(false),
+        );
+        std::fs::read(out.into_inner().unwrap().expect("one output")).unwrap()
+    }
+
+    /// `docs/specs/batch-resize.md` AC-06: "sharpen" reaches the run, as
+    /// the unsharp mask over the scaled pixels.
+    #[test]
+    fn sharpen_is_applied_after_scaling() {
+        let dir = tmp("sharpen");
+        let job = |sharpen| Job {
+            size: Size::Width(100),
+            sharpen,
+            pattern: "{name}-{n}".into(),
+            ..Job::default()
+        };
+        let plain = run_one(&dir, "a.png", &source_png(), &job(None));
+        let sharp = run_one(&dir, "b.png", &source_png(), &job(Some(Default::default())));
+        let pixels = |f: &[u8]| decode::decode(f, Request::Full).unwrap().to_bgra();
+        let mut want = pixels(&plain);
+        assert_ne!(pixels(&sharp), want, "sharpening changes the edge");
+        sharpen::apply(&mut want, 100, 67, Default::default());
+        assert_eq!(pixels(&sharp), want);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `docs/specs/batch-resize.md` AC-10: the source's ICC profile is
+    /// embedded with "keep colour profile" and left out without it.
+    #[test]
+    fn the_colour_profile_is_kept_on_request() {
+        let dir = tmp("icc");
+        let icc = crate::icc::matrix_profile(
+            crate::icc::colorants::DISPLAY_P3,
+            crate::icc::Trc::Gamma(2.2),
+            "Test",
+        );
+        let px = vec![90u8; 64 * 32 * 4];
+        let src = encode::encode(
+            &px,
+            64,
+            32,
+            Codec::Png,
+            &Default::default(),
+            None,
+            Some(&icc),
+        );
+        let src = src.unwrap();
+        for codec in [Codec::Jpeg, Codec::Png, Codec::Webp, Codec::Avif] {
+            for keep_icc in [true, false] {
+                let job = Job {
+                    size: Size::Width(32),
+                    output: Output::Codec(codec),
+                    keep_icc,
+                    pattern: "{name}-{n}".into(),
+                    ..Job::default()
+                };
+                let out = run_one(&dir, "p.png", &src, &job);
+                let probe = decode::probe(&out).unwrap();
+                let got = probe.icc.map(|p| p.bytes.to_vec());
+                let want = keep_icc.then(|| icc.clone());
+                assert_eq!(got, want, "{codec:?} keep_icc {keep_icc}");
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn jpeg_sources_are_decoded_at_a_reduced_scale_and_rotated() {
         // 640×480 JPEG with EXIF orientation 6: shown 480×640.
@@ -554,6 +635,7 @@ mod tests {
     /// `during` while a decode is in progress.
     struct Watched<F: Fn() + Sync> {
         decoded: Mutex<Vec<(u32, u32)>>,
+        requests: Mutex<Vec<Request>>,
         during: F,
     }
 
@@ -561,6 +643,7 @@ mod tests {
         fn new(during: F) -> Self {
             Watched {
                 decoded: Mutex::new(Vec::new()),
+                requests: Mutex::new(Vec::new()),
                 during,
             }
         }
@@ -572,6 +655,7 @@ mod tests {
         }
         fn decode(&self, data: &[u8], req: Request) -> Result<Image, DecodeError> {
             (self.during)();
+            self.requests.lock().unwrap().push(req);
             let img = decode::decode(data, req)?;
             self.decoded.lock().unwrap().push((img.width, img.height));
             Ok(img)
@@ -738,7 +822,6 @@ mod tests {
         most.into_inner()
     }
 
-    /// `docs/specs/batch-resize.md` AC-19.
     /// `docs/specs/batch-resize.md` AC-05.
     #[test]
     fn jpeg_sources_decode_at_the_smallest_scale_that_keeps_twice_the_target() {
@@ -782,6 +865,10 @@ mod tests {
                 &AtomicBool::new(false),
             );
             assert_eq!(sum.done, 1);
+            if *file == png {
+                let requests = source.requests.lock().unwrap();
+                assert_eq!(*requests, [Request::Full], "other formats at full size");
+            }
             let file = file.display();
             assert_eq!(
                 source.decoded.into_inner().unwrap(),
@@ -792,6 +879,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// `docs/specs/batch-resize.md` AC-19.
     #[test]
     fn files_run_in_parallel_within_the_memory_budget() {
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());

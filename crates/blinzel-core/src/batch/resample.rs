@@ -259,17 +259,21 @@ mod tests {
         assert_eq!(out[9 * 4 + 3], 0);
     }
 
+    /// `docs/specs/batch-resize.md` AC-04: within one level of a
+    /// double-precision Lanczos3 written out here, independent of the
+    /// module's own kernel.
     #[test]
     fn matches_a_double_precision_reference() {
-        // A smooth gradient, downscaled by a non-integer factor.
-        let (sw, sh, dw, dh) = (97u32, 61u32, 40u32, 23u32);
-        let mut src = Vec::new();
-        for y in 0..sh {
-            for x in 0..sw {
-                src.extend([(x * 2) as u8, (y * 4) as u8, ((x + y) % 256) as u8, 255]);
+        let lanczos3 = |x: f64| {
+            if x == 0.0 {
+                return 1.0;
             }
-        }
-        let out = resize(&src, sw, sh, dw, dh);
+            if x.abs() >= 3.0 {
+                return 0.0;
+            }
+            let px = std::f64::consts::PI * x;
+            3.0 * px.sin() * (px / 3.0).sin() / (px * px)
+        };
         let lin = |v: u8| {
             let c = v as f64 / 255.0;
             if c <= 0.04045 {
@@ -291,25 +295,57 @@ mod tests {
             let s = src as f64 / dst as f64;
             let c = (i as f64 + 0.5) * s;
             let w: Vec<(usize, f64)> = (0..src as usize)
-                .map(|j| (j, lanczos((j as f64 + 0.5 - c) / s.max(1.0))))
+                .map(|j| (j, lanczos3((j as f64 + 0.5 - c) / s.max(1.0))))
                 .filter(|(_, w)| *w != 0.0)
                 .collect();
             let sum: f64 = w.iter().map(|(_, w)| w).sum();
             w.into_iter().map(|(j, v)| (j, v / sum)).collect::<Vec<_>>()
         };
-        for oy in 0..dh {
-            let wy = weights(sh, dh, oy);
-            for ox in 0..dw {
-                let wx = weights(sw, dw, ox);
-                for c in 0..3 {
-                    let mut v = 0.0;
-                    for &(y, a) in &wy {
-                        for &(x, b) in &wx {
-                            v += a * b * lin(src[(y * sw as usize + x) * 4 + c]);
+        // A smooth gradient and noise (where the lobes of the window
+        // matter), downscaled by a non-integer factor and upscaled.
+        let mut seed = 0x2545_f491u32;
+        let mut noise = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 24) as u8
+        };
+        let gradient = |x: u32, y: u32| [(x * 2) as u8, (y * 4) as u8, ((x + y) % 256) as u8];
+        for (sw, sh, dw, dh, smooth) in [
+            (97u32, 61u32, 40u32, 23u32, true),
+            (97, 61, 40, 23, false),
+            (13, 9, 31, 20, false),
+        ] {
+            let mut src = Vec::new();
+            for y in 0..sh {
+                for x in 0..sw {
+                    let p = if smooth {
+                        gradient(x, y)
+                    } else {
+                        [noise(), noise(), noise()]
+                    };
+                    src.extend([p[0], p[1], p[2], 255]);
+                }
+            }
+            let out = resize(&src, sw, sh, dw, dh);
+            for oy in 0..dh {
+                let wy = weights(sh, dh, oy);
+                for ox in 0..dw {
+                    let wx = weights(sw, dw, ox);
+                    for c in 0..3 {
+                        let mut v = 0.0;
+                        for &(y, a) in &wy {
+                            for &(x, b) in &wx {
+                                v += a * b * lin(src[(y * sw as usize + x) * 4 + c]);
+                            }
                         }
+                        let got = out[((oy * dw + ox) * 4) as usize + c] as f64;
+                        assert!(
+                            (got - enc(v)).abs() <= 1.0,
+                            "{sw}x{sh} -> {dw}x{dh} ({ox},{oy}) c{c}: {got} vs {}",
+                            enc(v)
+                        );
                     }
-                    let got = out[((oy * dw + ox) * 4) as usize + c] as f64;
-                    assert!((got - enc(v)).abs() <= 1.0, "({ox},{oy}) c{c}");
                 }
             }
         }

@@ -255,6 +255,12 @@ mod tests {
         assert_eq!(render("web-{n}", &f).unwrap(), "web-7");
         assert_eq!(render("a:b?{name}. ", &f).unwrap(), "a_b_IMG_0042");
         assert_eq!(render("...", &f).unwrap(), "image");
+        assert_eq!(
+            render("1/2\\3:4*5?6\"7<8>9|0\u{1}x", &f).unwrap(),
+            "1_2_3_4_5_6_7_8_9_0_x",
+            "every character a file name cannot hold"
+        );
+        assert_eq!(render("{n:9}", &f).unwrap(), "000000007");
     }
 
     #[test]
@@ -266,6 +272,14 @@ mod tests {
             "20240517_090430"
         );
         assert_eq!(render("{date:YY}-{name}", &f).unwrap(), "24-IMG_0042");
+        let y1999 = Fields {
+            date: Some(Stamp {
+                year: 1999,
+                ..TAKEN
+            }),
+            ..fields()
+        };
+        assert_eq!(render("{date:YY_YYYY}", &y1999).unwrap(), "99_1999");
         assert_eq!(render("{date:hh:mm}", &f).unwrap(), "09_04");
         assert_eq!(
             render("{date:Tag DD}", &f).unwrap(),
@@ -281,6 +295,8 @@ mod tests {
         assert!(validate("{name").is_err());
         assert!(validate("{size}").is_err());
         assert!(validate("{n:x}").is_err());
+        assert!(validate("{n:10}").is_err(), "at most 9 digits");
+        assert!(validate("{n:9}").is_ok());
         assert!(validate("{date:}").is_err());
         assert!(validate("sub/{name}").is_err());
         assert!(validate("").is_err());
