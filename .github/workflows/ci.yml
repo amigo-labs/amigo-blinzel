@@ -39,10 +39,10 @@ jobs:
           XDG_RUNTIME_DIR=$RUNNER_TEMP timeout 120 xvfb-run -a ./target/release/blinzel \
             crates/blinzel-core/testdata/rgb420-64x48.avif --exit-after-first-frame --json startup.json
           cat startup.json
-          # The display profile published on the X root window (colord, KDE)
-          # and a copy offered to other programs as image/png. One at a
-          # time: the tests set DISPLAY.
-          xvfb-run -a sh -c 'BLINZEL_X11_TEST=$DISPLAY cargo test -q --release -p blinzel-app --lib -- linux::color linux::clipboard --test-threads=1'
+          # The display profile published on the X root window (colord, KDE),
+          # a copy offered to other programs as image/png and the order of
+          # the cold start. One at a time: the tests set DISPLAY.
+          xvfb-run -a sh -c 'BLINZEL_X11_TEST=$DISPLAY cargo test -q --release -p blinzel-app --lib --test startup -- linux::color linux::clipboard startup_order --test-threads=1'
       # Fails when Cargo.lock changed without regenerating the notices.
       - name: Third-party notices up to date
         run: cargo run --locked -p blinzel-release -- notices --check
