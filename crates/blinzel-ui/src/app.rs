@@ -2749,3 +2749,7 @@ mod tests {
         assert!(h.press(Letter('Q'), false, false).is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "app_color_tests.rs"]
+mod color_tests;

@@ -13,7 +13,7 @@
 //! Each [`Harness`] holds a process-wide lock while it lives: the UI
 //! language is a global, so harness tests run one after another.
 
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
@@ -124,6 +124,8 @@ pub(crate) struct DrawnImage {
     /// The stage's size (texels).
     pub size: (u32, u32),
     pub full_size: (u32, u32),
+    /// Drawn through a colour transform.
+    pub converted: bool,
 }
 
 /// What one [`App::render`] drew.
@@ -172,10 +174,11 @@ impl Canvas for FakeCanvas {
         self.frame = Frame::default();
         true
     }
-    fn draw_image(&mut self, img: &FakeImage, _: &Affine, _: &Rect, _: Rgba, _: Option<&()>) {
+    fn draw_image(&mut self, img: &FakeImage, _: &Affine, _: &Rect, _: Rgba, lut: Option<&()>) {
         self.frame.images.push(DrawnImage {
             size: img.size,
             full_size: img.full_size,
+            converted: lut.is_some(),
         });
     }
     fn draw_shapes(&mut self, shapes: &[Shape]) {
@@ -212,11 +215,21 @@ pub(crate) struct HostLog {
     pub first_frame_shown: bool,
 }
 
-/// A window on a 1920 × 1080 monitor (id 1); client points are screen
-/// points.
-#[derive(Default)]
+/// A window on a 1920 × 1080 monitor (id 1 until a test moves it);
+/// client points are screen points.
 pub(crate) struct FakeHost {
     pub log: RefCell<HostLog>,
+    /// The id of the monitor the window is on.
+    pub monitor: Cell<isize>,
+}
+
+impl Default for FakeHost {
+    fn default() -> FakeHost {
+        FakeHost {
+            log: RefCell::default(),
+            monitor: Cell::new(1),
+        }
+    }
 }
 
 impl Host for FakeHost {
@@ -236,7 +249,7 @@ impl Host for FakeHost {
         (p.0 as i32, p.1 as i32)
     }
     fn monitor(&self) -> Option<(isize, (u32, u32))> {
-        Some((1, (1920, 1080)))
+        Some((self.monitor.get(), (1920, 1080)))
     }
     fn offer_clipboard(&self) -> bool {
         self.log.borrow_mut().clipboard_offers += 1;
@@ -255,7 +268,8 @@ impl Host for FakeHost {
 
 /// The real file system and the crate's own decoders; wakes go into a
 /// channel the [`Harness`] drains. English, UTC unless a test sets an
-/// offset ([`Harness::set_utc_offset`]), sRGB monitor; log lines go to the
+/// offset ([`Harness::set_utc_offset`]), sRGB monitors unless a test
+/// gives one a profile ([`FakeServices::targets`]); log lines go to the
 /// test's output.
 pub(crate) struct FakeServices {
     wakes: Mutex<Sender<Wake>>,
@@ -275,6 +289,8 @@ pub(crate) struct FakeServices {
     /// A stand-in system decoder: what the native decoders report as not
     /// decoded natively (a raw's sensor data) develops to this size.
     pub develops: Mutex<Option<(u32, u32)>>,
+    /// The colour target of each monitor that is not sRGB.
+    pub targets: Mutex<HashMap<isize, Profile>>,
 }
 
 impl FakeServices {
@@ -330,8 +346,8 @@ impl Services for FakeServices {
     fn log(&self, msg: &str) {
         eprintln!("blinzel: {msg}");
     }
-    fn display_target(&self, _: isize) -> Option<Profile> {
-        None
+    fn display_target(&self, monitor: isize) -> Option<Profile> {
+        self.targets.lock().unwrap().get(&monitor).cloned()
     }
     fn thumb_threads(&self) -> usize {
         1
@@ -575,9 +591,19 @@ pub(crate) const CLIENT: (u32, u32) = (800, 600);
 /// How long [`Harness::pump`] waits for the loader before failing.
 const PUMP_LIMIT: Duration = Duration::from_secs(30);
 
-/// Colour transforms are not built: every image shows as sRGB.
-fn no_lut(_: Option<&Profile>, _: Option<&Profile>) -> Option<Lut3d> {
-    None
+/// Colour transforms built so far ([`identity_lut`]).
+pub(crate) static LUTS_BUILT: AtomicUsize = AtomicUsize::new(0);
+
+/// The colour engine: every transform is the identity (the frame records
+/// only whether one was used: [`DrawnImage::converted`]).
+fn identity_lut(_: Option<&Profile>, _: Option<&Profile>) -> Option<Lut3d> {
+    LUTS_BUILT.fetch_add(1, Ordering::Relaxed);
+    let n = blinzel_core::lut::SIZE;
+    let step = 65535.0 / (n - 1) as f64;
+    let nodes = (0..n * n * n)
+        .map(|i| [i % n, i / n % n, i / (n * n)].map(|v| (v as f64 * step).round() as u16))
+        .collect();
+    Lut3d::from_nodes(n, nodes)
 }
 
 /// Harness tests share globals (the UI language): one at a time.
@@ -661,6 +687,7 @@ impl Harness {
             decodes: Mutex::new(Vec::new()),
             previews: Mutex::new(HashMap::new()),
             develops: Mutex::new(None),
+            targets: Mutex::new(HashMap::new()),
         });
         let device = Arc::new(FakeDevice {
             budget,
@@ -668,7 +695,7 @@ impl Harness {
         });
         let loader = Loader::new(services.clone(), 1, 2, 2);
         loader.set_device(device.clone());
-        let color = ColorManager::new(settings.color_management, no_lut);
+        let color = ColorManager::new(settings.color_management, identity_lut);
         color.set_target(None);
         loader.set_color(color.clone());
         let app = App::new(
