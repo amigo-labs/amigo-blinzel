@@ -108,6 +108,10 @@ jobs:
           cp target/release/blinzel dist/amigo-blinzel-linux-${{ matrix.arch }}
           cp target/release/blinzel LICENSE THIRD-PARTY-NOTICES-linux.txt dist/amigo-blinzel/
           tar -C dist -czf dist/amigo-blinzel-linux-${{ matrix.arch }}.tar.gz amigo-blinzel
+          # The archive holds the folder amigo-blinzel/ with these three files only.
+          listing=$(tar -tzf dist/amigo-blinzel-linux-${{ matrix.arch }}.tar.gz | LC_ALL=C sort | tr '\n' ' ')
+          echo "$listing"
+          test "$listing" = "amigo-blinzel/ amigo-blinzel/LICENSE amigo-blinzel/THIRD-PARTY-NOTICES-linux.txt amigo-blinzel/blinzel "
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
@@ -175,6 +179,13 @@ jobs:
           ditto -c -k --keepParent dist/amigo-blinzel.app dist/amigo-blinzel-macos.zip
           cargo run --release --locked -p blinzel-release -- macos-dmg dist/amigo-blinzel.app dist/amigo-blinzel-macos.dmg
           hdiutil verify dist/amigo-blinzel-macos.dmg
+          # The disk image and the zip hold the same signed app.
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" dist/amigo-blinzel-macos.dmg
+          mkdir "$RUNNER_TEMP/zip"
+          ditto -x -k dist/amigo-blinzel-macos.zip "$RUNNER_TEMP/zip"
+          diff -r "$RUNNER_TEMP/zip/amigo-blinzel.app" "$RUNNER_TEMP/dmg/amigo-blinzel.app"
+          codesign --verify --verbose "$RUNNER_TEMP/zip/amigo-blinzel.app"
+          hdiutil detach "$RUNNER_TEMP/dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -208,6 +219,15 @@ jobs:
         run: |
           test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY secret is missing"; exit 1; }
           cargo run --release -p blinzel-release -- sign dist/SHA256SUMS dist/SHA256SUMS.sig
+      # Exactly the release's files (docs/specs/release.md, Assets), each
+      # executable built for the architecture in its name, every
+      # amigo-blinzel-* file in SHA256SUMS with its hash. Only what passed
+      # goes up.
+      - name: Check the release files
+        shell: bash
+        run: |
+          cp THIRD-PARTY-NOTICES.txt THIRD-PARTY-NOTICES-linux.txt THIRD-PARTY-NOTICES-macos.txt dist/
+          cargo run --release --locked -p blinzel-release -- check-release dist
       # release-please created the tag's release as a draft (with the
       # changelog as notes); the files go up first, then it is published,
       # so the updaters never see a release without its files.
@@ -217,7 +237,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          files="dist/amigo-blinzel-* dist/SHA256SUMS dist/SHA256SUMS.sig THIRD-PARTY-NOTICES.txt THIRD-PARTY-NOTICES-linux.txt THIRD-PARTY-NOTICES-macos.txt"
+          files="dist/*"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "amigo-blinzel ${TAG#v}" --generate-notes
           fi
