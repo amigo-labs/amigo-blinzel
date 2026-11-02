@@ -13,7 +13,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 1 | [selection-and-export](selection-and-export.md) | 18 / 22 | 2 | 2 | the first CI runs of AC-09 (Windows, `clipboard.rs`) and AC-11 (macOS, `macos/shell.rs`); the manual checks AC-04 (visual design), AC-15 (save dialog); then `/spec-check` |
 | 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements), then `/spec-check` |
 | 3 | [startup](startup.md) | 3 / 14 | 6 | 3 | `/spec-build` |
-| 4 | [browsing](browsing.md) | 19 / 21 | 3 | 1 | `/spec-build` for AC-18 (Windows threads); the first CI runs of AC-13 (Windows `gfx/device.rs`, macOS `metal_golden.rs`) and AC-15 (Windows `instance.rs`); the manual check AC-21 (measurement); then `/spec-check` |
+| 4 | [browsing](browsing.md) | 20 / 21 | 4 | 1 | the first CI runs of AC-13 (Windows `gfx/device.rs`, macOS `metal_golden.rs`), AC-15 (Windows `instance.rs`) and AC-18 (Windows `run.rs`, `platform/threads.rs`); the manual check AC-21 (measurement); then `/spec-check` |
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
 | 6 | [image-formats](image-formats.md) | 16 / 24 | 4 | 0 | `/spec-build` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 10 / 17 | 0 | 0 | `/spec-build` |
