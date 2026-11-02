@@ -529,11 +529,9 @@ impl Shell {
             return;
         };
         let services = self.services.clone();
-        let _ = std::thread::Builder::new()
-            .name("blinzel-save".into())
-            .spawn(move || {
-                let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
-                services.send(UserEvent::Notice(text));
+        let _ =
+            blinzel_ui::app::save_in_background(self.services.clone(), job, target, move |text| {
+                services.send(UserEvent::Notice(text))
             });
     }
 

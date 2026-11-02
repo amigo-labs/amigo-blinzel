@@ -695,13 +695,9 @@ impl Shell {
         let Some(target) = panel.URL().and_then(|u| url_path(&u)) else {
             return;
         };
-        let services = self.services.clone();
-        let _ = std::thread::Builder::new()
-            .name("blinzel-save".into())
-            .spawn(move || {
-                let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
-                post(UserEvent::Notice(text));
-            });
+        let _ = blinzel_ui::app::save_in_background(self.services.clone(), job, target, |text| {
+            post(UserEvent::Notice(text))
+        });
     }
 
     /// Work that waits for the end of an event: a copy's pixels, the next

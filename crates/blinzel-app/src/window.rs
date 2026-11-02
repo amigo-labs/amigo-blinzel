@@ -753,26 +753,24 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
                 crate::dialogs::save_file(hwnd, &folder, &job.default_name, job.prefer_png)
             {
                 let raw = hwnd.0 as isize;
-                let services = with_app(|a| a.services.clone());
-                let _ = std::thread::Builder::new()
-                    .name("blinzel-save".into())
-                    .spawn(move || {
-                        let Some(services) = services else { return };
-                        let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
-                        let ptr = Box::into_raw(Box::new(text)) as isize;
-                        unsafe {
-                            if PostMessageW(
-                                Some(HWND(raw as *mut _)),
-                                WM_NOTICE,
-                                WPARAM(0),
-                                LPARAM(ptr),
-                            )
-                            .is_err()
-                            {
-                                drop(Box::from_raw(ptr as *mut String));
+                if let Some(services) = with_app(|a| a.services.clone()) {
+                    let _ =
+                        blinzel_ui::app::save_in_background(services, job, target, move |text| {
+                            let ptr = Box::into_raw(Box::new(text)) as isize;
+                            unsafe {
+                                if PostMessageW(
+                                    Some(HWND(raw as *mut _)),
+                                    WM_NOTICE,
+                                    WPARAM(0),
+                                    LPARAM(ptr),
+                                )
+                                .is_err()
+                                {
+                                    drop(Box::from_raw(ptr as *mut String));
+                                }
                             }
-                        }
-                    });
+                        });
+                }
             }
             vec![]
         }
