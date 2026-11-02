@@ -55,6 +55,25 @@ pub fn write(folder: &Path, stem: &str, png: &[u8]) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Writes a shot where the settings ask ([`destination`]): into `folder`,
+/// into `cache` after deleting its shots older than [`CACHE_MAX_AGE`], or
+/// nowhere (`Ok(None)`). Returns the file.
+pub fn store(
+    s: &Settings,
+    folder: &Path,
+    cache: &Path,
+    stem: &str,
+    png: &[u8],
+) -> Result<Option<PathBuf>, String> {
+    let Some(dest) = destination(s, folder, cache) else {
+        return Ok(None);
+    };
+    if dest == cache {
+        sweep(cache, CACHE_MAX_AGE);
+    }
+    write(&dest, stem, png).map(Some)
+}
+
 /// Deletes the PNGs in `folder` older than `max_age` (the cached shots).
 pub fn sweep(folder: &Path, max_age: Duration) {
     let Ok(entries) = std::fs::read_dir(folder) else {
@@ -97,6 +116,49 @@ mod tests {
         assert_eq!(d(false, true, false).as_deref(), Some(cache));
         assert_eq!(d(false, false, true).as_deref(), Some(cache));
         assert_eq!(d(false, false, false), None);
+    }
+
+    /// `docs/specs/screenshots.md` AC-19: a shot written into the cache
+    /// first deletes the PNGs there at least 24 h old; other files and a
+    /// shot saved into the folder leave the cache alone.
+    #[test]
+    fn a_shot_into_the_cache_sweeps_its_old_pngs_first() {
+        let dir = std::env::temp_dir().join(format!("blinzel-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (folder, cache) = (dir.join("shots"), dir.join("cache"));
+        std::fs::create_dir_all(&cache).unwrap();
+        let aged = |name: &str, hours: u64| {
+            let path = cache.join(name);
+            let f = std::fs::File::create(&path).unwrap();
+            f.set_modified(SystemTime::now() - Duration::from_secs(hours * 3600))
+                .unwrap();
+            path
+        };
+        let (old, young, text) = (
+            aged("old.png", 25),
+            aged("young.png", 23),
+            aged("old.txt", 25),
+        );
+        let only_open = settings(false, true, false);
+        let shot = store(&only_open, &folder, &cache, "Shot", b"1").unwrap();
+        assert_eq!(shot, Some(cache.join("Shot.png")));
+        assert!(!old.exists(), "a day old: deleted");
+        assert!(young.exists() && text.exists());
+
+        let old = aged("old.png", 25);
+        let saved = store(&settings(true, true, false), &folder, &cache, "Shot", b"2").unwrap();
+        assert_eq!(saved, Some(folder.join("Shot.png")));
+        assert!(old.exists(), "a saved shot leaves the cache alone");
+        let none = store(
+            &settings(false, false, false),
+            &folder,
+            &cache,
+            "Shot",
+            b"3",
+        );
+        assert_eq!(none, Ok(None));
+        assert!(!folder.join("Shot (2).png").exists() && !cache.join("Shot (2).png").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
