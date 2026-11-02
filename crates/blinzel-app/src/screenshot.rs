@@ -17,7 +17,7 @@ use blinzel_core::settings::Settings;
 use blinzel_i18n::{Msg, tr, trf};
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
-use blinzel_ui::snip::{Outcome, Snip};
+use blinzel_ui::snip::{self, Outcome, Snip};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmFlush, DwmGetWindowAttribute,
@@ -320,13 +320,10 @@ pub fn start(main: HWND, whole_screen: bool) {
         Err(e) => return post(main, Err(e)),
     };
     if whole_screen {
-        let c = shot.cursor();
-        let r = shot
-            .monitors
-            .iter()
-            .find(|m| m.contains(c))
-            .copied()
-            .unwrap_or(Rect::new(0.0, 0.0, shot.size.0 as f64, shot.size.1 as f64));
+        let r = snip::monitor_under(&shot.monitors, shot.cursor()).map_or(
+            Rect::new(0.0, 0.0, shot.size.0 as f64, shot.size.1 as f64),
+            |i| shot.monitors[i],
+        );
         return save(main, &shot, r);
     }
     if let Err(e) = open_overlay(main, shot) {

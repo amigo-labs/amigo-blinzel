@@ -33,6 +33,13 @@ pub enum Outcome {
     Done(Rect),
 }
 
+/// The index of the monitor under `p` among `monitors` (the first that
+/// holds it), for the screenshot of the whole screen and the overlay's
+/// Enter.
+pub fn monitor_under(monitors: &[Rect], p: (f64, f64)) -> Option<usize> {
+    monitors.iter().position(|m| m.contains(p))
+}
+
 pub struct Snip {
     /// The picture's size.
     size: (f64, f64),
@@ -80,11 +87,8 @@ impl Snip {
 
     /// The monitor under the pointer (the whole picture without one).
     fn monitor(&self) -> Rect {
-        self.monitors
-            .iter()
-            .find(|m| m.contains(self.cursor))
-            .copied()
-            .unwrap_or_else(|| self.bounds())
+        monitor_under(&self.monitors, self.cursor)
+            .map_or_else(|| self.bounds(), |i| self.monitors[i])
     }
 
     /// The frontmost window under the pointer.
@@ -308,6 +312,22 @@ mod tests {
             ],
             (10.0, 10.0),
         )
+    }
+
+    /// `docs/specs/screenshots.md` AC-06: the whole screen is the monitor
+    /// under the pointer, also one above or left of the first; none
+    /// outside every monitor.
+    #[test]
+    fn the_whole_screen_is_the_monitor_under_the_pointer() {
+        let monitors = [
+            Rect::new(1920.0, 0.0, 1920.0, 1080.0),
+            Rect::new(0.0, 0.0, 1920.0, 1080.0),
+            Rect::new(0.0, -1080.0, 1920.0, 1080.0),
+        ];
+        assert_eq!(monitor_under(&monitors, (10.0, 10.0)), Some(1));
+        assert_eq!(monitor_under(&monitors, (2000.0, 500.0)), Some(0));
+        assert_eq!(monitor_under(&monitors, (10.0, -10.0)), Some(2));
+        assert_eq!(monitor_under(&monitors, (5000.0, 10.0)), None);
     }
 
     #[test]

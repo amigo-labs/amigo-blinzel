@@ -21,7 +21,7 @@ use blinzel_core::settings::Settings;
 use blinzel_i18n::{Msg, tr, trf};
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
-use blinzel_ui::snip::{Outcome, Snip};
+use blinzel_ui::snip::{self, Outcome, Snip};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send};
@@ -367,7 +367,8 @@ pub fn frozen(
     let p = pointer(mtm);
     let under = |f: &Frozen| f.display.frame.contains(p);
     if whole_screen {
-        let f = shots.iter().find(|f| under(f)).unwrap_or(&shots[0]);
+        let frames: Vec<Rect> = shots.iter().map(|f| f.display.frame).collect();
+        let f = &shots[snip::monitor_under(&frames, p).unwrap_or(0)];
         let (bgra, w, h) = f.crop(Rect::new(0.0, 0.0, f.size.0 as f64, f.size.1 as f64));
         save(bgra, w, h, settings);
         return Ok(());
