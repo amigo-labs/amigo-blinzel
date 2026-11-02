@@ -379,6 +379,62 @@ mod tests {
         assert_eq!((p.format, p.width, p.height), (Format::Ico, 16, 16));
     }
 
+    /// `docs/specs/color-management.md` AC-03: a HEIC's profile comes from
+    /// the container; any other file ImageIO probes yields the profile
+    /// ImageIO reports for it, if the image is RGB and not sRGB.
+    #[test]
+    fn probe_yields_the_profile_imageio_reports() {
+        use blinzel_core::icc::{Trc, colorants, matrix_profile};
+        const P3_HEIC: &[u8] = include_bytes!("../../../blinzel-core/testdata/p3-64x48.heic");
+        let heic = blinzel_core::decode::avif::container_profile(P3_HEIC).expect("colr profile");
+        assert!(!heic.srgb);
+        assert_eq!(probe(P3_HEIC).unwrap().icc.as_ref(), Some(&heic));
+        assert_eq!(probe_any(P3_HEIC).unwrap().icc, Some(heic));
+
+        // PNGs, probed by ImageIO itself rather than natively.
+        let png = |color: png::ColorType, icc: Option<Vec<u8>>| {
+            let (w, h) = (8, 6);
+            let mut out = Vec::new();
+            let mut info = png::Info::with_size(w, h);
+            info.color_type = color;
+            info.bit_depth = png::BitDepth::Eight;
+            info.icc_profile = icc.map(Into::into);
+            let mut wr = png::Encoder::with_info(&mut out, info)
+                .unwrap()
+                .write_header()
+                .unwrap();
+            let channels = if color == png::ColorType::Rgb { 3 } else { 1 };
+            wr.write_image_data(&vec![128; (w * h) as usize * channels])
+                .unwrap();
+            wr.finish().unwrap();
+            out
+        };
+        let rgb = png::ColorType::Rgb;
+        let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "Display P3 test");
+        let got = probe(&png(rgb, Some(p3)))
+            .unwrap()
+            .icc
+            .expect("the P3 profile");
+        assert!(!got.srgb);
+        assert!(
+            got.bytes.windows(15).any(|w| w == b"Display P3 test"),
+            "ImageIO reports the embedded profile ({} bytes)",
+            got.bytes.len()
+        );
+        let srgb = matrix_profile(colorants::SRGB, Trc::Srgb, "sRGB test");
+        let none = |data: Vec<u8>, what: &str| {
+            let icc = probe(&data).unwrap().icc;
+            assert!(
+                icc.is_none(),
+                "{what}: {:?} bytes",
+                icc.map(|p| p.bytes.len())
+            );
+        };
+        none(png(rgb, Some(srgb)), "an sRGB profile");
+        none(png(rgb, None), "no profile");
+        none(png(png::ColorType::Grayscale, None), "a grey image");
+    }
+
     /// AC-23: a reduced-size request to ImageIO decodes through its
     /// thumbnail path at that size.
     #[test]
