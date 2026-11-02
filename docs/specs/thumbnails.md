@@ -126,13 +126,13 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | AC-01 | `fits_the_tile` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
 | AC-02 | `thumbnails_a_jpeg_with_dct_scaling` (`crates/blinzel-core/src/thumb.rs`, feature `turbojpeg`, on by default; Linux, macOS, Windows) | built | |
 | AC-03 | `area_average_is_exact`, `transparent_pixels_do_not_bleed` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
-| AC-04 | | open | |
-| AC-05 | | open | |
+| AC-04 | `takes_the_smallest_preview_that_covers_the_thumbnail`, `without_a_fitting_preview_the_image_itself_is_decoded` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
+| AC-05 | `a_broken_preview_falls_back_to_the_image` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
 | AC-06 | `stores_and_reloads`, `alpha_survives_and_newer_entries_win` (`crates/blinzel-core/src/thumbcache.rs`; Linux, macOS, Windows) | built | |
 | AC-07 | | open | |
 | AC-08 | `starts_a_new_generation_at_the_limit` (`crates/blinzel-core/src/thumbcache.rs`, with a 40 000-byte limit; the 1 GiB constant is untested) | built | |
 | AC-09 | `ignores_torn_records` (`crates/blinzel-core/src/thumbcache.rs`) | built | |
-| AC-10 | | open | |
+| AC-10 | `instances_share_the_cache_without_interleaving`, `an_entry_from_an_old_generation_reads_as_a_miss` (`crates/blinzel-core/src/thumbcache.rs`, two cache instances in one process, each with its own file handles; Linux, macOS, Windows) | built | |
 | AC-11 | `planes_round_trip` (`crates/blinzel-core/src/thumb.rs`, last block: transparent over white → Y 255, Cb/Cr 128) | built | |
 | AC-12 | `slots_fill_pages_then_reuse_the_least_recently_drawn` (`crates/blinzel-ui/src/gfx.rs`; slot reuse only, the re-request after eviction is untested) | built | |
 | AC-13 | `draws_oriented_and_scaled_without_bleeding` (`crates/blinzel-app/tests/atlas.rs`, `#![cfg(windows)]`, Windows CI `cargo test --workspace --release`) | built | |
@@ -152,6 +152,7 @@ Supporting tests: the persistence of the filmstrip setting by `roundtrip` (`crat
 ## Decisions
 
 - 2026-11-02: in the grid, file commands (Delete, "Open with", "Edit with") take the selected tile and commands on the shown image (copy, cut, save cutout, select all from the menu, zoom, rotation, show original) do nothing. Because the grid covers that image, and Delete recycling a file other than the one the user sees selected was the defect found in the extraction; a copy of a tile would need its probe on the UI thread.
+- 2026-11-02: the tests of AC-04, AC-05 and AC-10 were green at once: preview choice, fallback and the shared cache already behaved as specified. AC-10's "instances" are two `ThumbCache`s in one test process: each opens its own handles, so the OS file lock excludes them as it does two processes.
 - 2026-11-02: the App-level tests of AC-16, AC-18 and AC-19 were green at once: the filmstrip, the grid keys and mouse and the marks already behaved as specified; the tests guard that behaviour, none of it changed.
 - 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.
 - 2026-11-02: AC-23 checks "no longer exists" with a file check per marked file when the dialog opens (on the UI thread). Because opening the dialog is not on the startup or browsing path, and the dialog's header inspection would otherwise list the missing file as unreadable instead of leaving it out.

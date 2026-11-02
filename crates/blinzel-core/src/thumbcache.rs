@@ -414,6 +414,57 @@ mod tests {
     }
 
     #[test]
+    fn instances_share_the_cache_without_interleaving() {
+        let dir = temp_dir("shared");
+        let a = ThumbCache::open(&dir, 1 << 30).unwrap();
+        let b = ThumbCache::open(&dir, 1 << 30).unwrap();
+        // Two instances, two threads each, appending at the same time;
+        // every thumbnail has its own size, so a torn blob shows.
+        let key = |i: u32| Key::new(Path::new(&format!("{i}.png")), 1, 1);
+        let size = |i: u32| (8 + i, 4 + i % 7);
+        std::thread::scope(|s| {
+            for (c, first) in [(&a, 0), (&a, 1), (&b, 2), (&b, 3)] {
+                s.spawn(move || {
+                    for i in (first..80).step_by(4) {
+                        let (w, h) = size(i);
+                        c.put(&key(i), &thumb(w, h, i % 2 == 0)).unwrap();
+                    }
+                });
+            }
+        });
+        // An instance sees the other's entries after the next open.
+        assert!(a.get(&key(2)).is_none(), "b's, not seen by a yet");
+        let c = ThumbCache::open(&dir, 1 << 30).unwrap();
+        assert_eq!(c.len(), 80);
+        for i in 0..80 {
+            let t = c.get(&key(i)).unwrap_or_else(|| panic!("{i}"));
+            assert_eq!((t.width, t.height), size(i), "{i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_entry_from_an_old_generation_reads_as_a_miss() {
+        let dir = temp_dir("generation");
+        let old = Key::new(Path::new("old.png"), 1, 1);
+        let new = Key::new(Path::new("new.png"), 1, 1);
+        let t = thumb(32, 16, false);
+        let a = ThumbCache::open(&dir, 1 << 30).unwrap();
+        a.put(&old, &t).unwrap();
+        assert!(a.get(&old).is_some());
+        // Another instance starts a new generation (every append passes
+        // its limit) and writes a blob of the same length where `old` was.
+        let b = ThumbCache::open(&dir, 1).unwrap();
+        b.put(&new, &t).unwrap();
+        assert!(a.get(&old).is_none(), "a miss, not new.png's pixels");
+        assert!(a.get(&new).is_none(), "not in a's index");
+        let reopened = ThumbCache::open(&dir, 1 << 30).unwrap();
+        assert!(reopened.get(&old).is_none());
+        assert!(reopened.get(&new).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn ignores_torn_records() {
         let r = Record {
             key: Key::new(Path::new("a"), 1, 2),
