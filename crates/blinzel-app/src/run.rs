@@ -80,6 +80,33 @@ fn may_hand_off(args: &Args) -> bool {
     !args.exit_after_first_frame
 }
 
+/// What a `--resident` start (the sign-in entry) does before any window
+/// exists (`docs/specs/resident-mode.md` AC-19).
+#[derive(Debug, PartialEq)]
+enum ResidentStart {
+    /// Start hidden and warm up.
+    Run,
+    /// Exit with code 0; `remove_sign_in` when resident mode was turned
+    /// off since, so the sign-in entry goes too.
+    Exit { remove_sign_in: bool },
+}
+
+/// Resident mode `on` in the settings; `running` asks whether an instance
+/// runs already (only then: a mutex lookup).
+fn resident_start(on: bool, running: impl FnOnce() -> bool) -> ResidentStart {
+    if !on {
+        ResidentStart::Exit {
+            remove_sign_in: true,
+        }
+    } else if running() {
+        ResidentStart::Exit {
+            remove_sign_in: false,
+        }
+    } else {
+        ResidentStart::Run
+    }
+}
+
 /// Where `--exit-after-first-frame` writes the startup report: the
 /// `--json` path, else `startup.json` in the working directory.
 fn report_path(args: &Args) -> Option<PathBuf> {
@@ -207,11 +234,12 @@ pub fn run() -> i32 {
 
     if args.resident {
         // Started at sign-in: only if still wanted, and only once.
-        if !settings.resident {
-            resident::set_autostart(false);
-            return 0;
-        }
-        if instance::running().is_some() {
+        if let ResidentStart::Exit { remove_sign_in } =
+            resident_start(settings.resident, || instance::running().is_some())
+        {
+            if remove_sign_in {
+                resident::set_autostart(false);
+            }
             return 0;
         }
     } else if may_hand_off(&args)
@@ -582,10 +610,32 @@ fn decode_workers(performance: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        Args, decode_workers, io_threads, language_from_names, may_hand_off, report_path,
-        uncloak_fallback,
+        Args, ResidentStart, decode_workers, io_threads, language_from_names, may_hand_off,
+        report_path, resident_start, uncloak_fallback,
     };
     use std::path::PathBuf;
+
+    /// `docs/specs/resident-mode.md` AC-19: a `--resident` start with
+    /// resident mode off removes the sign-in value and exits; with it on,
+    /// it exits only when an instance runs already.
+    #[test]
+    fn a_resident_start_with_the_setting_off_removes_the_sign_in_value_and_exits() {
+        let off = resident_start(false, || panic!("no instance lookup when off"));
+        assert_eq!(
+            off,
+            ResidentStart::Exit {
+                remove_sign_in: true
+            }
+        );
+        let running = resident_start(true, || true);
+        assert_eq!(
+            running,
+            ResidentStart::Exit {
+                remove_sign_in: false
+            }
+        );
+        assert_eq!(resident_start(true, || false), ResidentStart::Run);
+    }
 
     /// `docs/specs/localization.md` AC-10: the user's preferred UI
     /// languages, in order, as Windows lists them.
