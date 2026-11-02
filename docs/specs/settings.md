@@ -82,8 +82,8 @@ This spec records what the code does today.
 | AC-02 | `a_missing_file_means_the_documented_defaults` (`crates/blinzel-core/src/settings.rs`), `a_missing_or_unreadable_file_loads_the_defaults` (`crates/blinzel-ui/src/settings_store.rs`) | built | |
 | AC-03 | `roundtrip` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
 | AC-04 | `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply`, `tolerates_garbage`, `old_screenshot_clipboard_key_is_ignored` (`crates/blinzel-core/src/settings.rs`) | built | |
-| AC-05 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
-| AC-06 | `roundtrip` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
+| AC-05 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`: `prefetch_ahead` and `prefetch_behind` above 32 become 32), CI: Linux | built | |
+| AC-06 | `roundtrip` (`crates/blinzel-core/src/settings.rs`: wrong count, non-numbers, zero or negative width or height are ignored), CI: Linux | built | |
 | AC-07 | `auto_and_empty_language_both_mean_the_system_language` (`crates/blinzel-core/src/settings.rs`) | built | |
 | AC-08 | `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
 | AC-09 | `invalid_background_and_paths_keep_their_defaults` (`crates/blinzel-core/src/settings.rs`) | built | |

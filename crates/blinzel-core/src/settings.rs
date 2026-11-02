@@ -258,7 +258,15 @@ mod tests {
         };
         assert_eq!(Settings::parse(&s.to_text()), s);
         // Broken rects are ignored.
-        for bad in ["1,2,3", "10,10,5,20", "a,b,c,d"] {
+        for bad in [
+            "1,2,3",
+            "1,2,3,4,5",
+            "a,b,c,d",
+            "10,10,5,20",
+            "10,10,10,20",
+            "10,20,30,10",
+            "10,10,20,10",
+        ] {
             assert_eq!(Settings::parse(&format!("window = {bad}")).window, None);
         }
         assert_eq!(
@@ -274,6 +282,10 @@ mod tests {
         );
         assert_eq!(s.view, ViewOptions::default());
         assert_eq!(s.prefetch_ahead, 32);
+        assert_eq!(
+            Settings::parse("prefetch_behind = 1000").prefetch_behind,
+            32
+        );
         assert_eq!(Settings::parse("language = \"auto\"").language, None);
     }
 
