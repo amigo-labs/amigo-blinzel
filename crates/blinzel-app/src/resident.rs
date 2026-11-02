@@ -127,9 +127,15 @@ pub fn remove_tray(hwnd: HWND) {
     }
 }
 
+/// Explorer restarted: the icon again, if it was shown.
 pub fn on_taskbar_created(hwnd: HWND) {
-    if TRAY_SHOWN.load(Ordering::Relaxed) {
-        add_tray(hwnd);
+    readd_tray(TRAY_SHOWN.load(Ordering::Relaxed), hwnd, add_tray);
+}
+
+/// After `TaskbarCreated`, `add` the icon again where it was `shown`.
+fn readd_tray(shown: bool, hwnd: HWND, add: impl FnOnce(HWND)) {
+    if shown {
+        add(hwnd);
     }
 }
 
@@ -201,6 +207,24 @@ mod tests {
         set_resident(HWND::default(), false, |on| sign_in.push(on));
         assert!(!TRAY_SHOWN.load(Ordering::Relaxed), "icon removed");
         assert_eq!(sign_in, [true, false]);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-13: Explorer's `TaskbarCreated`
+    /// broadcast adds a shown icon again, and only a shown one.
+    #[test]
+    fn the_icon_is_added_again_after_explorer_restarts() {
+        let id = taskbar_created();
+        assert!(
+            (0xC000..=0xFFFF).contains(&id),
+            "a registered message: {id:#x}"
+        );
+        // SAFETY: a static wide string; registering again returns the same id.
+        assert_eq!(id, unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) });
+        let mut added = 0;
+        readd_tray(false, HWND::default(), |_| added += 1);
+        assert_eq!(added, 0, "no icon while not resident");
+        readd_tray(true, HWND::default(), |_| added += 1);
+        assert_eq!(added, 1);
     }
 
     /// `docs/specs/resident-mode.md` AC-13: the icon has the app name as

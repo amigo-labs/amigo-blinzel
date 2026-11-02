@@ -80,11 +80,10 @@ pub fn show(hwnd: HWND, x: i32, y: i32, state: &MenuState) -> Option<Cmd> {
 /// The tray icon's menu at screen position `(x, y)`.
 pub fn show_tray(hwnd: HWND, x: i32, y: i32) -> Option<Cmd> {
     enable_dark_menus(hwnd);
-    let menu = build(&tray_items())?;
+    let menu = tray_menu()?;
     let drop_right = unsafe { GetSystemMetrics(SM_MENUDROPALIGNMENT) } != 0;
     let flags = tray_flags(blinzel_i18n::is_rtl(), drop_right);
     let id = unsafe {
-        let _ = SetMenuDefaultItem(menu, Cmd::ShowWindow.id(), 0);
         // Otherwise the menu stays open when the user clicks elsewhere.
         let _ = SetForegroundWindow(hwnd);
         let id = TrackPopupMenuEx(menu, flags.0, x, y, hwnd, None);
@@ -93,6 +92,15 @@ pub fn show_tray(hwnd: HWND, x: i32, y: i32) -> Option<Cmd> {
         id
     };
     Cmd::from_id(id.0 as u32)
+}
+
+/// The tray menu, with "Show" as its default (bold) item.
+fn tray_menu() -> Option<HMENU> {
+    let menu = build(&tray_items())?;
+    unsafe {
+        let _ = SetMenuDefaultItem(menu, Cmd::ShowWindow.id(), 0);
+    }
+    Some(menu)
 }
 
 /// The window menu's `TrackPopupMenuEx` flags: below the point, opening
@@ -152,9 +160,26 @@ fn enable_dark_menus(hwnd: HWND) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GET_MENU_DEFAULT_ITEM_FLAGS, GetMenuDefaultItem,
+    };
 
     fn has(flags: TRACK_POPUP_MENU_FLAGS, flag: TRACK_POPUP_MENU_FLAGS) -> bool {
         flags.0 & flag.0 == flag.0
+    }
+
+    /// `docs/specs/resident-mode.md` AC-13: "Show" is the tray menu's
+    /// default item.
+    #[test]
+    fn show_is_the_tray_menus_default_item() {
+        let menu = tray_menu().expect("tray menu");
+        // SAFETY: `menu` is a menu this test created and destroys once.
+        let default = unsafe {
+            let id = GetMenuDefaultItem(menu, 0, GET_MENU_DEFAULT_ITEM_FLAGS::default());
+            let _ = DestroyMenu(menu);
+            id
+        };
+        assert_eq!(default, Cmd::ShowWindow.id());
     }
 
     /// `docs/specs/localization.md` AC-16: right to left, the window menu
