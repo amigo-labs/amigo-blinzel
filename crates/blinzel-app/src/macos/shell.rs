@@ -37,7 +37,7 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSApplicationTerminateReply, NSBackingStoreType, NSControlStateValueOff, NSControlStateValueOn,
     NSCursor, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSMenu,
-    NSMenuDelegate, NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard,
+    NSMenuDelegate, NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard, NSPasteboardType,
     NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSSavePanel, NSScreen, NSView, NSWindow,
     NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
@@ -1221,9 +1221,14 @@ fn clip_png(pixels: Result<(Vec<u8>, u32, u32), String>) -> Result<Vec<u8>, Stri
 fn put_png(png: &[u8]) -> bool {
     let pb = NSPasteboard::generalPasteboard();
     pb.clearContents();
-    let data = NSData::with_bytes(png);
+    let (ty, data) = png_item(png);
+    pb.setData_forType(Some(&data), ty)
+}
+
+/// The pasteboard item of a PNG: its bytes as `public.png`.
+fn png_item(png: &[u8]) -> (&'static NSPasteboardType, Retained<NSData>) {
     // SAFETY: a constant type name.
-    pb.setData_forType(Some(&data), unsafe { NSPasteboardTypePNG })
+    (unsafe { NSPasteboardTypePNG }, NSData::with_bytes(png))
 }
 
 /// A message: the notice on the window, or next to the menu bar icon while
@@ -2066,5 +2071,33 @@ mod tests {
             .collect();
         assert_eq!(&buf[..info.buffer_size()], &rgb[..]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `docs/specs/screenshots.md` AC-15: a screenshot goes on the
+    /// pasteboard as its PNG (`public.png`).
+    #[test]
+    fn a_screenshot_goes_on_the_pasteboard_as_png() {
+        let (w, h) = (5u32, 3u32);
+        let bgra: Vec<u8> = (0..w * h)
+            .flat_map(|i| [i as u8, (i * 3) as u8, (i * 7) as u8, 255])
+            .collect();
+        let encoded = blinzel_core::export::encode_png_bgra(&bgra, w, h).unwrap();
+        let (ty, data) = png_item(&encoded);
+        assert_eq!(ty.to_string(), "public.png");
+        let data = data.to_vec();
+        assert_eq!(data, encoded, "the shot's own PNG");
+        let mut reader = png::Decoder::new(std::io::Cursor::new(data))
+            .read_info()
+            .expect("a PNG");
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height), (w, h));
+        let rgb: Vec<u8> = bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect();
+        assert_eq!(&buf[..info.buffer_size()], &rgb[..]);
     }
 }
