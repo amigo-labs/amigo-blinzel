@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use blinzel_core::update::{self as core, Release, StartAction, State, Version};
+use blinzel_core::update::{self as core, Found, StartAction, State, Version};
 use blinzel_i18n::{Msg, trf};
 
 /// Largest download accepted (the Linux executable is about 20 MB, the
@@ -165,46 +165,32 @@ pub fn check_now(
     let _ = std::thread::Builder::new()
         .name("blinzel-update-now".into())
         .spawn(move || {
-            let text = match i.and_then(|i| check_and_install(&i)) {
-                Ok(Outcome::Current(v)) => trf(Msg::UpdateCurrent, &[("version", &v)]),
-                Ok(Outcome::Installed(v)) => trf(Msg::UpdateReady, &[("version", &v)]),
-                Err(e) => trf(Msg::UpdateFailed, &[("reason", &e)]),
-            };
-            notice(text);
+            notice(notice_text(i.and_then(|i| check_and_install(&i))));
         });
 }
 
-fn check_and_install(i: &impl Installation) -> Result<Outcome, String> {
-    let key = core::RELEASE_KEY.ok_or("no release signing key in this build")?;
-    let api = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        core::REPO
-    );
-    let json = crate::curl::get(&api, 1 << 20)?;
-    let json = String::from_utf8(json).map_err(|_| "release info is not UTF-8")?;
-    let asset = i.asset();
-    let Release {
-        version,
-        exe_url,
-        sums_url,
-        sig_url,
-    } = core::parse_release(&json, &asset).ok_or("no usable release")?;
-    let running = running_version();
-    if version <= running {
-        return Ok(Outcome::Current(running));
+/// The notice "Check for updates" shows for a check's result.
+fn notice_text(result: Result<Outcome, String>) -> String {
+    match result {
+        Ok(Outcome::Current(v)) => trf(Msg::UpdateCurrent, &[("version", &v)]),
+        Ok(Outcome::Installed(v)) => trf(Msg::UpdateReady, &[("version", &v)]),
+        Err(e) => trf(Msg::UpdateFailed, &[("reason", &e)]),
     }
+}
 
-    let sums = crate::curl::get(&sums_url, 64 << 10)?;
-    let sig = crate::curl::get(&sig_url, 4 << 10)?;
-    if !core::verify_signature(&sums, &sig, &key) {
-        return Err("checksums are not signed with the release key".into());
-    }
-    let sums = String::from_utf8(sums).map_err(|_| "checksums are not UTF-8")?;
-    let want = core::sum_for(&sums, &asset).ok_or("no checksum for us")?;
-    let download = crate::curl::get(&exe_url, MAX_DOWNLOAD)?;
-    if core::sha256(&download) != want {
-        return Err("download does not match its checksum".into());
-    }
+fn check_and_install(i: &impl Installation) -> Result<Outcome, String> {
+    let found = core::check(
+        &i.asset(),
+        running_version(),
+        core::RELEASE_KEY,
+        MAX_DOWNLOAD,
+        crate::curl::get,
+        |d| Ok(core::sha256(d)),
+    )?;
+    let (version, download) = match found {
+        Found::Current(v) => return Ok(Outcome::Current(v)),
+        Found::New { version, download } => (version, download),
+    };
     i.install(&download)?;
     let mut state = load_state(i);
     state.pending = Some(version);
@@ -237,6 +223,24 @@ mod tests {
         fn program(&self) -> PathBuf {
             self.0.join("blinzel")
         }
+    }
+
+    /// AC-05, AC-15: what "Check for updates" says for each result.
+    #[test]
+    fn a_manual_check_reports_its_result() {
+        let v = Version::parse("1.3.0").unwrap();
+        assert_eq!(
+            notice_text(Ok(Outcome::Current(v))),
+            "amigo-blinzel 1.3.0 is up to date."
+        );
+        assert_eq!(
+            notice_text(Ok(Outcome::Installed(v))),
+            "Version 1.3.0 is downloaded and active from the next start."
+        );
+        assert_eq!(
+            notice_text(Err("no checksum for us".into())),
+            "Update failed: no checksum for us"
+        );
     }
 
     /// `docs/specs/resident-mode.md` AC-21: a hiding window hands over only

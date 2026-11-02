@@ -107,6 +107,19 @@ fn swap(installed: &Path, new: &Path, old: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// AC-04: the Linux updater fetches the bare executable of its own
+    /// architecture.
+    #[test]
+    fn fetches_the_bare_executable() {
+        let i = Installed(Layout::under(Path::new("/nonexistent")));
+        let want = if cfg!(target_arch = "aarch64") {
+            "amigo-blinzel-linux-arm64"
+        } else {
+            "amigo-blinzel-linux-x64"
+        };
+        assert_eq!(i.asset(), want);
+    }
+
     #[test]
     fn swap_keeps_the_previous_executable() {
         let dir = std::env::temp_dir().join(format!("blinzel-swap-{}", std::process::id()));

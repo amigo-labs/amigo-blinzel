@@ -18,7 +18,7 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use blinzel_core::update::{self as core, Release, StartAction, State, Version};
+use blinzel_core::update::{self as core, Found, StartAction, State, Version};
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
@@ -218,35 +218,18 @@ pub fn check_now(hwnd: HWND, notice_msg: u32) {
 }
 
 fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
-    let key = core::RELEASE_KEY.ok_or("no release signing key in this build")?;
-    let api = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        core::REPO
-    );
-    let json = http_get(&api, 1 << 20)?;
-    let json = String::from_utf8(json).map_err(|_| "release info is not UTF-8")?;
-    let Release {
-        version,
-        exe_url,
-        sums_url,
-        sig_url,
-    } = core::parse_release(&json, &core::asset_name(arch())).ok_or("no usable release")?;
-    let running = running_version();
-    if version <= running {
-        return Ok(Outcome::Current(running));
-    }
-
-    let sums = http_get(&sums_url, 64 << 10)?;
-    let sig = http_get(&sig_url, 4 << 10)?;
-    if !core::verify_signature(&sums, &sig, &key) {
-        return Err("checksums are not signed with the release key".into());
-    }
-    let sums = String::from_utf8(sums).map_err(|_| "checksums are not UTF-8")?;
-    let want = core::sum_for(&sums, &core::asset_name(arch())).ok_or("no checksum for us")?;
-    let exe = http_get(&exe_url, MAX_DOWNLOAD)?;
-    if sha256(&exe)? != want {
-        return Err("download does not match its checksum".into());
-    }
+    let found = core::check(
+        &core::asset_name(arch()),
+        running_version(),
+        core::RELEASE_KEY,
+        MAX_DOWNLOAD,
+        http_get,
+        sha256,
+    )?;
+    let (version, exe) = match found {
+        Found::Current(v) => return Ok(Outcome::Current(v)),
+        Found::New { version, download } => (version, download),
+    };
 
     let dir = layout.cache.join("updates").join(version.to_string());
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

@@ -101,14 +101,14 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | `picks_the_assets_for_the_architecture` (`crates/blinzel-core/src/update.rs`), Linux CI, covers pre-release and missing asset; a draft, a missing `SHA256SUMS(.sig)` and a bad tag inside a release are untested | open |        |
+| AC-01 | `parse_release_offers_only_complete_published_releases`, `picks_the_assets_for_the_architecture` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-02 | `versions_parse_and_order` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-03 | `picks_the_assets_for_the_architecture` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
-| AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
+| AC-04 | `picks_the_linux_and_macos_assets` (`crates/blinzel-core/src/update.rs`), `fetches_the_bare_executable` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `fetches_the_zipped_bundle` (`crates/blinzel-app/src/macos/update.rs`), macOS CI | built |        |
+| AC-05 | `check_downloads_nothing_when_not_newer` (`crates/blinzel-core/src/update.rs`), `a_manual_check_reports_its_result` (`crates/blinzel-app/src/selfupdate.rs`), Linux CI | built |        |
 | AC-06 | `verifies_ed25519_signatures` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-07 | `reads_checksum_files`, `sha256_matches_known_digests` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
-| AC-08 |      | open   |        |
+| AC-08 | `check_hands_over_only_a_verified_download` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-09 | `hashes_with_cng` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-10 | `checks_at_most_daily` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-11 |      | open   |        |
@@ -127,3 +127,6 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 
 ## Decisions
 
+- **The check flow moved into `blinzel-core::update::check`** (new public API: `check`, `Found`, `latest_release_url`). Windows and the Linux/macOS flow had the same sequence twice (release JSON, version, signature, checksum line, hash), untestable behind their downloaders; `check` takes the shell's HTTPS GET and SHA-256 as closures, so AC-05 and AC-08 are tested once on Linux and Windows keeps hashing with CNG (AC-09). `blinzel.md` §10 already puts these decisions in `blinzel-core::update`.
+- **Block 1 tests were green at once** (AC-01, AC-04, AC-05, AC-08): the spec was reverse engineered from working code. Each test was checked by breaking the code on purpose (`<=` to `<`, the draft check, the signature check, the hash comparison, the `.sig` lookup, the macOS asset name, the notice text, the Linux asset) and went red each time.
+- **AC-04 on macOS:** `fetches_the_zipped_bundle` runs only in the macOS CI job (`cargo test -p blinzel-app`); the name itself is tested on Linux in `picks_the_linux_and_macos_assets`.

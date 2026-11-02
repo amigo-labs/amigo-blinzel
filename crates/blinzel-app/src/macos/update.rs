@@ -163,6 +163,15 @@ pub fn check_now(notice: impl FnOnce(String) + Send + 'static) {
 mod tests {
     use super::*;
 
+    /// AC-04: the macOS updater fetches the zipped universal bundle.
+    #[test]
+    fn fetches_the_zipped_bundle() {
+        let i = Installed {
+            bundle: PathBuf::from("/Applications/amigo-blinzel.app"),
+        };
+        assert_eq!(i.asset(), "amigo-blinzel-macos.zip");
+    }
+
     /// `docs/specs/resident-mode.md` AC-21: the installed update starts as
     /// a new, hidden instance of the bundle.
     #[test]
