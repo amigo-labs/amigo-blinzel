@@ -575,6 +575,11 @@ mod tests {
         assert_eq!(parse(&d), Err(Error::ZeroSize));
         d = header(0xC0, 10, 10, &[(1, 0x55, 0)], &[]);
         assert_eq!(parse(&d), Err(Error::BadSegment(0xC0)));
+        // A sampling factor of 0, horizontal or vertical.
+        for hv in [0x10, 0x01] {
+            d = header(0xC0, 10, 10, &[(1, hv, 0)], &[]);
+            assert_eq!(parse(&d), Err(Error::BadSegment(0xC0)), "{hv:#04x}");
+        }
     }
 
     #[test]
