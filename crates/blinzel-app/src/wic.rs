@@ -386,20 +386,22 @@ mod tests {
     use super::*;
     use blinzel_core::format::Format;
 
-    /// An icon with one opaque red 2×2 entry, stored as a 32-bit bitmap:
-    /// the header, the bitmap info with the height doubled for the mask,
-    /// the BGRA rows bottom-up, then the empty AND mask.
-    fn tiny_icon() -> Vec<u8> {
+    /// An icon with one opaque red 16×16 entry (the smallest usual icon
+    /// size), stored as a 32-bit bitmap: the header, the bitmap info with
+    /// the height doubled for the mask, the BGRA rows bottom-up, then the
+    /// empty AND mask (rows padded to 32 bits).
+    fn small_icon() -> Vec<u8> {
+        let n = 16u32;
         let mut dib = Vec::new();
-        for v in [40u32, 2, 4] {
+        for v in [40, n, 2 * n] {
             dib.extend(v.to_le_bytes());
         }
         dib.extend(1u16.to_le_bytes());
         dib.extend(32u16.to_le_bytes());
         dib.extend([0; 24]);
-        dib.extend([0u8, 0, 255, 255].repeat(4));
-        dib.extend([0; 8]);
-        let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
+        dib.extend([0u8, 0, 255, 255].repeat((n * n) as usize));
+        dib.extend(vec![0; (n.div_ceil(32) * 4 * n) as usize]);
+        let mut ico = vec![0, 0, 1, 0, 1, 0, n as u8, n as u8, 0, 0, 1, 0, 32, 0];
         ico.extend((dib.len() as u32).to_le_bytes());
         ico.extend(22u32.to_le_bytes());
         ico.extend(dib);
@@ -561,9 +563,8 @@ mod tests {
             Err(DecodeError::Corrupt("wic".into()))
         );
 
-        // A real file only WIC reads: an icon with one 2×2 32-bit bitmap
-        // (a PNG entry this small is refused by the system decoders).
-        let ico = tiny_icon();
+        // A real file only WIC reads: an icon with one 16×16 32-bit bitmap.
+        let ico = small_icon();
         assert!(matches!(
             blinzel_core::decode::decode(&ico, Request::Full),
             Err(DecodeError::Unsupported(Format::Ico))
@@ -571,11 +572,11 @@ mod tests {
         let img = decode_any_with(&ico, Request::Full, 1).unwrap();
         assert_eq!(
             (img.width, img.height, packed(&img)),
-            (2, 2, PackedFormat::Bgra8)
+            (16, 16, PackedFormat::Bgra8)
         );
         assert_eq!(&img.to_bgra()[..4], [0, 0, 255, 255]);
         let p = probe_any(&ico).unwrap();
-        assert_eq!((p.format, p.width, p.height), (Format::Ico, 2, 2));
+        assert_eq!((p.format, p.width, p.height), (Format::Ico, 16, 16));
     }
 
     /// AC-21: the first lossy WebP still decodes natively and loads WIC's

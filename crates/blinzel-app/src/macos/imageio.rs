@@ -246,20 +246,22 @@ fn in_order<T>(
 mod tests {
     use super::*;
 
-    /// An icon with one opaque red 2×2 entry, stored as a 32-bit bitmap:
-    /// the header, the bitmap info with the height doubled for the mask,
-    /// the BGRA rows bottom-up, then the empty AND mask.
-    fn tiny_icon() -> Vec<u8> {
+    /// An icon with one opaque red 16×16 entry (the smallest usual icon
+    /// size), stored as a 32-bit bitmap: the header, the bitmap info with
+    /// the height doubled for the mask, the BGRA rows bottom-up, then the
+    /// empty AND mask (rows padded to 32 bits).
+    fn small_icon() -> Vec<u8> {
+        let n = 16u32;
         let mut dib = Vec::new();
-        for v in [40u32, 2, 4] {
+        for v in [40, n, 2 * n] {
             dib.extend(v.to_le_bytes());
         }
         dib.extend(1u16.to_le_bytes());
         dib.extend(32u16.to_le_bytes());
         dib.extend([0; 24]);
-        dib.extend([0u8, 0, 255, 255].repeat(4));
-        dib.extend([0; 8]);
-        let mut ico = vec![0, 0, 1, 0, 1, 0, 2, 2, 0, 0, 1, 0, 32, 0];
+        dib.extend([0u8, 0, 255, 255].repeat((n * n) as usize));
+        dib.extend(vec![0; (n.div_ceil(32) * 4 * n) as usize]);
+        let mut ico = vec![0, 0, 1, 0, 1, 0, n as u8, n as u8, 0, 0, 1, 0, 32, 0];
         ico.extend((dib.len() as u32).to_le_bytes());
         ico.extend(22u32.to_le_bytes());
         ico.extend(dib);
@@ -351,20 +353,30 @@ mod tests {
             (2, 2, PackedFormat::Rgba8)
         );
 
-        // An icon with one 2×2 32-bit bitmap: native refuses it, ImageIO
-        // reads it (a PNG entry this small is refused by ImageIO too).
-        let ico = tiny_icon();
+        // An icon with one 16×16 32-bit bitmap: native refuses it, ImageIO
+        // reads it.
+        let ico = small_icon();
         assert!(matches!(
             blinzel_core::decode::decode(&ico, Request::Full),
             Err(DecodeError::Unsupported(Format::Ico))
         ));
-        let img = decode_any_with(&ico, Request::Full, 1).unwrap();
+        let img = decode_any_with(&ico, Request::Full, 1).unwrap_or_else(|e| {
+            // Say what ImageIO made of the icon, and whether it reads icons.
+            let cf = CFData::from_bytes(&ico);
+            // SAFETY: valid data, no options; the calls only query it.
+            let seen = unsafe { CGImageSource::with_data(&cf, None) }
+                .map(|s| unsafe { (s.status().0, s.r#type().map(|t| t.to_string()), s.count()) });
+            // SAFETY: a plain query of the readable type identifiers.
+            let types = unsafe { CGImageSource::type_identifiers() };
+            let ico_readable = format!("{types:?}").contains("com.microsoft.ico");
+            panic!("ImageIO refused the icon ({e:?}): source {seen:?}, reads icons {ico_readable}");
+        });
         assert_eq!(
             (img.width, img.height, packed(&img)),
-            (2, 2, PackedFormat::Bgra8)
+            (16, 16, PackedFormat::Bgra8)
         );
         let p = probe_any(&ico).unwrap();
-        assert_eq!((p.format, p.width, p.height), (Format::Ico, 2, 2));
+        assert_eq!((p.format, p.width, p.height), (Format::Ico, 16, 16));
     }
 
     /// AC-23: a reduced-size request to ImageIO decodes through its
