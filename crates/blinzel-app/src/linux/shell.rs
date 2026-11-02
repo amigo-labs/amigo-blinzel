@@ -36,6 +36,7 @@ use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::{CursorIcon, Fullscreen, ResizeDirection, Window, WindowId};
 
+use super::clipboard;
 use super::gpu::{Gpu, Target, WgpuCanvas, WgpuDevice, instance};
 use super::install::APP_ID;
 
@@ -540,20 +541,10 @@ impl Shell {
         let copy = std::mem::take(&mut self.host.borrow_mut().copy);
         if copy && let Some(src) = self.app.as_ref().and_then(|a| a.clip.clone()) {
             let services = self.services.clone();
-            let _ = std::thread::Builder::new()
-                .name("blinzel-copy".into())
-                .spawn(move || {
-                    let r = src.pixels(&*services).map(|(px, w, h)| {
-                        let rgba = px
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .flat_map(|p| [p[2], p[1], p[0], p[3]])
-                            .collect();
-                        (rgba, w, h)
-                    });
-                    services.send(UserEvent::Clipboard(r));
-                });
+            let _ = blinzel_ui::app::copy_in_background(self.services.clone(), src, move |r| {
+                let r = r.map(|(px, w, h)| (clipboard::rgba(&px), w, h));
+                services.send(UserEvent::Clipboard(r));
+            });
         }
     }
 
@@ -986,20 +977,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                 vec![]
             }
             UserEvent::Clipboard(r) => {
-                let set = r.and_then(|(rgba, w, h)| {
-                    let cb = match &mut self.clipboard {
-                        Some(c) => c,
-                        None => self
-                            .clipboard
-                            .insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
-                    };
-                    cb.set_image(arboard::ImageData {
-                        width: w as usize,
-                        height: h as usize,
-                        bytes: rgba.into(),
-                    })
-                    .map_err(|e| e.to_string())
-                });
+                let set = r
+                    .and_then(|(rgba, w, h)| clipboard::put_image(&mut self.clipboard, rgba, w, h));
                 if let Err(e) = set {
                     log(&format!("clipboard: {e}"));
                 }
