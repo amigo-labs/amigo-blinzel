@@ -327,6 +327,7 @@ Pitfalls that code and git history don't show. Short entries; `/spec-build` adds
 - **`App` commands write the settings file, and the UI language is a process global.** In `blinzel-ui` tests, `settings_store` only writes to the thread's `TEST_CONFIG_DIR` (the harness's temp folder), never `~/.config`; App-level tests use `testkit::Harness`, which holds a lock so tests that switch the language cannot race. The harness auto-applies only `Uncloak` (each render returns it until the shell clears `cloaked`); other window feedback goes through `Harness::shell`.
 - **`blinzel-core`'s batch tests need its `batch` feature.** `cargo test -p blinzel-core --lib batch::run` alone runs 0 tests and says ok; add `--features batch` (the workspace run gets it through `blinzel-ui`).
 - **The harness's window fits its small test images.** App tests that read the batch dialog's drawn rows call `Harness::resize` first; in the tiny window every name is elided to `…name`.
+- **Display-bound Linux tests run only on Xvfb.** A test that needs an X server returns early without `BLINZEL_X11_TEST` (so `cargo test --workspace` stays headless) and sets `DISPLAY` itself; the Linux CI job's xvfb-run step lists it by module filter and runs with `--test-threads=1`. Locally: `xvfb-run -a sh -c 'BLINZEL_X11_TEST=$DISPLAY cargo test -p blinzel-app --lib -- linux::color linux::clipboard --test-threads=1'`. The Windows target does not even `cargo check` here (C dependencies such as `libwebp-sys` need MSVC).
 
 ---
 
