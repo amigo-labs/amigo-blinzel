@@ -318,6 +318,7 @@ packaging/                    winget manifests, Linux icon, macOS signing certif
 
 Pitfalls that code and git history don't show. Short entries; `/spec-build` adds to this list when a loop surprised it.
 
+- **No early `return` in an objc2 `define_class!` method that returns `bool`.** The macro turns the declared `bool` into objc2's `Bool`, and a `return false;` inside the body does not convert (E0308, only the macOS CI job sees it). Write the body as an expression (`if … { false } else { …; true }`).
 - **Windows developer machine: the rustup host is `windows-gnu`.** Build the app with `cargo +1.99.1-x86_64-pc-windows-msvc …`. NASM (`%LOCALAPPDATA%\bin\NASM`) and the CMake that comes with Visual Studio (`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`) must be in the `PATH`.
 - **Laptop measurements vary by up to 30 %** between consecutive runs (throttling). Measure the candidates alternately and run libjpeg-turbo alongside as a control (§4).
 - **Git Bash rewrites arguments that look like paths** (`/CN=…` becomes a Windows path). Scripts that pass such arguments set `MSYS_NO_PATHCONV=1`.
