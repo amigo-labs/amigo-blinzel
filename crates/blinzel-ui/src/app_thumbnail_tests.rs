@@ -607,6 +607,24 @@ fn an_evicted_thumbnail_is_asked_for_again_when_it_is_needed() {
 }
 
 #[test]
+fn the_viewers_atlas_holds_512_thumbnails_and_reuses_a_slot_for_the_513th() {
+    // AC-12: 8 pages of 64 slots.
+    let mut h = folder_of(513);
+    h.key(Letter('G'));
+    let ids: Vec<u64> = (0..513)
+        .map(|i| h.app.list().get(i).unwrap().cache_id())
+        .collect();
+    while h.grid_selected() != Some(512) {
+        h.wait_for(|h| h.frame().thumbs.len() >= 16);
+        h.key(PageDown);
+    }
+    h.wait_for(|h| h.thumb_reads().len() >= 513 && h.app.browse.has_thumb(ids[512]));
+    settle(&mut h, 513, 1);
+    let held = ids.iter().filter(|&&id| h.app.browse.has_thumb(id)).count();
+    assert_eq!(held, 512, "one slot was reused");
+}
+
+#[test]
 fn transparent_thumbnails_are_composited_over_the_background_colour() {
     // AC-11: a fully transparent PNG over a white (not the default) background.
     let settings = Settings {
