@@ -416,3 +416,87 @@ fn cloud_placeholders_are_not_read_ahead_but_load_when_navigated_to() {
     assert_eq!(h.view_reads(), ["b.png", "a.png", "c.png"]);
     assert_eq!(h.frame().images.len(), 1, "c.png is shown");
 }
+
+// ------------------------------------------------------ reading, errors
+
+/// A 3600 × 2400 JPEG named `name` followed by `tail`, which the probe
+/// reports as its 960 × 640 embedded preview.
+fn with_preview(h: &Harness, name: &str, tail: &[u8]) {
+    let mut data = crate::testkit::jpeg(3600, 2400);
+    let at = data.len();
+    data.extend_from_slice(tail);
+    h.set_preview(data.len(), at..data.len(), (960, 640));
+    h.write_file(name, &data);
+}
+
+fn reads_of(h: &Harness, name: &str) -> usize {
+    h.view_reads().iter().filter(|r| *r == name).count()
+}
+
+/// AC-09.
+#[test]
+fn one_read_gives_the_preview_and_the_screen_stage_and_the_current_image_gets_every_thread() {
+    let mut h = Harness::new();
+    with_preview(&h, "a.jpg", &crate::testkit::jpeg(960, 640));
+    h.write_png("b.png", 64, 48);
+    h.open("a.jpg");
+    let id = h.app.current.as_ref().unwrap().cache_id;
+    assert!(h.app.has_stage(id, Stage::Preview));
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert_eq!(reads_of(&h, "a.jpg"), 1);
+    assert_eq!(reads_of(&h, "b.png"), 1);
+    // The harness's loader decodes the visible image with 2 threads.
+    let mut decodes = h.decodes();
+    decodes.sort();
+    assert_eq!(decodes, [((64, 48), 1), ((3600, 2400), 2)]);
+    // Zoomed in: the full resolution needs a read of its own.
+    h.app.view.zoom = Some(1.0);
+    h.app.after_zoom();
+    h.pump();
+    assert!(h.app.has_stage(id, Stage::Full));
+    assert_eq!(reads_of(&h, "a.jpg"), 2);
+}
+
+/// AC-20.
+#[test]
+fn a_broken_file_is_not_tried_again_until_it_changes_and_browsing_goes_on() {
+    let mut h = Harness::new();
+    h.write_png("a.png", 64, 48);
+    h.write_file("b.png", b"not an image");
+    h.write_png("c.png", 64, 48);
+    h.open("a.png");
+    h.key(Right);
+    let id = h.app.current.as_ref().unwrap().cache_id;
+    assert!(h.app.error_of(id).is_some());
+    assert!(h.frame().images.is_empty(), "not the previous image");
+    assert!(
+        h.frame()
+            .texts
+            .iter()
+            .any(|t| t.starts_with("Could not open “b.png”"))
+    );
+    h.key(Right);
+    assert_eq!(h.current_name().as_deref(), Some("c.png"));
+    assert_eq!(h.frame().images.len(), 1);
+    h.key(Left);
+    h.key(Left);
+    assert_eq!(h.current_name().as_deref(), Some("a.png"));
+    assert_eq!(reads_of(&h, "b.png"), 1, "not tried again");
+    // Rewritten: a new size and write time, so it is tried again.
+    h.write_png("b.png", 64, 48);
+    folder_changed(&mut h);
+    h.key(Right);
+    assert_eq!(h.frame().images.len(), 1);
+    assert_eq!(reads_of(&h, "b.png"), 2);
+    drop(h);
+
+    // A broken embedded preview: the image itself still shows.
+    let mut h = Harness::new();
+    with_preview(&h, "d.jpg", b"not a preview");
+    h.open("d.jpg");
+    let id = h.app.current.as_ref().unwrap().cache_id;
+    assert_eq!(h.app.error_of(id), None);
+    assert!(!h.app.has_stage(id, Stage::Preview));
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert_eq!(h.frame().images.len(), 1);
+}

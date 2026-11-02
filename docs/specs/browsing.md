@@ -137,7 +137,7 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 | AC-06 | `the_neighbours_are_wanted_in_browsing_direction_four_ahead_and_two_behind`, `neighbours_are_read_most_urgent_first_once_and_failed_ones_are_skipped` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
 | AC-07 | `the_settings_file_sets_how_many_are_prepared_ahead_and_behind` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `tolerates_garbage`, `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply` (`crates/blinzel-core/src/settings.rs`, the cap at 32 and unreadable values) | built | |
 | AC-08 | `runs_by_priority`, `replacing_wanted_drops_and_reprioritizes`, `running_jobs_get_cancelled`, `completed_jobs_are_not_repeated_until_forgotten`, `classes_are_independent` (`crates/blinzel-core/src/sched.rs`) | built | |
-| AC-09 | | open | |
+| AC-09 | `one_read_gives_the_preview_and_the_screen_stage_and_the_current_image_gets_every_thread` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
 | AC-10 | `zooming_past_the_screen_stage_prepares_the_full_resolution`, `actual_size_prepares_everything_at_full_resolution` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
 | AC-11 | `tiles_cover_the_image_with_borders` (`crates/blinzel-ui/src/gfx.rs`); `ycc_subsamplings_with_tile_seams` (`crates/blinzel-app/tests/wgpu_golden.rs`, lavapipe, Linux CI with `BLINZEL_REQUIRE_GPU=1`; also `warp_golden.rs` in Windows CI and `metal_golden.rs` in macOS CI) | built | |
 | AC-12 | `evicts_least_recently_used_except_kept` (`crates/blinzel-core/src/cache.rs`) | built | |
@@ -148,7 +148,7 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 | AC-17 | `cloud_placeholders_are_not_read_ahead_but_load_when_navigated_to` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `remove_and_placeholders` (`crates/blinzel-core/src/filelist.rs`); both also run in the Windows CI job (`cargo test --workspace --release`) | built | |
 | AC-18 | | open | |
 | AC-19 | `panics_are_contained` (`crates/blinzel-core/src/decode/mod.rs`) | built | |
-| AC-20 | | open | |
+| AC-20 | `a_broken_file_is_not_tried_again_until_it_changes_and_browsing_goes_on` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `a_broken_image_shows_why_instead_of_the_previous_one` (`crates/blinzel-ui/src/app_viewing_tests.rs`, the message) | built | |
 | AC-21 | manual: measurement | open | |
 
 ## Decisions
@@ -159,3 +159,4 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 - AC-14's 150 ms settle lives in the shells: the Linux test checks `DIR_SETTLE`; the macOS `DIR_SETTLE` and the Windows `DirWatcher` sleep are the same 150 ms without a test of their own.
 - AC-06, AC-07, AC-10 and AC-17 held before their tests were written: the tests read what `App` wants prepared (`App::wanted_jobs`, split from `update_wanted` for that) and what the loader read, and each went red when the code under it was broken on purpose (priorities, previews, direction, the 1.05 threshold, the full-resolution neighbours, skipping placeholders and failed files).
 - AC-17 is proven by the App test with the attributes the Windows listing reports; Linux and macOS never report placeholders. The test runs in the Linux and the Windows CI job.
+- AC-09 and AC-20 held before their tests were written. The harness's probe reports an embedded preview where a test puts one (a JPEG appended to a larger JPEG, or garbage for a broken preview), and its decoder logs the threads each decode gets. That a failed file is not read again is held twice: `App::failed` and the scheduler, which does not repeat a completed job (AC-08); breaking only one of them keeps the test green.

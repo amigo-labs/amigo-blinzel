@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use blinzel_core::bufpool::PoolBuf;
 use blinzel_core::decode::{self, DecodeError, Probe, Request};
+use blinzel_core::exif::EmbeddedPreview;
 use blinzel_core::filelist::Entry;
 use blinzel_core::geom::{Affine, Orientation, Rect};
 use blinzel_core::icc::Profile;
@@ -252,6 +253,10 @@ pub(crate) struct FakeServices {
     pub utc_offset: AtomicI32,
     /// When set, every decode fails with this error (e.g. one from WIC).
     pub decode_error: Mutex<Option<DecodeError>>,
+    /// Every decode: the probed size of the image and the threads it got.
+    pub decodes: Mutex<Vec<((u32, u32), usize)>>,
+    /// Embedded previews the probe reports, by file length.
+    pub previews: Mutex<HashMap<usize, EmbeddedPreview>>,
 }
 
 impl FakeServices {
@@ -283,9 +288,17 @@ impl Services for FakeServices {
         crate::files::entry(path).map(|e| self.with_attributes(e))
     }
     fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
-        decode::probe(data)
+        let mut p = decode::probe(data)?;
+        if let Some(preview) = self.previews.lock().unwrap().get(&data.len()) {
+            p.previews.insert(0, preview.clone());
+        }
+        Ok(p)
     }
     fn decode(&self, data: &[u8], req: Request, threads: usize) -> Result<Image, DecodeError> {
+        if let Ok(p) = decode::probe(data) {
+            let mut d = self.decodes.lock().unwrap();
+            d.push(((p.width, p.height), threads));
+        }
         if let Some(e) = self.decode_error.lock().unwrap().clone() {
             return Err(e);
         }
@@ -356,6 +369,17 @@ pub(crate) fn png(w: u32, h: u32) -> Vec<u8> {
         .flat_map(|p| [p[2], p[1], p[0], 255])
         .collect();
     blinzel_core::export::encode_png_bgra(&bgra, w, h).unwrap()
+}
+
+/// A JPEG of `w` × `h` with the test pattern.
+pub(crate) fn jpeg(w: u32, h: u32) -> Vec<u8> {
+    let opts = blinzel_core::decode::jpeg::EncodeOptions {
+        quality: 90,
+        subsampling: 420,
+        ..Default::default()
+    };
+    let rgb = blinzel_core::testimg::rgb(w, h);
+    blinzel_core::decode::jpeg::encode_rgb(&rgb, w, h, opts).unwrap()
 }
 
 // ------------------------------------------------------------------ driver
@@ -438,6 +462,8 @@ impl Harness {
             attributes: Mutex::new(HashMap::new()),
             utc_offset: AtomicI32::new(0),
             decode_error: Mutex::new(None),
+            decodes: Mutex::new(Vec::new()),
+            previews: Mutex::new(HashMap::new()),
         });
         let device = Arc::new(FakeDevice::default());
         let loader = Loader::new(services.clone(), 1, 2, 2);
@@ -480,14 +506,7 @@ impl Harness {
     /// A JPEG of `w` × `h` with the test pattern; above the 1920 × 1080
     /// screen box it decodes at a reduced size for the screen.
     pub fn write_jpeg(&self, name: &str, w: u32, h: u32) -> PathBuf {
-        let opts = blinzel_core::decode::jpeg::EncodeOptions {
-            quality: 90,
-            subsampling: 420,
-            ..Default::default()
-        };
-        let rgb = blinzel_core::testimg::rgb(w, h);
-        let data = blinzel_core::decode::jpeg::encode_rgb(&rgb, w, h, opts).unwrap();
-        self.write_file(name, &data)
+        self.write_file(name, &jpeg(w, h))
     }
 
     /// Any file in the images' folder (e.g. a broken image).
@@ -896,6 +915,27 @@ impl Harness {
     pub fn set_attributes(&self, name: &str, attributes: u32) {
         let mut a = self.app.services.attributes.lock().unwrap();
         a.insert(name.to_string(), attributes);
+    }
+
+    /// The probe reports an embedded preview of `size` at `range` in every
+    /// file of `file_len` bytes.
+    pub fn set_preview(&self, file_len: usize, range: std::ops::Range<usize>, size: (u32, u32)) {
+        let p = EmbeddedPreview {
+            range,
+            width: size.0,
+            height: size.1,
+        };
+        self.app
+            .services
+            .previews
+            .lock()
+            .unwrap()
+            .insert(file_len, p);
+    }
+
+    /// Decodes so far: the image's size and the threads it was given.
+    pub fn decodes(&self) -> Vec<((u32, u32), usize)> {
+        self.app.services.decodes.lock().unwrap().clone()
     }
 
     /// Every decode fails with `e` from now on (`None`: decode again).
