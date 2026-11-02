@@ -392,3 +392,24 @@ fn only_a_hidden_instance_on_windows_skips_the_write_on_exit() {
     assert!(writes_settings_on_exit(false, false));
     assert!(writes_settings_on_exit(true, false));
 }
+
+#[test]
+fn the_app_never_writes_the_window_placement_itself() {
+    // Only the Windows shell sets `window` and `maximized` (on close and
+    // hide); Linux and macOS write neither key.
+    let mut h = Harness::with_images(&["a.png"]);
+    let a = h.command(ToggleFilmstrip);
+    h.shell(a);
+    let a = h.command(View(ViewMode::FitWindowToImage));
+    h.shell(a);
+    h.shell(vec![Action::ToggleMaximize]);
+    assert!(h.app.maximized);
+    h.app.save_settings_on_exit();
+    let text = h.saved_text().unwrap();
+    for key in ["window", "maximized"] {
+        assert!(
+            !text.lines().any(|l| l.starts_with(key)),
+            "{key} in\n{text}"
+        );
+    }
+}
