@@ -76,6 +76,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 
 - [ ] AC-21 (always, manual: measurement): 200 thumbnails from the cache are on screen (open the cache, read and decode 200, load them into the atlas, draw the grid, GPU done) in at most 30 ms median, measured with `blinzel --bench <dir> --json out.json`, field `thumb_grid_200` (Windows only; the CI step "App benchmark (offscreen, WARP)" runs it on WARP and fails only on a cache miss, not on the time).
 - [ ] AC-22 (always, manual: measurement): Over 200 different 12-MP JPEGs with sensor noise, cold thumbnails (read, probe, decode, reduce; no cache) reach at least 150 per second and warm reading of all 200 from a reopened cache takes at most 30 ms, measured with `blinzel-bench thumbs <dir> [--count N] [--threads T]` on the machine named with the result (not run in CI).
+- [ ] AC-23 (event): When the user opens "Resize images…" (Ctrl+B or the menu) while tiles are marked in the grid, then the batch dialog starts with exactly the marked files, in the folder's order; marked files that no longer exist are left out. Without marks it starts empty.
 
 ## Technical notes
 
@@ -116,7 +117,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 
 ## Open questions
 
-- Should the marks of the grid feed the batch dialog's file list? The design spec (`blinzel.md` §7, "Multi-selection in the grid") presents them as part of batch processing and `GridState::marked` is documented "e.g. for the batch dialog", but nothing reads them today (AC-19 only covers marking).
+<!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
 ## Evidence
 
@@ -144,8 +145,10 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | AC-20 | | open | |
 | AC-21 | | open | |
 | AC-22 | | open | |
+| AC-23 | | open | |
 
 Partial coverage without an exact test: AC-16 persistence of the setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); AC-18 the layout functions behind the keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`) — the key and mouse handling in `App` has no test.
 
 ## Decisions
 
+- 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.

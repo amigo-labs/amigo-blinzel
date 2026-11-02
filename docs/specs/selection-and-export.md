@@ -53,6 +53,7 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 - [ ] AC-19 (event): When a re-encoded cutout is written, JPEG uses quality 95, the chroma subsampling of a JPEG source (4:2:0 for other sources) and a JPEG source's ICC profile; PNG is 8-bit RGB when every pixel is opaque, else RGBA, without ICC profile; WebP (lossy, quality 90) and AVIF (quality 85) embed the source's ICC profile. No re-encoded cutout carries EXIF.
 - [ ] AC-20 (event): When saving finishes, a notice shows `Saved “{name}” losslessly` (no re-encoding) or `Saved “{name}”`; when reading, decoding, encoding or writing fails, the notice names the file and the reason. The save runs off the UI thread.
 - [ ] AC-21 (always): Selecting, copying and cutting never write a file; saving a cutout writes only the target chosen in the save dialog, first to a temporary file next to it (`{target stem}.blinzel-tmp`), then renamed onto the target.
+- [ ] AC-22 (error): If the target chosen in the save dialog is the image the cutout comes from (the same file, also under another spelling of its path), then nothing is written and a notice says that the source cannot be replaced; any other existing target is replaced after the dialog's overwrite confirmation.
 
 ## Technical notes
 
@@ -78,7 +79,7 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 
 ## Open questions
 
-- Saving a cutout replaces an existing target after the system dialog's confirmation, which includes choosing the source image itself. AGENTS.md §9 says every result is a new file and an existing name gets a number; `blinzel.md` §7 says saving happens only via "Save as" with the overwrite confirmation. Which rule applies to "Save cutout as" — refuse the source path, number an existing name, or keep the confirmation?
+<!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
 ## Evidence
 
@@ -105,7 +106,9 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 | AC-19 | partial: `png_output_and_format_from_path` checks the PNG size only | open | |
 | AC-20 | | open | |
 | AC-21 | | open | |
+| AC-22 | | open | |
 
 ## Decisions
 
+- 2026-11-02: "Save cutout as" never replaces its own source; other existing files may be replaced after the system dialog's confirmation (AC-22). Because the viewer never modifies the image it shows (`blinzel.md` §2, AGENTS.md §9), while numbering an existing name would break the save dialog people know.
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's 🟡 markers for §7 were not taken as evidence.

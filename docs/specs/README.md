@@ -6,13 +6,13 @@ All specs below were extracted from the code on 2026-11-02 (`/spec-extract`). Th
 
 ## Order
 
-Specs with an open question come first: `/spec-build` only starts once that question is settled (`/spec <name>`). The rest are in the order of the product: viewing first, distribution last.
+The first three carry decisions of 2026-11-02 that change behavior, so they come first. The rest are in the order of the product: viewing first, distribution last.
 
 | # | Spec | ACs proven | CI-only | Manual | Next |
 | - | ---- | ---------- | ------- | ------ | ---- |
-| 1 | [selection-and-export](selection-and-export.md) | 6 / 21 | 2 | 2 | `/spec`: may "Save cutout as" replace an existing file, even the source? |
-| 2 | [thumbnails](thumbnails.md) | 10 / 22 | 1 | 3 | `/spec`: should the grid's marks fill the batch dialog? |
-| 3 | [settings](settings.md) | 4 / 15 | 1 | 0 | `/spec`: implement `ram_budget_mb` or drop it? |
+| 1 | [selection-and-export](selection-and-export.md) | 6 / 22 | 2 | 2 | `/spec-build` (decided: the source is never replaced, AC-22) |
+| 2 | [thumbnails](thumbnails.md) | 10 / 23 | 1 | 3 | `/spec-build` (decided: the grid's marks fill the batch dialog, AC-23) |
+| 3 | [settings](settings.md) | 3 / 16 | 1 | 0 | `/spec-build` (decided: `ram_budget_mb` is dropped, AC-16) |
 | 4 | [startup](startup.md) | 3 / 14 | 6 | 3 | `/spec-build` |
 | 5 | [browsing](browsing.md) | 8 / 21 | 3 | 1 | `/spec-build` |
 | 6 | [viewing](viewing.md) | 7 / 22 | 0 | 2 | `/spec-build` |
@@ -31,7 +31,7 @@ Specs with an open question come first: `/spec-build` only starts once that ques
 | 19 | [benchmark-gate](benchmark-gate.md) | 5 / 19 | 6 | 0 | `/spec-build` |
 | 20 | [competitive-benchmark](competitive-benchmark.md) | 5 / 17 | 3 | 5 | `/spec-build` |
 | 21 | [website](website.md) | 12 / 21 | 0 | 3 | `/spec-build` |
-| | **Total** | **168 / 423** | | | |
+| | **Total** | **167 / 426** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
@@ -68,7 +68,6 @@ Gaps not yet written as specs: planned in the design spec, not in the code.
 | Thumbnail metric in `blinzel-race`; comparison of batch processing with vipsthumbnail, XnConvert and ImageMagick in the tooling | §11, §7 |
 | A speed budget in CI: today no M1/M2/M4 target is asserted anywhere, only measured by hand | §12 |
 | Yardsticks for the system decoders (WIC) and the Windows thumbnail cache in `blinzel-bench`; the gate of HEIC and AVIF against WIC | §3 |
-| RAM budget (`ram_budget_mb` is read and written, but unused) | §5 |
 | Changelog page and legal notice (Impressum) on the website; startup and memory columns in the feature table | §11 |
 | winget: a PR after every release (manual today, `packaging/winget/README.md`) | §10 |
 | Remembering the window position on Linux and macOS (Windows only today) | §6 |

@@ -58,7 +58,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 
 ### Dialog
 
-- [ ] AC-22 (event): When the user presses Ctrl+B or chooses "Resize images…", a modal panel opens over the viewer with an empty file list and the settings last used in this session (the first time: long edge 1920, "don't enlarge", format "as source", quality 85, keep metadata, location and colour profile, pattern `{name}`, folder `resized`); while it is open, every key and click goes to it.
+- [ ] AC-22 (event): When the user presses Ctrl+B or chooses "Resize images…", a modal panel opens over the viewer with the files marked in the grid (`thumbnails.md` AC-23), otherwise an empty file list, and the settings last used in this session (the first time: long edge 1920, "don't enlarge", format "as source", quality 85, keep metadata, location and colour profile, pattern `{name}`, folder `resized`); while it is open, every key and click goes to it.
 - [ ] AC-23 (event): When images or folders are dropped onto the window on Windows or Linux while the dialog is open, they are added to its list: a folder adds the images directly in it (not those of subfolders) in natural order; non-images and files already listed are left out; their headers are read in the background. Without an open dialog, a drop opens the first dropped file in the viewer.
 - [ ] AC-24 (state): While the list is shown, each row reads old name → new name, the new name being the planned path with the real output size and the file's real date; rows still being read show "reading…", unreadable files show "unreadable: {reason}" in red and are left out of the run; × removes a row and "Remove all" clears the list.
 - [ ] AC-25 (error): If a header is still being read, no file is readable, the size is empty, zero or above 100000, the pattern is invalid (unclosed `{`, unknown placeholder, empty, or a `/` or `\`) or the folder is empty, then Start and Enter do nothing and the new names show `–`. Size fields accept only digits, at most six.
@@ -88,7 +88,7 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 | Target folder `.` and pattern `{name}`, same format as the source | The copy gets ` (2)`; the source stays as it is |
 | The same file dropped twice, or a folder containing it | Listed once |
 | Several files that make the same name | Numbered in list order, as shown in the list before the start |
-| macOS: files dropped while the dialog is open | The first file opens in the viewer behind the dialog; the list stays empty (known gap) |
+| macOS: files dropped while the dialog is open | The first file opens in the viewer behind the dialog; the list stays empty (known gap; marking in the grid fills it instead) |
 | File system without hard links (FAT, some shares) | Written by rename; a file appearing at that very moment could be replaced (race window) |
 | Cancel while large files are in progress | Those files finish and are written; only files not started are skipped |
 
@@ -131,4 +131,5 @@ Known gaps the code has today: on macOS a drop onto the window always opens the 
 
 ## Decisions
 
+- 2026-11-02: revised AC-22: the dialog starts with the grid's marks when there are any (decision in `thumbnails.md`).
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's ✅ markers for §7 "Batch processing" were not taken as evidence.
