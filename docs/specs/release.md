@@ -3,7 +3,7 @@ status: todo
 created: 2026-11-02
 size: M
 platforms: all
-design: [blinzel.md §2, blinzel.md §9, blinzel.md §10, blinzel.md §12 (M7), blinzel.md §13, blinzel.md §14]
+design: [blinzel.md §2, blinzel.md §9, blinzel.md §10, blinzel.md §12 (M7), blinzel.md §13]
 ---
 
 # Release automation

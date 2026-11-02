@@ -3,7 +3,7 @@ status: todo
 created: 2026-11-02
 size: L
 platforms: Windows, macOS
-design: [blinzel.md §1, blinzel.md §11, blinzel.md §12 (M8), blinzel.md §14]
+design: [blinzel.md §1, blinzel.md §11, blinzel.md §12 (M8)]
 ---
 
 # Competitive benchmark

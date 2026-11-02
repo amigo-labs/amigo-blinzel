@@ -1,13 +1,10 @@
-# amigo-blinzel: Plan
+---
+status: draft
+---
 
-This document is the binding plan. At the end, every item is checked against the implementation.
+# amigo-blinzel: design
 
-**Status legend:**
-- ✅ implemented and verified
-- 🟡 implemented, verification (CI or manually on Windows) pending
-- ⬜ open
-
-As of: 2026-10-25. The current state of work for the next session is in [section 16](#16-handover-next-steps).
+This is the design spec: the goal, the decisions, the architecture, the reasons behind them and the measurements they rest on. What a feature does, its acceptance criteria and the evidence for them (and so its progress) live in the feature specs next to this file, indexed in [README.md](README.md). Each feature spec names the sections it builds on in its `design:` front matter and never contradicts them; a feature that needs a new architectural decision gets a row in §2 first (AGENTS.md §2.1).
 
 ---
 
@@ -40,205 +37,171 @@ IrfanView and ImageGlass are too slow. amigo-blinzel is meant to be measurably f
 
 ## 3. Methodology: benchmark gate "library vs. in-house build"
 
-`crates/blinzel-bench` generates a deterministic corpus and measures every candidate. The winner gets built in; the library remains the yardstick and pixel reference.
+`crates/blinzel-bench` generates a deterministic corpus and measures every candidate. The winner gets built in; the library remains the yardstick and pixel reference. Tooling and its CI gate: [benchmark-gate.md](benchmark-gate.md). The Windows yardsticks (thumbnail provider and cache, directory listing, WIC) and ImageMagick are not candidates in `blinzel-bench`; their numbers below come from one-off measurements (WIC through `BLINZEL_DECODER=native|wic` and `blinzel.exe --bench`).
 
-| Hot path | Yardstick | In-house lever | Status |
+| Hot path | Yardstick | In-house lever | Result |
 |---|---|---|---|
-| JPEG decode | libjpeg-turbo, zune-jpeg | own parallel decoder (M3) | ✅ `blinzel-jpeg` for the visible image: sequential 4.1×, progressive 1.7× turbo (16 threads), byte-identical; single-thread and regions stay with turbo |
-| Path to the GPU | RGBA from the decoder | YCbCr planes, color conversion in the shader | ✅ measured: 24 MP 118 instead of 147 ms, 45 MP 190 instead of 410 ms |
-| PNG | zune-png, png | `png` + own fused RGBA expansion | ✅ 1.9× (photo) and 3.2× (screenshot) faster than zune-png |
-| Memory | system allocator | committed buffer pool | ✅ 96 MB: 0.6 ms instead of 40 ms |
-| Thumbnail scaling | Windows thumbnail provider (`IShellItemImageFactory`) | DCT 1/8 + area averaging per YCbCr plane | ✅ 200 12-MP JPEGs, 16 threads: 287/s instead of 18/s |
-| Thumbnail storage | Windows thumbnail cache (`thumbcache_*.db`) | own pack file | ✅ 200 from the cache: 23.6 ms instead of 432 ms (CPU side, without atlas upload) |
-| Directory | FindFirstFileExW (`LARGE_FETCH`, `InfoBasic`) | `GetFileInformationByHandleEx(FileFullDirectoryInfo)` (what `NtQueryDirectoryFile` returns) | ✅ measured, stays with FindFirstFileExW: 10k entries 7.7–8.0 ms vs. 6.8–7.3 ms (64 KB buffer) or −8 to +18 % (256 KB), on average under 10 %; sorting 2.5 ms. Target ≤ 25 ms met. |
-| WebP | WIC (Store extension) | `image-webp` (pure Rust, MIT/Apache) | ✅ measured (12/24 MP, same pixels): lossless 210 instead of 303 ms → native. For lossy, WIC with the codec loaded is about 20 % faster (12 MP 411–454 instead of 485–541 ms, 24 MP 604–649 instead of 751–812 ms), but its first call in the process costs 200–400 ms. Hence: the first lossy WebP native, the WIC codec loads in the background meanwhile, the following ones via WIC. Animations native. |
-| JPEG XL | WIC (Store extension "JPEG XL Image Extension") | `jxl-oxide` (pure Rust, MIT/Apache) with our own row-by-row conversion to RGBA8 instead of the generic pixel stream (which cost 225–800 ms, as much as decoding) | ✅ native, jxl crates with `opt-level = "s"`: exe 2.9 → 4.6 MB (with `opt-level = 3` 5.1 MB, `"z"` 4.4 MB and considerably slower). Measured in the same run (12/24 MP, distance 1 and lossless): 12 MP first image 270–353 instead of 514–559 ms, afterwards 259–265 instead of 319–364 ms; 24 MP 523–535 instead of 600–662 ms; lossless on par (581–707 vs. 671–692 ms). In addition: no Store codec needed, color profile and orientation from the header. Channels with an offset region and CMYK stay with WIC. |
-| TIFF | WIC | `tiff` (pure Rust, MIT) with strips in parallel on the P-cores, each thread with its own decoder over the same bytes | ✅ measured (12/24 MP, 8-bit RGB; files with 600 strips as written by libtiff): LZW 12 MP 66–115 instead of 226–512 ms, 24 MP 156–217 instead of 513–1091 ms, Deflate 41–47 instead of 128–156 ms, uncompressed on par. With only one strip (e.g. from ffmpeg) or one thread, WIC is equally fast or faster: then WIC first. Native only grayscale/RGB(A) with 8/16 bits, interleaved, without JPEG compression; TIFF-based raws (preview subfile, SubIFDs, DNG, CR2) go to WIC. Exe +190 KB. The probe now reads orientation and color profile for every simple TIFF. |
-| RAW | WIC (Microsoft Raw Image Decoder) | own probe (`raw.rs`): orientation, size (EXIF, RAF records, RW2 sensor borders) and the embedded JPEGs from TIFF raws (NEF, CR2, ARW, DNG, PEF, RW2), RAF and CR3, under 1 ms per file | ✅ measured (CC0 samples from raw.pixls.us, open to image): CR2 2793 → 96 ms, CR3 3571 → 138 ms, NEF 2001 → 59 ms, RW2 5855 → 69 ms, RAF 1628 → 91 ms, iPhone DNG 745 → 91 ms. A preview that covers what is needed (the screen; for 100 % the whole image) is the stage; otherwise it appears first and WIC develops afterwards (ARW: preview 1616 × 1080, 1435 ms). Without a preview (ORF), WIC as before. After development, the probe takes over the size from WIC. |
-| HEIC | WIC (Store extension "HEVC Video Extensions", often hardware decode) | `zune-heic` (pure Rust, own HEVC decoder, MIT/Apache/Zlib): 8-bit 4:2:0 and monochrome, grid tiles in parallel, `clap`/`irot`/`imir` applied, alpha (premultiplied is divided out) | 🟡 Linux, 4 vCPU, `blinzel-bench run`: 12 MP (one tile, heif-enc) 340–700 ms, 24 MP 700–730 ms. Not yet measured against WIC (`BLINZEL_DECODER=native` or `=wic` with `blinzel.exe --bench`). Because of the HEVC patents only with the Cargo feature `heic` (off by default, not included in releases): then WIC goes first where the HEVC codec is installed, and without it `zune-heic` decodes. Without the feature, HEIC stays with WIC. Probe and decode take the same path, because WIC delivers unrotated with orientation, `zune-heic` rotated. The color profile is read by our own HEIF container reader (also without the feature). 10-bit, 4:2:2/4:4:4 and sequences stay with WIC. Note: HEVC is patent-encumbered ([section 14](#14-open-items-on-your-side)). |
-| AVIF | WIC (Store extension "AV1 Video Extension") | `rav1d` (Rust port of dav1d, BSD-2; assembly only on x86-64, ARM64 with the Rust fallbacks, because MSVC does not build dav1d's ARM assembly) and our own HEIF container reader (`decode::avif`): items, grids, alpha (also premultiplied), `clap` as crop, `irot`/`imir` as orientation for the GPU, `colr` (ICC; nclx with P3 yields a generated profile). 8–12 bits, 4:0:0 to 4:4:4, all common CICP matrices and both value ranges, bilinear chroma interpolation | 🟡 Linux, 4 vCPU, `blinzel-bench run` (avifenc, quality 60): 12 MP 383 ms (1 thread) or 205 ms (4), 24 MP 730 or 267 ms. Pixels against libavif (`avifdec`): at most 4 levels of deviation, mostly 0–2; orientation and crop as in libheif. Not yet measured against WIC; until then like HEIC: WIC first where the AV1 codec is installed, otherwise native. HDR (PQ, HLG) and unknown essential properties stay with WIC. |
-| Batch scaling (M9) | `fast_image_resize` (MIT/Apache, SIMD) with the same math: sRGB → linear U16, Lanczos3, alpha premultiplied | own separable Lanczos3 in `f32`, linear and premultiplied, in bands of 64 rows (small intermediate buffer), source rows read directly from the YCbCr planes | ✅ `blinzel-bench resize`, one thread: 24 MP → 1600 px 309 instead of 506 ms, → 400 px 201 instead of 438 ms, 12 MP with alpha → 2048 px 228 instead of 308 ms; only when enlarging (2 → 4 MP) is the library faster (148 vs. 104 ms). Differences only at hard edges in dark areas (mean 0.04–0.2 levels) → in-house build. |
-| SIMD levels | baseline x86-64-v2 | runtime dispatch per kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | ✅ measured: no level gains ≥ 10 % on a hot path, hence no dispatch ([section 15](#simd-levels)) |
+| JPEG decode | libjpeg-turbo, zune-jpeg | own parallel decoder (M3) | `blinzel-jpeg` for the visible image: sequential 4.1×, progressive 1.7× turbo (16 threads), byte-identical; single-thread and regions stay with turbo |
+| Path to the GPU | RGBA from the decoder | YCbCr planes, color conversion in the shader | 24 MP 118 instead of 147 ms, 45 MP 190 instead of 410 ms |
+| PNG | zune-png, png | `png` + own fused RGBA expansion | 1.9× (photo) and 3.2× (screenshot) faster than zune-png |
+| Memory | system allocator | committed buffer pool | 96 MB: 0.6 ms instead of 40 ms |
+| Thumbnail scaling | Windows thumbnail provider (`IShellItemImageFactory`) | DCT 1/8 + area averaging per YCbCr plane | 200 12-MP JPEGs, 16 threads: 287/s instead of 18/s |
+| Thumbnail storage | Windows thumbnail cache (`thumbcache_*.db`) | own pack file | 200 from the cache: 23.6 ms instead of 432 ms (CPU side, without atlas upload) |
+| Directory | FindFirstFileExW (`LARGE_FETCH`, `InfoBasic`) | `GetFileInformationByHandleEx(FileFullDirectoryInfo)` (what `NtQueryDirectoryFile` returns) | stays with FindFirstFileExW: 10k entries 7.7–8.0 ms vs. 6.8–7.3 ms (64 KB buffer) or −8 to +18 % (256 KB), on average under 10 %; sorting 2.5 ms. Meets the target ≤ 25 ms. |
+| WebP | WIC (Store extension) | `image-webp` (pure Rust, MIT/Apache) | measured (12/24 MP, same pixels): lossless 210 instead of 303 ms → native. For lossy, WIC with the codec loaded is about 20 % faster (12 MP 411–454 instead of 485–541 ms, 24 MP 604–649 instead of 751–812 ms), but its first call in the process costs 200–400 ms. Hence: the first lossy WebP native, the WIC codec loads in the background meanwhile, the following ones via WIC. Animations native. |
+| JPEG XL | WIC (Store extension "JPEG XL Image Extension") | `jxl-oxide` (pure Rust, MIT/Apache) with our own row-by-row conversion to RGBA8 instead of the generic pixel stream (which cost 225–800 ms, as much as decoding) | native, jxl crates with `opt-level = "s"`: exe 2.9 → 4.6 MB (with `opt-level = 3` 5.1 MB, `"z"` 4.4 MB and considerably slower). Measured in the same run (12/24 MP, distance 1 and lossless): 12 MP first image 270–353 instead of 514–559 ms, afterwards 259–265 instead of 319–364 ms; 24 MP 523–535 instead of 600–662 ms; lossless on par (581–707 vs. 671–692 ms). In addition: no Store codec needed, color profile and orientation from the header. Channels with an offset region and CMYK stay with WIC. |
+| TIFF | WIC | `tiff` (pure Rust, MIT) with strips in parallel on the P-cores, each thread with its own decoder over the same bytes | measured (12/24 MP, 8-bit RGB; files with 600 strips as written by libtiff): LZW 12 MP 66–115 instead of 226–512 ms, 24 MP 156–217 instead of 513–1091 ms, Deflate 41–47 instead of 128–156 ms, uncompressed on par. With only one strip (e.g. from ffmpeg) or one thread, WIC is equally fast or faster: then WIC first. Native only grayscale/RGB(A) with 8/16 bits, interleaved, without JPEG compression; TIFF-based raws (preview subfile, SubIFDs, DNG, CR2) go to WIC. Exe +190 KB. The probe reads orientation and color profile for every simple TIFF. |
+| RAW | WIC (Microsoft Raw Image Decoder) | own probe (`raw.rs`): orientation, size (EXIF, RAF records, RW2 sensor borders) and the embedded JPEGs from TIFF raws (NEF, CR2, ARW, DNG, PEF, RW2), RAF and CR3, under 1 ms per file | measured (CC0 samples from raw.pixls.us, open to image): CR2 2793 → 96 ms, CR3 3571 → 138 ms, NEF 2001 → 59 ms, RW2 5855 → 69 ms, RAF 1628 → 91 ms, iPhone DNG 745 → 91 ms. A preview that covers what is needed (the screen; for 100 % the whole image) is the stage; otherwise it appears first and WIC develops afterwards (ARW: preview 1616 × 1080, 1435 ms). Without a preview (ORF), WIC as before. After development, the probe takes over the size from WIC. |
+| HEIC | WIC (Store extension "HEVC Video Extensions", often hardware decode) | `zune-heic` (pure Rust, own HEVC decoder, MIT/Apache/Zlib): 8-bit 4:2:0 and monochrome, grid tiles in parallel, `clap`/`irot`/`imir` applied, alpha (premultiplied is divided out) | Linux, 4 vCPU, `blinzel-bench run`: 12 MP (one tile, heif-enc) 340–700 ms, 24 MP 700–730 ms. Not measured against WIC. Because of the HEVC patents only with the Cargo feature `heic` (see below): then WIC goes first where the HEVC codec is installed, and without it `zune-heic` decodes. Without the feature, HEIC stays with WIC. Probe and decode take the same path, because WIC delivers unrotated with orientation, `zune-heic` rotated. The color profile is read by our own HEIF container reader (also without the feature). 10-bit, 4:2:2/4:4:4 and sequences stay with WIC. |
+| AVIF | WIC (Store extension "AV1 Video Extension") | `rav1d` (Rust port of dav1d, BSD-2; assembly only on x86-64, ARM64 with the Rust fallbacks, because MSVC does not build dav1d's ARM assembly) and our own HEIF container reader (`decode::avif`): items, grids, alpha (also premultiplied), `clap` as crop, `irot`/`imir` as orientation for the GPU, `colr` (ICC; nclx with P3 yields a generated profile). 8–12 bits, 4:0:0 to 4:4:4, all common CICP matrices and both value ranges, bilinear chroma interpolation | Linux, 4 vCPU, `blinzel-bench run` (avifenc, quality 60): 12 MP 383 ms (1 thread) or 205 ms (4), 24 MP 730 or 267 ms. Pixels against libavif (`avifdec`): at most 4 levels of deviation, mostly 0–2; orientation and crop as in libheif. Not measured against WIC; like HEIC on Windows: WIC first where the AV1 codec is installed, otherwise native. HDR (PQ, HLG) and unknown essential properties stay with WIC. |
+| Batch scaling (M9) | `fast_image_resize` (MIT/Apache, SIMD) with the same math: sRGB → linear U16, Lanczos3, alpha premultiplied | own separable Lanczos3 in `f32`, linear and premultiplied, in bands of 64 rows (small intermediate buffer), source rows read directly from the YCbCr planes | `blinzel-bench resize`, one thread: 24 MP → 1600 px 309 instead of 506 ms, → 400 px 201 instead of 438 ms, 12 MP with alpha → 2048 px 228 instead of 308 ms; only when enlarging (2 → 4 MP) is the library faster (148 vs. 104 ms). Differences only at hard edges in dark areas (mean 0.04–0.2 levels) → in-house build. |
+| SIMD levels | baseline x86-64-v2 | runtime dispatch per kernel (`kernels.rs`: SSE4.2, AVX, AVX2+FMA) | no level gains ≥ 10 % on a hot path, hence no dispatch ([section 15](#simd-levels)) |
+
+**HEVC patents:** HEVC is patent-encumbered. Our own HEVC decoder (`zune-heic`) therefore sits behind the Cargo feature `heic`, off by default; releases do not include it, and HEIC runs via WIC (Windows) or ImageIO (macOS) there. Anyone building it themselves enables it with `cargo build --release -p blinzel-app --features heic`; its license texts are then missing from the `THIRD-PARTY-NOTICES*.txt`, which only cover the default build. `blinzel-bench` enables the feature for measuring.
+
+Behavior: [image-formats.md](image-formats.md) (detection, probe, native decoders, decoder order per platform).
 
 **Insight from the measurements:** DCT scaling brings less than expected (24 MP: 1/8 = 74 ms, full = 118 ms). Huffman decoding dominates. The **parallel Huffman decoder (M3)** is therefore the biggest remaining lever; progressive JPEGs (approx. 320 ms) need it in particular.
 
 ### Own JPEG decoder `blinzel-jpeg` (M3)
 
-1. **Parallelism within one image:**
-   - Restart segments in parallel.
-   - Speculative parallel Huffman decoding via self-synchronization (Weißenberger & Schmidt), DC correction via prefix sum.
-   - Pipeline of entropy decode and IDCT.
-2. **Less work:**
-   - DCT scaling.
-   - DC-only mode for 1/8 and thumbnails (AC only skipped).
-   - YCbCr output.
-   - AVX2/NEON IDCT.
+Levers, in the order they were built (sequential baseline, restart-parallel, parallel Huffman, DC-only, progressive):
+
+1. **Parallelism within one image:** restart segments in parallel; otherwise speculative parallel Huffman decoding via self-synchronization (Weißenberger & Schmidt), DC correction via prefix sum; progressive scans pipelined across threads.
+2. **Less work:** DCT scaling; at 1/8 only DC coefficients are kept (AC codes are decoded but not stored); YCbCr output.
 3. Write **directly into the target memory**.
 
-Order of the stages:
-- sequential baseline
-- restart-parallel
-- parallel Huffman
-- DC-only
-- progressive
-
-**Design (2026-10-23):**
+Design:
 - **Reference:** The output is byte-identical with libjpeg-turbo (islow IDCT, for 1/2, 1/4, 1/8 the reduced IDCTs from `jidctred.c`). Tests compare every plane 1:1 with turbo.
 - **Output:** YCbCr planes without upsampling, directly into buffers provided by the caller (buffer pool). Every plane is padded to whole MCUs so that blocks are written without edge cases.
 - **Entropy data:** A pre-pass removes the byte stuffing (`FF 00`) and records the restart markers. After that, every bit position is a plain number, and the bit reader needs no marker check in the hot path.
 - **Huffman:** 10-bit lookup; for AC additionally a combined table (code + extra bits → run, value, length).
+- **IDCT:** ports of libjpeg-turbo's IDCTs written on fixed-width lane arrays that the compiler vectorizes; no hand-written AVX2/NEON kernels.
 - **Parallel without restart markers** (Weißenberger & Schmidt):
-  1. Speculative: Each thread decodes its section from a guessed position and records the bit position and DC sums at every MCU start.
+  1. Speculative: Each thread decodes its section from a guessed position and records the bit position and DC sums at every MCU start. A guess that runs into an invalid code restarts one bit later.
   2. Synchronize: Each thread decodes past its end until it hits a recorded state of its successor. From there on, both are identical.
   3. Prefix sums yield the absolute MCU number and the DC predictors at every recorded MCU start.
   4. Final: The threads decode MCU row bands from the known state and write directly into their own band of the planes (safe Rust, `split_at_mut`).
 - **With restart markers**, step 1 is exact and step 2 is dropped.
-- **Fallback:** Arithmetic coding, 12-bit, lossless and CMYK stay with libjpeg-turbo.
+- **Progressive:** All scans are read up front; with multiple threads each scan runs in its own thread, row by row behind the scans it depends on (same component, overlapping band). Coefficients sit in block rows behind mutexes, are allocated only on first access and released during the parallel IDCT. Refinement scans keep a mask of the non-zero coefficients per block. Limit: the last Y refinement scan (3.7 MB) alone takes approx. 100 ms; without knowing the block number it cannot be split speculatively, so it only gets faster through a faster sequential decoder.
+- **Sequential files** decode and transform each block in one pass (no entropy/IDCT pipeline).
+- **Where it runs:** `decode::decode_with(data, req, threads)` uses `blinzel-jpeg` only for multi-threaded, non-region decodes, i.e. the visible image on all P-cores. Prefetch and thumbnails (one thread) and regions stay with libjpeg-turbo.
+- **Fallback:** Arithmetic coding, 12-bit, lossless, CMYK and other four-component files, three components that are not YCbCr, 4:1:1 and other unusual subsampling, and corrupt entropy data are declined and go to libjpeg-turbo. libjpeg-turbo in turn hands 12-bit files to the system decoder (none on Linux).
+
+Behavior: [jpeg-decoder.md](jpeg-decoder.md). Measurements: [section 15](#jpeg-decoder-m3).
 
 ## 4. Architecture
 
-| Crate | Contents | Status |
-|---|---|---|
-| `blinzel-core` | pixel buffers, buffer pool, format detection, decoders (JPEG/turbojpeg, PNG, GIF, own BMP), EXIF/MPF, layout, selection, natsort, file list, scheduler, LRU, CPU reference renderer, timing, settings, export | 🟡 (tested on Linux) |
-| `blinzel-ui` | Platform-independent interface: state machine `App`, loader, thumbnail pool, grid/filmstrip, menu model, color management cache, settings file. Talks only to the traits in `backend.rs` (`Device`, `Canvas`, `Host`, `Services`), which each platform shell in `blinzel-app` implements natively (Windows: Direct3D 11/Win32). | 🟡 (tested on Linux; Windows unchanged) |
-| `blinzel-jpeg` | strict marker parser; parallel decoder (Huffman, 8-bit, sequential and progressive) into YCbCr planes, byte-identical with libjpeg-turbo | 🟡 |
-| `blinzel-i18n` | `i18n/*.toml` → static tables (DE/EN) | 🟡 |
-| `blinzel-bench` | corpus + library-vs-in-house benches (JSON) | 🟡 |
-| `blinzel-app` | The three shells around `blinzel-ui`. Windows (`blinzel.exe`): Win32 window, menu, D3D11 renderer, WIC, clipboard, dialogs, setup, updater, `--bench`. Linux (`src/linux/`): winit, wgpu renderer (`blinzel.wgsl`), cosmic-text, rfd, arboard, notify, Little CMS, X11 display profile, `--install`. macOS (`src/macos/`): AppKit, Metal renderer (`blinzel.metal`), Core Text, ImageIO, menu bar, NSPasteboard. Shared by Linux and macOS: updater flow (`selfupdate.rs`), downloads via `curl`, Little CMS (`lcms.rs`). | 🟡 |
-| `blinzel-release` | Release tool: Ed25519 keys and signature of the checksums, license notices per platform (`THIRD-PARTY-NOTICES*.txt`), the macOS app bundle (`macos-bundle`) | 🟡 |
-| `blinzel-race` | Competitive benchmark (M8): test images with color signature, Desktop Duplication on all monitors, open/next/rapid fire | 🟡 |
-| `website/` + `blinzel-site` | Website for Cloudflare Workers (M8): static, DE/EN, charts as inline SVG from `website/data/race.json` | 🟡 |
+| Crate | Contents |
+|---|---|
+| `blinzel-core` | pixel buffers, buffer pool, format detection, probe and native decoders (JPEG via libjpeg-turbo and `blinzel-jpeg`, PNG, GIF, own BMP, WebP, JPEG XL, TIFF, AVIF, HEIC behind the feature `heic`), raw probe, EXIF/MPF, ICC and 3D LUT, layout, selection, natsort, file list, grid geometry, scheduler, LRU, CPU reference renderer, thumbnails and their cache, batch engine (feature `batch`), export, update decisions, screenshot files, timing, settings |
+| `blinzel-ui` | Platform-independent interface: state machine `App`, loader, thumbnail pool, grid/filmstrip, menu model, UI-drawn popup menu and dialogs (batch, screenshot overlay), color management cache, settings file. Talks only to the traits in `backend.rs` (`Device`, `Canvas`, `Host`, `Services`), which each platform shell in `blinzel-app` implements natively. |
+| `blinzel-jpeg` | strict marker parser; parallel decoder (Huffman, 8-bit, sequential and progressive) into YCbCr planes, byte-identical with libjpeg-turbo |
+| `blinzel-i18n` | `i18n/*.toml` → static tables (nine languages, §8) |
+| `blinzel-bench` | corpus + library-vs-in-house benches (JSON) |
+| `blinzel-app` | The three shells around `blinzel-ui`. Windows (`blinzel.exe`): Win32 window, menu, D3D11 renderer, WIC, Windows Color System, clipboard, dialogs, setup, updater, tray, screenshots, `--bench`. Linux (`src/linux/`): winit, wgpu renderer (`blinzel.wgsl`), cosmic-text, rfd, arboard, notify, X11 display profile, `--install`. macOS (`src/macos/`): AppKit, Metal renderer (`blinzel.metal`), Core Text, ImageIO, menu bar, NSPasteboard, menu bar icon, screenshots. Shared by Linux and macOS: updater flow (`selfupdate.rs`), downloads via `curl`, Little CMS (`lcms.rs`). |
+| `blinzel-release` | Release tool: Ed25519 keys and signature of the checksums, license notices per platform (`THIRD-PARTY-NOTICES*.txt`), the macOS app bundle and disk image (`macos-bundle`, `macos-dmg`) |
+| `blinzel-race` | Competitive benchmark (M8): test images with color signature, screen capture on all monitors (Desktop Duplication, ScreenCaptureKit), open/next/rapid fire |
+| `website/` + `blinzel-site` | Website for Cloudflare Workers (M8): static, DE/EN, charts as inline SVG from `website/data/race.json` and `race-macos.json` |
 
 ## 5. Core principles: startup and browsing
 
-- 🟡 **Parallel cold start:**
+- **Parallel cold start (Windows):**
   - The single-instance handoff (`WM_COPYDATA` + `AllowSetForegroundWindow`) comes first.
-  - Then the decode job is queued, and `d3d11.dll` is loaded via `LoadLibrary` on a worker.
-  - The window is created cloaked, with `DWMWA_TRANSITIONS_FORCEDISABLED` and `WS_EX_NOREDIRECTIONBITMAP`.
-  - The folder listing is built in the background.
-  - The window is uncloaked with the first image, after 400 ms at the latest.
-  - *Deviation from the original plan:* Instead of reading the header before `CreateWindow`, the still invisible window is resized to the image size before uncloaking. The result is the same, it just does not block.
-- 🟡 **Shaders:** precompiled with fxc. COM, WIC, Direct2D and DirectWrite start only when needed; DirectWrite is warmed up after the first present.
-- 🟡 **Embedded camera preview** first, if it is at least half the size of the screen. For raws it replaces the stage if it covers it (see gate table).
-- 🟡 **Prefetch scheduler:**
-  - Two stages (I/O, CPU), priorities, generation cancel.
-  - Direction-dependent: 4 ahead, 2 back.
-  - Every file is read only once; one job delivers preview and stage.
-- 🟡 **GPU:**
+  - Then the decode job is queued, and `d3d11.dll` is loaded via `LoadLibrary` on a device thread.
+  - The window is created cloaked, with `DWMWA_TRANSITIONS_FORCEDISABLED`. It keeps its redirection surface (no `WS_EX_NOREDIRECTIONBITMAP`), because the first image is painted with GDI.
+  - Instead of reading the header before `CreateWindow`, the still invisible window is resized to the image size before uncloaking. The result is the same, it just does not block.
+  - The window is uncloaked with the first image, or 400 ms after the device and swap chain are ready at the latest.
+  - The folder listing starts in the background once the `App` exists, i.e. after the device.
+- **First image via GDI (Windows):** Device creation takes longer than reading and decoding. The loader therefore renders the first decoded image itself on the CPU (`blinzel_core::preview`, the same geometry as the GPU); the UI thread pumps messages instead of waiting for the device and shows it with `SetDIBitsToDevice`. Direct3D takes over as soon as the device is ready. The window is shown without activation (`SW_SHOWNA`, saves approx. 20 ms) and takes the foreground after the first image.
+- **Linux and macOS:** the first job is queued before the event loop starts, the window is created invisible, the device is created on the UI thread after the window, and the window becomes visible with the first presented image. No early CPU image; the shaders are compiled at run time (WGSL, Metal source).
+- **Shaders (Windows):** precompiled with fxc. COM, WIC, Direct2D and DirectWrite start only when needed; DirectWrite is warmed up after the first present.
+- **Delay-load** for shell32/ole32/oleaut32/shlwapi measured: startup until `main` stays at 20–23 ms (that is the process creation itself). No delay-load.
+- Behavior: [startup.md](startup.md). Measurements: [section 15](#startup-time).
+- **Embedded camera preview** first: for the current image and the next one, a preview that covers at least half the screen box in width or height and has under a third of the image's pixels (or any raw's preview) is shown before the stage. For raws it replaces the stage if it covers what the stage needs (see gate table). Behavior: [image-formats.md](image-formats.md).
+- **Prefetch scheduler:**
+  - Two stages (I/O, CPU), priorities; a new navigation replaces the wanted set, which cancels jobs that are no longer wanted.
+  - Direction-dependent: by default 4 ahead, 2 back (settings `prefetch_ahead`/`prefetch_behind`, 0–32).
+  - One job reads the file once and delivers preview and stage; the full-resolution stage when zoomed and the animation stage read it again.
+- **GPU:**
   - Tile textures (4096, with border), upload directly from workers.
-  - VRAM budget via `QueryVideoMemoryInfo`.
+  - VRAM budget per platform (Windows from `QueryVideoMemoryInfo`, Linux fixed, macOS from the device's recommended working set).
   - EXIF orientation as a transform, never rotate pixels.
-- 🟡 **I/O:**
+- **I/O:**
   - `ReadFile` with buffer pool, no mmap.
   - Cloud placeholders are skipped during prefetch.
-  - HDD detection (seek penalty) → 1 I/O thread.
-- 🟡 **Hybrid CPUs:** workers only on P-cores (EfficiencyClass), ABOVE_NORMAL, without power throttling.
-- 🟡 **Robust:** no `panic=abort`, every decode runs in `catch_unwind`.
-- ✅ **Delay-load** for shell32/ole32/oleaut32/shlwapi measured: startup until `main` stays at 20–23 ms (that is the process creation itself). No delay-load.
-- 🟡 **Resident mode (M6, setting, off by default):**
-  - Closing hides the window instead of ending the process. Image, folder listing, textures and buffers are released; device, shaders and decoder threads stay warm.
-  - A second start only hands over the file (`WM_COPYDATA`). The hidden window comes back cloaked, is uncloaked with the first frame and then takes the foreground.
-  - Without "Open images in the same window", the handoff only goes to a hidden instance, and closing only hides if there is no hidden one yet.
-  - Tray icon (Show, Open…, Exit), re-registered after an Explorer restart (`TaskbarCreated`).
-  - Start at sign-in via `HKCU\…\Run` (`blinzel.exe --resident`) as long as the setting is on. Uninstalling removes the entry and ends running instances beforehand.
-  - The `--resident` start warms up decode, upload and present once (generated JPEG at screen size; for this the window is cloaked once and shown as a tool window, i.e. without a taskbar button).
-  - If an update has been installed in the meantime, the hidden instance starts the new version the next time it hides.
-  - A woken instance reloads the settings; a hidden one does not save on exit (its copy may be stale).
-- 🟡 **ICC color management (M6, setting, on by default):**
-  - Embedded profiles from JPEG (APP2 `ICC_PROFILE`) and PNG (`iCCP`) end up in the `Probe`; images without a profile are treated as sRGB.
-  - The target is the profile of the monitor the window is on (`GetICMProfileW`). If "Advanced color" is active there (Auto Color Management or HDR), DWM converts from sRGB itself; the target is then sRGB.
-  - Our own check recognizes sRGB profiles by their primaries and tone curve. If source and target are sRGB (the normal case), nothing happens: no DLL loading, no shader work.
-  - Otherwise the Windows Color System (`mscms`, all profile types) builds a 3D LUT with 33³ points (16-bit), cached per profile pair. The image shader applies it trilinearly after filtering, before compositing with the background; the CPU reference and the first GDI image do the same.
-  - When moving to another monitor (or on `WM_DISPLAYCHANGE`), the target is determined anew.
-  - `GetICMProfileW` loads the ICM subsystem on the first call (approx. 7 ms, which at startup competed with decode and device: first GDI image and Direct3D frame each approx. 7 ms later). Therefore a start uses the target of the last run (`%LOCALAPPDATA%\amigo-blinzel\display-color.txt`) and asks Windows only after the first frame; if the answer differs, it redraws. After that, no measurable difference in A/B anymore.
+  - HDD detection (seek penalty of the startup file's drive) → 1 I/O thread.
+- **Hybrid CPUs (Windows):** the number of decode workers follows the number of P-cores (highest `EfficiencyClass`, 2–6), and the visible image decodes on as many threads as there are P-cores; the loader's workers and the JPEG decoder's helper threads run ABOVE_NORMAL without power throttling. There is no CPU-set affinity, so the OS still places the threads.
+- **Robust:** no `panic=abort`, every decode runs in `catch_unwind`.
+- Behavior: [browsing.md](browsing.md).
+- **Resident mode (M6, setting, off by default; Windows and macOS):** Closing hides the window instead of ending the process. Image, folder listing, textures and buffers are released; device, shaders and decoder threads stay warm. A second start only hands over the file; the hidden window comes back cloaked, is uncloaked with the first frame and then takes the foreground. On Windows the `--resident` start warms up decode, upload and present once with a generated JPEG and shows the window once while cloaked as a tool window, because the first present of a window that was never visible costs extra in DWM. Behavior: [resident-mode.md](resident-mode.md). Measurements: [section 15](#resident-handoff).
+- **ICC color management (M6, setting, on by default):**
+  - Images without a profile are treated as sRGB. Our own check recognizes sRGB profiles by their primaries and tone curve. If source and target are sRGB (the normal case), nothing happens: no DLL loading, no shader work.
+  - Otherwise the platform's engine (Windows Color System `mscms` on Windows, Little CMS on Linux and macOS) builds a 3D LUT with 33³ points (16-bit), cached per profile pair. The image shader applies it trilinearly after filtering, before compositing with the background; the CPU reference and the first GDI image do the same.
+  - The target is the profile of the monitor the window is on. On Windows, if "Advanced color" is active there (Auto Color Management or HDR), DWM converts from sRGB itself; the target is then sRGB. Linux and macOS: §9.
+  - `GetICMProfileW` loads the ICM subsystem on the first call (approx. 7 ms, which at startup competed with decode and device: first GDI image and Direct3D frame each approx. 7 ms later). Therefore a Windows start uses the target of the last run (`%LOCALAPPDATA%\amigo-blinzel\display-color.txt`) and asks Windows only after the first frame; if the answer differs, it redraws. After that, no measurable difference in A/B anymore. Linux and macOS remember no target: they start with sRGB, ask when the window exists and again after the first frame.
   - A needed LUT is built in parallel with decoding (4–7 ms, cold with DLL loading). Display P3 image (24 MP) cold: first GDI image as without a profile; resident handoff with profile 24–26 ms. The `--resident` start preloads `mscms`.
-  - WebP profiles (and the EXIF orientation) are read by the native probe; for JPEG XL the profile describes the color space `jxl-oxide` renders into (sRGB yields no profile). TIFF profiles are also read by the native probe, HEIC profiles (`colr`/`prof`) by our own HEIF container reader, AVIF profiles by our own container reader (`colr`, nclx with P3 primaries as a generated profile), both also when WIC decodes. Profiles from WIC formats (HEIC, AVIF) are not read yet (comes with the native decoders in M5); grayscale and CMYK profiles yield no transform.
-- 🟡 **App icon:** `build.rs` draws the favicon motif and embeds it as ICO (DIB up to 64 px, PNG for 256 px). Window, taskbar, tray and Start menu shortcut use it.
-- 🟡 **First image via GDI:** Device creation takes longer than reading and decoding. The loader therefore renders the first decoded image itself on the CPU (`blinzel_core::preview`, the same geometry as the GPU); the UI thread pumps messages instead of waiting for the device and shows it with `SetDIBitsToDevice`. Direct3D takes over as soon as the device is ready. The window is shown without activation (`SW_SHOWNA`, saves approx. 20 ms) and takes the foreground after the first image.
+  - Profiles are read by the probe for JPEG, PNG, WebP, TIFF, JPEG XL (the color space `jxl-oxide` renders into; sRGB yields no profile), and by our own HEIF container reader for HEIC and AVIF (`colr`/`prof`, nclx with P3 primaries as a generated profile), also when WIC decodes. Grayscale and CMYK profiles yield no transform.
+  - Behavior: [color-management.md](color-management.md).
+- **App icon:** `build.rs` draws the favicon motif and embeds it as ICO (DIB up to 64 px, PNG for 256 px). Window, taskbar, tray and Start menu shortcut use it.
 
 ## 6. UI and window behavior
 
-- 🟡 **Frameless window:**
-  - `WM_NCCALCSIZE` removes the caption; borders and shadow remain.
-  - Top resize border and drag strip via `WM_NCHITTEST`.
-  - Snap layouts via `HTMAXBUTTON`.
-- 🟡 **Controls:** ☰ + min/max/close as SDF shapes over the image, with halo and hover areas (close in red).
-- 🟡 **Hamburger menu:** native `TrackPopupMenuEx` in dark mode (uxtheme 135/133/136), localized.
-- 🟡 **View modes** (1/2/3), zoom around the cursor (wheel, +/−, 0), pan (mouse, arrows on overflow), full screen (F11, Enter, double-click), rotation in the view only (R/L).
-- 🟡 Mode 1 ("original size"): The window follows every image, limited to the work area and centered on its middle.
-- 🟡 An empty start shows a hint; drag & drop, Ctrl+O, Del (Recycle Bin), mouse back/forward.
-- 🟡 Filmstrip (T) and grid (G), see below.
+- **Frameless window:** on Windows `WM_NCCALCSIZE` removes the caption, borders and shadow remain, the top resize border and drag strip come from `WM_NCHITTEST`, snap layouts from `HTMAXBUTTON`. Linux uses a frameless winit window, macOS content under the transparent title bar. Behavior: [platform-shells.md](platform-shells.md).
+- **Controls:** ☰ + min/max/close as SDF shapes over the image, with halo and hover areas (close in red).
+- **Menu:** one menu model (`blinzel_ui::menu`) for all shells: on Windows the native `TrackPopupMenuEx` in dark mode (uxtheme 135/133/136), on macOS the menu bar and an NSMenu context menu, on Linux a popup drawn by the UI. Localized.
+- **Viewing:** view modes (1/2/3), zoom, pan, full screen, rotation in the view only, the window following the image, the empty-start hint, opening and deleting. Behavior: [viewing.md](viewing.md).
+- **Window placement:** remembered on Windows only (`GetWindowPlacement` into the settings, `SetWindowPlacement` at start; a maximized window is already maximized while cloaked so that the first image is computed for the real size). Behavior: [platform-shells.md](platform-shells.md).
+- Filmstrip (T) and grid (G), see below.
 
 ### Thumbnails (M4)
 
 - **Generation** (`blinzel_core::thumb`): edge 256 px (Explorer size; at 150 % scaling that is enough for 160 px tiles).
-  - The source is the smallest one that covers the tile: an embedded preview (EXIF/MPF) if it is large enough and the aspect ratio matches (EXIF thumbnails often have bars), otherwise the image itself with DCT scaling (JPEG down to 1/8).
+  - The source is the smallest one that covers the tile: an embedded preview (EXIF/MPF) if it is large enough and the aspect ratio matches (EXIF thumbnails often have bars), otherwise the image itself with DCT scaling (JPEG down to 1/8, through libjpeg-turbo on one thread).
   - One thread per image, many images in parallel on the background pool; the view has priority.
-  - Downscaling with exact area averaging (separable box filter with fractional weights), output BGRA; the EXIF orientation is applied when drawing.
-- **Cache** (benchmark gate against the Windows thumbnail cache `IShellItemImageFactory`): own pack file under `%LOCALAPPDATA%\amigo-blinzel\thumbs\`.
-  - `thumbs.pack`: appended entries (JPEG, quality 85, approx. 10–15 KB per thumbnail).
-  - `thumbs.idx`: log of fixed-size records (path hash, size and modification time of the file, offset, length, dimensions, orientation), loaded into a hash table on first access.
+  - Downscaling with exact area averaging (separable box filter with fractional weights) per YCbCr plane, converted to BGRA once at target size; the EXIF orientation is applied when drawing. Only this per-plane reduction reached the targets: `Image::to_bgra` (exact, float, bilinear chroma) cost 1.8 ms per 256 thumbnail and 15 ms per 1/8 decode.
+- **Cache** (benchmark gate against the Windows thumbnail cache `IShellItemImageFactory`): own pack file in the per-user cache folder (`%LOCALAPPDATA%\amigo-blinzel\thumbs\`, `~/Library/Caches/…`, `$XDG_CACHE_HOME/…`).
+  - `thumbs.pack`: appended entries, JPEG quality 85 4:2:0 for opaque thumbnails (approx. 10–15 KB each), PNG for thumbnails with alpha.
+  - `thumbs.idx`: log of 64-byte records (path hash, size and modification time of the file, offset, length, dimensions, full size, orientation, format, checksum), loaded into a hash table on first access.
   - A stale entry (size or time changed) is regenerated. Above 1 GB a new generation begins (pack and index are replaced).
-  - Multiple instances: appending under a named mutex; what another instance has written is only seen on the next load (duplicates do no harm).
-- **GPU:** atlas pages with 64 slots for 256 thumbnails in YCbCr 4:2:0 (2048² R8 for Y, 1024² R8G8 for Cb/Cr, 6 MB per page, at most 8 pages), LRU; the shader converts to RGB. Thumbnails from the cache (JPEG) go into the atlas as planes without a detour through RGB, 1.5 instead of 4 bytes per pixel. A grid with 200 tiles is 200 small draws.
-- **Interface** (both off by default, in the "View" menu and via key):
-  - Filmstrip (T, setting) at the bottom with the neighbors of the current image; the image gets the area above. Click opens, wheel flips.
-  - Grid (G) over the whole window for the folder: click selects, double-click, Enter or Space opens, arrows/Page Up/Page Down/Home/End move the selection, wheel scrolls, Esc or G closes.
-  - What is visible is requested first, then the next and the previous page; the pool runs at normal priority, the displayed image decodes above it.
-- **Measurement** (`blinzel-bench thumbs <dir> [--count N] [--threads T]`): cold (without cache) thumbnails per second over a folder with 12-MP JPEGs with sensor noise (approx. 4 MB per file), warm 200 tiles from the cache. Targets from section 12: cold ≥ 150/s, 200 from the cache ≤ 30 ms.
-- **Status (Ryzen 7 PRO 6850H, 16 threads):** cold 287/s (1 thread: 26/s), saving 1.1–1.3 ms per thumbnail (12.6 KB), warm 200 in 23.6 ms (1 thread: 0.9 ms per thumbnail). Only the per-plane conversion to target size achieved this: `Image::to_bgra` (exact, float, bilinear chroma) cost 1.8 ms per 256 thumbnail and 15 ms per 1/8 decode.
-- For comparison, on the same files the Windows thumbnail provider and cache: cold 18/s, warm 432–446 ms for 200.
-- **End to end in the app** (`blinzel --bench`, `thumb_grid_200`: open the cache, read and decode 200, load into the atlas, draw the grid, GPU done): **16 ms** median (target ≤ 30 ms). With a BGRA atlas it was 37–69 ms; the upload and the conversion to RGB made the difference.
-- 🟡 Remember window position and size: on close (and hide) `GetWindowPlacement` into the settings, on start `SetWindowPlacement` as long as a monitor is still there; a maximized window is still maximized while cloaked so that the first image is computed for the real size. Visual check open.
+  - Multiple instances: appending under an exclusive OS file lock on `thumbs.idx`; what another instance has written is only seen on the next load (duplicates do no harm).
+- **GPU:** atlas pages with 64 slots for 256 thumbnails in YCbCr 4:2:0 (2048² R8 for Y, 1024² R8G8 for Cb/Cr, 6 MiB per page, at most 8 pages), LRU; the shader converts to RGB. Thumbnails from the cache (JPEG) go into the atlas as planes without a detour through RGB, 1.5 instead of 4 bytes per pixel. A grid with 200 tiles is 200 small draws. With a BGRA atlas the grid took 37–69 ms instead of 16 ms.
+- **Interface:** filmstrip and grid, both off by default; what is visible is requested first, then the next and the previous page; the pool runs at normal priority, the displayed image decodes above it.
+- Behavior: [thumbnails.md](thumbnails.md). Measurements: [section 15](#thumbnail-speed-m4).
 
 ## 7. Selection, copy, cut, save
 
-Principle: image files are never overwritten. Saving happens only via "Save as", with the Windows overwrite confirmation.
+Principle: the viewer never writes to an image file by itself. A cutout is saved only through "Save as", where the user picks the target in the system dialog; an existing target (the source file included) is replaced only after the system's overwrite confirmation. Whether that confirmation suffices is an open question in [selection-and-export.md](selection-and-export.md).
 
-- 🟡 **Selection rectangle** in full-resolution coordinates:
-  - Handles, moving, size display `W × H` via DirectWrite.
-  - Dimmed surroundings.
-  - Ctrl+A, Esc.
-- 🟡 **Ctrl+C** with delayed clipboard rendering (`CF_DIBV5` + `PNG`): only the region is decoded, at full resolution and only when pasting.
-- 🟡 **Ctrl+X:** copy and crop the view to the selection (pure view state). Esc or "Show original" restores the image.
-- 🟡 **Ctrl+S "Save cutout as…"** (selection, otherwise crop):
-  - **Lossless JPEG** if the source is a JPEG, the cutout starts on MCU boundaries and no view rotation is active.
-    - Implemented via `tj3Transform` crop, without re-encoding, very fast.
-    - The EXIF data is preserved, including the orientation.
-    - The stale EXIF thumbnail is detached, the MPF segment removed.
-  - **Otherwise:**
-    - Decode the region at full resolution and orient it.
-    - Save as JPEG (quality 95, subsampling of the source, ICC profile carried over) or as PNG.
-  - Runs on a background thread; errors appear as a message.
+- **Selection** in full-resolution coordinates; the size label is drawn by the shared UI text on every platform.
+- **Ctrl+C:** on Windows with delayed clipboard rendering (`CF_DIBV5` + `PNG`): only the region is decoded, at full resolution and only when pasting, so copying itself costs nothing. Linux and macOS decode the region on a background thread right after the copy and offer PNG.
+- **Ctrl+X:** copy and crop the view to the selection (pure view state).
+- **Ctrl+S "Save cutout as…":** lossless via `tj3Transform` crop (no re-encoding, EXIF kept) where source and target are JPEG and the cutout starts on MCU boundaries without view rotation; otherwise the region is decoded at full resolution, oriented and encoded (JPEG, PNG, WebP or AVIF, with the batch encoders), on a background thread.
+- Behavior: [selection-and-export.md](selection-and-export.md).
 
 ### Batch processing: resize (M9)
 
 Principle as above: source files stay unchanged. Every output is a new file; a name that already exists gets a number (` (2)`) instead of being replaced.
 
-- ✅ **Engine** `blinzel-core::batch` (feature `batch`), tested on Linux:
-  - Size in display orientation: long edge, width, height, fit in box, fill box (center crop, i.e. fixed aspect ratio), percent; "don't enlarge" as the default.
+- **Engine** `blinzel-core::batch` (feature `batch`), the same on all platforms:
   - JPEG is decoded smaller via DCT scaling as long as at least twice the target size remains.
-  - Scale in linear light (gate above), then rotate into display orientation, optionally sharpen (unsharp mask).
-  - Formats: JPEG (libjpeg-turbo; from quality 90 without chroma subsampling, transparency onto white), PNG, WebP (libwebp, lossy or lossless), AVIF (rav1e via `ravif`), "as source" (JPEG/PNG/WebP/AVIF stay, otherwise PNG with transparency, otherwise JPEG). Animations: the first frame.
-  - Metadata: EXIF from JPEG, PNG, WebP, HEIF/AVIF and JPEG XL is rewritten, not patched: orientation 1, new pixel dimensions, without IFD1 preview and MakerNote, GPS removed on request. The ICC profile of the source is embedded (AVIF: `colr`/`prof` next to nclx). Checked with Pillow and `avifdec`.
-  - Names by pattern: `{name}`, `{ext}`, `{n}`/`{n:3}`, `{w}`, `{h}`, `{date}` (EXIF capture time, otherwise modification time in local time; `{date:DD.MM.YYYY_hh-mm}` with `YYYY YY MM DD hh mm ss`); target folder relative to the source (default `resized`).
-  - Writing: temporary file, then via hard link to the free name (fails instead of replacing; without hard links, rename).
-  - Names planned in advance (`batch::plan`): from the header and EXIF of each file, in list order with numbers for identical names; the run writes exactly these paths (only if one has been taken in the meantime, the next number). Every intermediate file has its own name, even with the same target name.
-  - Parallel across files (one decode thread per file), limited by a memory budget; a broken file is reported, the rest continues; cancel.
-- ✅ **Measurement** (`blinzel-bench batch`, Linux container, 4 vCPU, 24 12-MP JPEGs with sensor noise, long edge 1920): JPEG 8.6/s (431 KB per file), WebP 5.1/s (213 KB), AVIF 1.1/s (73 KB, rav1e speed 6). For comparison ImageMagick on the same files (`convert -resize 1920x1920`, 4 processes): 2.1/s.
-- ✅ **Dialog in the app** (menu "Resize images…", Ctrl+B): modal panel over the viewer, the same code on all platforms (`blinzel-ui/src/batch_dialog.rs`, controls in `widgets.rs`). Size mode, dimensions, "don't enlarge", format, quality, lossless (WebP), sharpen, metadata/GPS/color profile, name pattern, target folder (system dialog "…"). Runs in the background with progress, cancel, report (first errors) and "Open folder". The settings are kept for the session.
-- ✅ **File list via drag & drop** (`blinzel-ui/src/batch_files.rs`): The dialog starts empty; images and folders (without subfolders) are dragged in, headers read in the background. The list shows old → new for each file with real size and real date, unreadable files in red; × removes, "Remove all" clears. Without an open dialog, a drop opens the image as before. On macOS a drop handler is still missing; local time for modification dates only on Windows (otherwise UTC).
-- ✅ **Multi-selection in the grid:** Ctrl+click, Shift+click (range), Ctrl+A, Esc clears; marked tiles with a check mark.
-- ✅ **"Save cutout as"** also as WebP and AVIF (the same encoders).
-- ⬜ Comparison with `vipsthumbnail` and XnConvert in `blinzel-race`.
+  - Scale in linear light with our own resampler (gate above), then rotate into display orientation, optionally sharpen (unsharp mask).
+  - Encoders: libjpeg-turbo, `png`, libwebp, AVIF via rav1e (`ravif`).
+  - Metadata: EXIF is rewritten, not patched: orientation 1, new pixel dimensions, without IFD1 preview and MakerNote, GPS removed on request, so no stale preview or orientation survives. The ICC profile of the source is embedded (AVIF: `colr`/`prof` next to nclx). Checked with Pillow and `avifdec`.
+  - Names are planned in advance from header and EXIF, in list order, with numbers for identical names.
+  - Writing: temporary file, then via hard link to the free name, which fails instead of replacing; without hard links, rename after checking the name is free.
+  - Parallel across files (one decode thread per file), limited by a memory budget.
+- **Dialog in the app** (Ctrl+B): modal panel over the viewer, the same code on all platforms (`blinzel-ui/src/batch_dialog.rs`). The file list is filled by drag and drop (Windows and Linux; on macOS a drop opens the first file, so the list cannot be filled there). The grid's multi-selection is not connected to the dialog.
+- Behavior: [batch-resize.md](batch-resize.md). Measurements: [section 15](#batch-m9).
 
 ## 8. Localization
 
-- 🟡 `i18n/<sprache>.toml`; `build.rs` generates `enum Msg` and static tables. At runtime a translation is just an array index.
-- 🟡 Missing keys fall back to English (build warning). Placeholder errors abort the build.
-- 🟡 Language selection via `GetUserPreferredUILanguages`; can be overridden in the menu, without a restart.
-- 🟡 Plural rules (CLDR families).
-- 🟡 RTL languages: `[meta] direction = "rtl"` in `i18n/<sprache>.toml` yields `Lang::is_rtl()`. The app then mirrors the controls (menu on the right, window buttons on the left), opens menus mirrored (`TPM_LAYOUTRTL`) from the right edge, sets the reading direction of DirectWrite and of the message boxes (`MB_RTLREADING`) and swaps ← and → when flipping through images. Open: filmstrip/grid and the setup dialog stay left-to-right; we do not ship an RTL language yet (translation by native speakers needed).
+- `i18n/<code>.toml`; `build.rs` generates `enum Msg` and static tables. At runtime a translation is just an array index, so there is no parsing at startup.
+- Missing keys fall back to English (build warning). Placeholder errors abort the build.
+- Plural rules (CLDR families).
+- Language: from the system (Windows `GetUserPreferredUILanguages`, macOS `NSLocale.preferredLanguages`, Linux `LANGUAGE`/`LC_ALL`/`LC_MESSAGES`/`LANG`); can be overridden in the menu, without a restart.
+- RTL languages: `[meta] direction = "rtl"` yields `Lang::is_rtl()`. The app then mirrors the controls and the UI-drawn menu and swaps ← and → when flipping through images; on Windows it also opens native menus mirrored (`TPM_LAYOUTRTL`) and sets the reading direction of DirectWrite and of the message boxes (`MB_RTLREADING`). Not mirrored: filmstrip, grid, the batch dialog and the other UI-drawn dialogs, the setup dialog, text direction on Linux and macOS, the macOS menu bar. We do not ship an RTL language yet (translation by native speakers needed).
+- Behavior: [localization.md](localization.md).
 
 ## 9. Platforms
 
@@ -254,223 +217,142 @@ Only versions with Microsoft support. As of October 2026:
 Windows 10 is not supported: support has ended for Home/Pro, only Commercial ESU and LTSC are still running.
 
 **Consequences:**
-- 🟡 Minimum Direct3D feature level 11_0 and Shader Model 5. Every Windows 11 device has a DX12/WDDM 2 GPU. No FL 10 fallbacks.
-- 🟡 Version check: build < 26100 → localized message at startup or in the installer.
-- 🟡 Application manifest: supportedOS, PerMonitorV2, longPathAware, UTF-8 code page.
-- 🟡 ARM64 build in CI (cross from x64); tests run on x64.
+- Minimum Direct3D feature level 11_0 and Shader Model 5. Every Windows 11 device has a DX12/WDDM 2 GPU. No FL 10 fallbacks.
+- Version check: build < 26100 → localized message at startup or in the installer.
+- Application manifest: supportedOS, PerMonitorV2, longPathAware, UTF-8 code page.
+- ARM64 build in CI (cross from x64); tests run on x64.
 - Usable without fallbacks: EcoQoS, CPU sets, snap layouts, dark mode attributes, WIC codecs for HEIF, AVIF and WebP (as far as the Store extensions are installed).
 
 ### macOS and Linux (M10, M11)
 
-The shells implement the same traits as Windows (`Device`, `Canvas`, `Host`, `Services` in `blinzel-ui/src/backend.rs`). The uniforms of each draw call come from `blinzel_ui::draws` for wgpu and Metal; the shaders are line-by-line ports of `blinzel.hlsl` and, like WARP, are checked against the CPU reference renderer (lavapipe in the Linux CI, the Metal device of the macOS runner).
+The shells implement the same traits as Windows (`Device`, `Canvas`, `Host`, `Services` in `blinzel-ui/src/backend.rs`). The uniforms of each draw call come from `blinzel_ui::draws` for wgpu and Metal; the shaders are line-by-line ports of `blinzel.hlsl` and, like WARP, are checked against the CPU reference renderer (lavapipe in the Linux CI, the Metal device of the macOS runner). What each shell provides: [platform-shells.md](platform-shells.md).
 
 **Linux:**
-- 🟡 Frameless winit window (the borders resize, the top strip moves), menu and dialogs drawn by the app itself, file dialogs via the xdg portal (rfd), trash, clipboard, folder watching (inotify), single instance via a Unix socket.
-- 🟡 Color management via Little CMS; under X11 the target is the profile that colord or KDE publish as `_ICC_PROFILE` on the root window (mapped to the window's monitor via RandR). Wayland has no protocol for this yet: sRGB there.
-- 🟡 `blinzel --install` / `--uninstall`: `~/.local/share/amigo-blinzel/`, link `~/.local/bin/blinzel`, desktop entry with MIME types, icon; app id/WM_CLASS match the entry.
-- 🟡 Updater as on Windows for the installed copy; asset `amigo-blinzel-linux-<arch>` (the bare file), downloads via `curl`.
-- Not on Linux: resident mode and tray.
+- Frameless winit window, menu and dialogs drawn by the app itself, file dialogs via the xdg portal (rfd), trash, clipboard, folder watching (inotify), single instance via a Unix socket.
+- Color management via Little CMS; under X11 the target is the profile that colord or KDE publish as `_ICC_PROFILE` on the root window (mapped to the window's monitor via RandR). Wayland has no protocol for this yet: sRGB there.
+- `blinzel --install` / `--uninstall` per user (data in `$XDG_DATA_HOME`, else `~/.local/share`; link `~/.local/bin/blinzel`, desktop entry with MIME types, icon; app id/WM_CLASS match the entry). Updater as on Windows for the installed copy; asset `amigo-blinzel-linux-<arch>` (the bare file), downloads via `curl`.
+- Not on Linux: resident mode, tray and screenshots.
 
 **macOS:**
-- 🟡 NSWindow with content under the transparent title bar, `CAMetalLayer` as the view's layer, menu bar (application menu and "Image", filled from the menu tree when opened) and context menu as NSMenu, NSOpenPanel/NSSavePanel, Trash, clipboard (PNG), folder watching (FSEvents), files from the Finder via `application:openURLs:`, drag & drop.
-- 🟡 ImageIO as the system decoder: HEIC there first (hardware HEVC, Apple's license), RAW, TIFF and the rest as fallback; downscaled requests via the thumbnail path.
-- 🟡 Resident mode (`macos/resident.rs`): an icon in the menu bar (`NSStatusItem`, SF Symbol "eye") with the tray menu; closing the window hides it (`windowShouldClose:`), the app then leaves the Dock (activation policy "accessory") and keeps its GPU warm; the Dock icon, Finder or the menu wakes it. Start at sign-in via the LaunchAgent `~/Library/LaunchAgents/io.github.amigo-labs.blinzel.plist` (`blinzel --resident`, only for a copy in an app bundle). An update installed meanwhile takes over when the window is next hidden (`open -n -g … --args --resident`).
-- 🟡 Color management: the target is the display's profile (`CGDisplayCopyColorSpace`); the Metal layer has no color space of its own, so macOS shows its pixels unchanged, as on Windows.
-- 🟡 App bundle (`blinzel-release macos-bundle`): Info.plist with document types, icon (ICNS from the icon generator), universal binary via `lipo`, signed with our own self-signed certificate (ad hoc without it, see section 10), not notarized. The updater swaps the bundle; the previous one stays next to it for rollback.
-- 🟡 Download: `amigo-blinzel-macos.dmg` (`blinzel-release macos-dmg`: the bundle and a link to /Applications). The updater keeps fetching `amigo-blinzel-macos.zip`, which every release still carries, because installed copies look for that name.
+- NSWindow with content under the transparent title bar, `CAMetalLayer` as the view's layer, menu bar and context menu as NSMenu, NSOpenPanel/NSSavePanel, Trash, clipboard (PNG), folder watching (FSEvents), files from the Finder via `application:openURLs:`, drag & drop.
+- ImageIO as the system decoder: HEIC goes there first (hardware HEVC, Apple's license) and to the native decoder only if ImageIO fails; every other format goes to the native decoders first (AVIF included) and to ImageIO when they decline; downscaled requests via the thumbnail path.
+- Resident mode with an icon in the menu bar (`NSStatusItem`) instead of a tray; start at sign-in via a LaunchAgent, only for a copy in an app bundle. No warm-up at the `--resident` start.
+- Color management: the target is the display's profile (`CGDisplayCopyColorSpace`), the transform comes from Little CMS; the Metal layer has no color space of its own, so macOS shows its pixels unchanged, as on Windows.
+- App bundle (`blinzel-release macos-bundle`): Info.plist with document types, icon (ICNS from the icon generator), universal binary via `lipo`, signed with our own self-signed certificate (ad hoc without it, see section 10), not notarized. The updater swaps the bundle; the previous one stays next to it for rollback.
+- Download: `amigo-blinzel-macos.dmg` (`blinzel-release macos-dmg`: the bundle and a link to /Applications). The updater keeps fetching `amigo-blinzel-macos.zip`, which every release still carries, because installed copies look for that name.
 - dav1d assembly only on x86-64: the published `rav1d` does not contain `src/arm/asm-offsets.h`, which its ARM assembly files include. ARM64 (Mac and Linux) uses the Rust fallbacks.
 
 ## 10. Installation, updates, signing (M7)
 
 ### Setup exe
 
-- 🟡 **Release assets** per release on GitHub:
-  - `amigo-blinzel-setup-x64.exe` and `amigo-blinzel-setup-arm64.exe`; this is the same exe as the viewer.
+- **Release assets** per release on GitHub:
+  - Windows: `amigo-blinzel-setup-x64.exe` and `amigo-blinzel-setup-arm64.exe`; this is the same exe as the viewer.
+  - Linux: `amigo-blinzel-linux-<arch>` (the bare executable, for the updater) and `amigo-blinzel-linux-<arch>.tar.gz` (with `LICENSE` and notices), for x64 and arm64.
+  - macOS: `amigo-blinzel-macos.dmg` and `amigo-blinzel-macos.zip`.
   - `SHA256SUMS` and `SHA256SUMS.sig`.
-  - `THIRD-PARTY-NOTICES.txt` (the same license texts the exe shows in the menu).
-- 🟡 **Installation dialog:** When started as setup (file name contains `setup`, or `--install`), a dialog appears in the viewer's look, frameless and multilingual.
-- 🟡 **Per-user installation, without admin**, to `%LOCALAPPDATA%\Programs\amigo-blinzel\`:
-  - Start menu shortcut (`IShellLinkW`, AppUserModelID).
-  - Entry under `HKCU\…\Uninstall`.
-  - Create ProgIDs, Capabilities and RegisteredApplications.
-  - Then open the Default apps page (Windows does not allow setting it programmatically).
-  - `SHChangeNotify`.
-- 🟡 **Uninstallation:** via the system settings. The exe copies itself to `%TEMP%` and cleans up from there.
-- 🟡 **Silent mode:** `--install --silent` and `--uninstall --silent` (for winget).
-- 🟡 **Version check in setup:** build < 26100 → abort with a message.
-- 🟡 **winget manifest**; a PR to winget-pkgs after every release, optionally automated.
+  - `THIRD-PARTY-NOTICES.txt`, `THIRD-PARTY-NOTICES-linux.txt`, `THIRD-PARTY-NOTICES-macos.txt` (the same license texts each build shows in the menu).
+- **Setup mode:** When started as setup (file name contains `setup`, or `--install`), a dialog appears in the viewer's look, frameless and multilingual, drawn with the viewer's renderer.
+- **Per-user installation, without admin**, to `%LOCALAPPDATA%\Programs\amigo-blinzel\`: Start menu shortcut with AppUserModelID, "Installed apps" entry under `HKCU\…\Uninstall`, ProgIDs, Capabilities, RegisteredApplications, App Paths, then `SHChangeNotify`. Registry writes go to HKCU only.
+- **Default apps:** Windows does not allow setting the default viewer programmatically, so the setup's done screen offers a button that opens the Default apps page; silent mode never opens it.
+- **Uninstallation:** via the system settings. The exe copies itself to `%TEMP%` and cleans up from there.
+- **Silent mode:** `--install --silent` and `--uninstall --silent` (for winget).
+- **Version check in setup:** build < 26100 → abort with a message.
+- **winget:** `packaging/winget/` holds templates of the three manifests (scope user, silent switch, ProductCode = uninstall key); a person fills and submits them after a release.
+- Testability: installation runs through a `Layout` of real paths or a sandbox (temp folder, own HKCU branch).
+- Behavior: [installation.md](installation.md).
 
 ### No code signature
 
-- ✅ **Decided:** Releases are not signed with a code signing certificate (no SignPath, no Authenticode, no notarization on the Mac). Consequence: Windows SmartScreen warns on the first start ("More info" → "Run anyway"), and macOS Gatekeeper refuses the first start until it is allowed in System Settings → Privacy & Security; the download page explains both.
-- 🟡 **Mac: our own self-signed certificate** instead of an ad hoc signature. It is not trusted by Gatekeeper (the first start warning stays), but it gives the app a stable identity: macOS keeps permissions such as "Screen Recording" across updates, while an ad hoc signature changes with every build and loses them. `release.yml` imports it from the secrets `MACOS_SIGNING_CERT` (the .p12 as base64) and `MACOS_SIGNING_CERT_PASSWORD` into a temporary keychain and passes its SHA-1 hash to `blinzel-release macos-bundle` as `BLINZEL_MACOS_SIGN_IDENTITY`; without the secrets it signs ad hoc. It finds the certificate in the .p12 by itself, not by name.
+- **Decided:** Releases are not signed with a code signing certificate (no SignPath, no Authenticode, no notarization on the Mac). Consequence: Windows SmartScreen warns on the first start ("More info" → "Run anyway"), and macOS Gatekeeper refuses the first start until it is allowed in System Settings → Privacy & Security; the download page explains both.
+- **Mac: our own self-signed certificate** instead of an ad hoc signature. It is not trusted by Gatekeeper (the first start warning stays), but it gives the app a stable identity: macOS keeps permissions such as "Screen Recording" across updates, while an ad hoc signature changes with every build and loses them. `release.yml` imports it from the secrets `MACOS_SIGNING_CERT` and `MACOS_SIGNING_CERT_PASSWORD` into a temporary keychain and passes its SHA-1 hash to `blinzel-release macos-bundle` as `BLINZEL_MACOS_SIGN_IDENTITY`; without the secrets it signs ad hoc.
   - One certificate for all of amigo-labs' Mac apps (CN `amigo-labs`), as organization secrets shared with the selected repositories. Permissions such as Screen Recording belong to an app (bundle id plus certificate), so the apps do not share them. It must not be replaced: a new certificate makes every Mac ask for those permissions once more.
-  - `packaging/macos/create-signing-cert.sh` creates it (valid for ten years) in `~/amigo-labs-signing`, outside any repository, and sets both secrets through `gh` (organization admin rights needed). `--help` lists the options; another repository gets access with `create-signing-cert.sh --repos amigo-blinzel,amigo-pincel` (the full list, it asks for the .p12's password). Its .p12 uses 3DES/SHA-1, which macOS' `security import` reads everywhere and which needs no OpenSSL legacy provider (Git Bash on Windows has none). Keep `signing.p12` and its password safe.
-- 🟡 **Releases automatically via release-please** (as in amigo-native):
-  1. Every push to `main` creates or updates a release PR (`.github/workflows/release-please.yml`). It contains the next version in `Cargo.toml` and `Cargo.lock` as well as the `CHANGELOG.md` entry from the Conventional Commits since the last release. Before 1.0, `feat` bumps the second digit, `fix` the third; `docs`, `ci`, `chore` etc. do not trigger a release.
-  2. When the release PR is merged, release-please sets the tag `v<version>` and creates the release as a draft with the changelog.
-  3. Then `release.yml` builds all platforms, generates `SHA256SUMS`, signs them with Ed25519, attaches the files and publishes the release. Only then do the updaters see it.
-  - `release.yml` can also be started by hand for an existing tag.
-  - Configuration: `release-please-config.json` and `.release-please-manifest.json`. The manifest starts at 0.0.0, so the first release becomes 0.1.0. `bootstrap-sha` is the merge of PR #22.
-  - Optionally the secret `RELEASE_PLEASE_TOKEN` (fine-grained PAT with write access for contents and pull-requests), so that CI also runs on the release PR. Without a token, "Allow GitHub Actions to create and approve pull requests" must be on under Settings → Actions → General.
-- ✅ **Own signature of the checksums (Ed25519).** The app has the public key built in (`276b0fbd4a1f9eb68476f0b8a14c5cc0bab403cbca24bcf07d8cff333d3fa9b7`). It is the only proof of origin: the updater installs only what is signed with the release key.
-
-**Implementation (branch `m7-install`):**
-- `blinzel-app/src/setup/`: mode detection, installation via a `Layout` (real paths or a sandbox for tests), registry helpers for HKCU only, Start menu shortcut with AppUserModelID `amigo-labs.amigo-blinzel`, setup window with the viewer's renderer and DirectWrite (without Direct3D: message box).
-- Exit codes of the setup: 0 installed, 1 failed, 2 Windows too old, 3 cancelled.
-- `packaging/winget/`: templates of the three manifests (scope user, silent switch, ProductCode = uninstall key).
-- `.github/workflows/release.yml`: builds x64 and ARM64, generates and signs `SHA256SUMS`, creates a draft release.
-- Test `blinzel-app/tests/setup.rs`: installation, in-place update and uninstallation in a sandbox (temp folder, own HKCU branch).
+  - `packaging/macos/create-signing-cert.sh` creates it and sets the secrets; how, and how to keep it safe: [docs/SECRETS.md](../SECRETS.md).
+- **Releases automatically via release-please:** every push to `main` creates or updates a release PR with the next version (`Cargo.toml`, `Cargo.lock`) and the `CHANGELOG.md` entry from the Conventional Commits; `feat` bumps the minor version, `fix` the patch version, `docs`, `ci`, `chore` etc. trigger no release. Merging it sets the tag `v<version>` and creates a draft release. Then `release.yml` builds all three platforms, generates `SHA256SUMS`, signs them with Ed25519, attaches the files and publishes the release (it creates the draft itself if none exists, e.g. when started by hand for an existing tag). Only then do the updaters see it. Behavior: [release.md](release.md); secrets: [docs/SECRETS.md](../SECRETS.md).
+- **Own signature of the checksums (Ed25519).** The app has the public key built in (`276b0fbd4a1f9eb68476f0b8a14c5cc0bab403cbca24bcf07d8cff333d3fa9b7`, `RELEASE_KEY` in `crates/blinzel-core/src/update.rs`). It is the only proof of origin: the updater installs only what is signed with the release key. The secret seed lives only in the repository secret `RELEASE_SIGNING_KEY`; if it is lost, installed copies no longer accept updates. Without `RELEASE_KEY` (`None`), the updater verifies and installs nothing. A key change reaches installed copies only via a release that is still signed with the old key.
 
 ### Self-updater (silently in the background)
 
-- 🟡 **Check:**
-  - At most 1× a day, no earlier than 10 s after startup, on a background thread (never on the critical path).
-  - Source: `GET https://api.github.com/repos/amigo-labs/amigo-blinzel/releases/latest` via WinHTTP, which is loaded via `LoadLibrary` and uses the system proxy.
-- 🟡 **Download** the matching asset (x64/ARM64) plus `SHA256SUMS(.sig)` to `%LOCALAPPDATA%\amigo-blinzel\updates\`.
-- 🟡 **Verify in two steps:**
-  1. Ed25519 signature of the checksums.
-  2. SHA-256 of the exe.
-
-  Only then is it swapped.
-- 🟡 **Swap:**
-  - Rename the running exe to `.old` (allowed on NTFS) and put the new one in its place.
-  - The next start uses the new version at no extra cost.
-  - `.old` is deleted on the next start.
-- 🟡 **Rollback:** If the new version fails three times to start up to the first frame, `.old` is restored.
-- 🟡 **Menu:** "Check for updates" and "About amigo-blinzel (version)". Setting `auto_update = true`.
-
-**Implementation:**
-- Decisions without Windows in `blinzel-core::update` (version, release JSON via a small JSON reader of our own, `SHA256SUMS`, Ed25519 via `ed25519-compact`, schedule, start counter) with unit tests.
-- Windows part in `blinzel-app/src/update.rs`: WinHTTP and `BCryptHash` are loaded only when needed. Only an installed copy updates itself; developer and portable builds never do.
-- `blinzel-release keygen | sign | verify` for our own signing key.
-- The public key is stored as `RELEASE_KEY` in `crates/blinzel-core/src/update.rs`, the secret one (seed as hex) only in the repository secret `RELEASE_SIGNING_KEY`. Without `RELEASE_KEY` (`None`), the updater verifies and installs nothing. New key: `cargo run -p blinzel-release -- keygen <datei>`, store the file's content as the secret, delete the file, enter the printed line. A key change reaches installed copies only via a release that is still signed with the old key.
+- **Check:** at most 1× a day, no earlier than 10 s after startup, on a background thread (never on the critical path). A long-running Windows instance (resident mode) tests every hour whether a check is due; Linux and macOS test once per process. Source: the GitHub "latest release" API, on Windows via WinHTTP (loaded via `LoadLibrary`, uses the system proxy), on Linux and macOS via the system `curl`.
+- **Download** the matching asset into `%LOCALAPPDATA%\amigo-blinzel\updates\<version>\` (Windows); `SHA256SUMS(.sig)` stay in memory.
+- **Verify in two steps:** 1. Ed25519 signature of the checksums, 2. SHA-256 of the download. Only then is it swapped.
+- **Swap:** Rename the running exe to `.old` (allowed on NTFS) and put the new one in its place; the next start uses the new version at no extra cost. Linux keeps `blinzel.old`, macOS the previous bundle.
+- **Rollback:** If the new version fails three times to start up to the first frame, the previous version is restored. A start that finds no update on trial deletes the previous version.
+- **Decisions without the platform** in `blinzel-core::update` (version, release JSON via a small JSON reader of our own, `SHA256SUMS`, Ed25519 via `ed25519-compact`, schedule, start counter); each shell downloads and swaps its own way. Only an installed copy updates itself; developer and portable builds never do.
+- Behavior: [updates.md](updates.md).
 
 ## 11. Website and competitive comparison (M8)
 
 ### Website on Cloudflare Workers
 
-- 🟡 `website/`: static HTML/CSS with minimal JS, extremely fast (in keeping with the product), German and English.
-  - Pages: home, features, **comparison**, **benchmarks**, methodology, download, changelog, privacy.
-  - Charts are generated at build time as inline SVG from the benchmark JSONs; no chart library in the browser.
-  - The download link points to `releases/latest/download/amigo-blinzel-setup-x64.exe` (stable URL).
-- 🟡 **Deployment** via Cloudflare Workers Static Assets (`wrangler.toml` in the repo root directory).
+- `website/`: static HTML/CSS with minimal JS, extremely fast (in keeping with the product), German and English.
+  - One start page per language plus a privacy page. Features, measurements with methodology, the feature comparison and the downloads are sections of the start page; their old page addresses redirect there. The changelog is the GitHub releases page.
+  - Charts are generated at build time as inline SVG from the race reports; no chart library in the browser.
+  - Download links point to stable URLs `releases/latest/download/<asset>`.
+- **Deployment** via Cloudflare Workers Static Assets (`wrangler.toml` in the repo root directory) at `blinzel.amigo-labs.dev`.
   - Cloudflare Workers Builds is connected to the repo (root directory `/`, default deploy command). Before every deploy, Wrangler runs `website/build.sh`: it installs the missing Rust toolchain in the build image and generates `website/dist` with `blinzel-site`.
   - Alternatively, `.github/workflows/website.yml` deploys as soon as the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set; with Workers Builds this is not necessary.
-  - Initially the `workers.dev` subdomain; a custom domain can be added at any time.
+- Behavior: [website.md](website.md).
 
 ### Competitive benchmark `blinzel-race`
 
 A dedicated measurement tool for Windows and macOS measures all viewers the same way, from the outside.
 
-**Implementation (`crates/blinzel-race`, branch `m8-race`):**
+**Design (`crates/blinzel-race`):**
 - `corpus <dir>`: 24 JPEGs with 24 MP and approx. 8 MB each (sensor noise, so that the entropy decoder works as hard as with real photos), each around one of six signature colors (the colored corners of the RGB cube). Consecutive images always differ.
-- Detection: Desktop Duplication on every monitor (viewers open where they last were); every presented frame delivers `LastPresentTime` (QPC) and a grid of 40 × 24 sample points.
+- Detection: screen capture on every monitor (viewers open where they last were). Windows: Desktop Duplication, every presented frame delivers `LastPresentTime` (QPC). macOS: ScreenCaptureKit, a frame only arrives when the screen has changed and carries its display time (`mach_absolute_time`). Both reduce each frame to a grid of 40 × 24 sample points.
 - Keys are only sent while the viewer owns the foreground window.
-- `list` shows the detected viewers with version (version resource; `blinzel.exe` now has one).
-- `run <dir> [--reps N] [--cold] [--only …] [--viewer name=exe] [--json …]`. `--cold` empties the standby list and needs administrator rights.
-- **macOS** (`capture_macos.rs`, `sys_macos.rs`, `viewers_macos.rs`; the flow in `race.rs` is the same):
-  - Detection via ScreenCaptureKit on every display. A frame only arrives when the screen has changed, and carries its display time (`mach_absolute_time`). ScreenCaptureKit scales the grid down on the GPU.
-  - Launch via Launch Services (`open -a App datei`), as in the Finder. Quit politely via `NSRunningApplication.terminate`, after 3 s with `SIGKILL`.
-  - Keys via `CGEvent`, only while the frontmost window belongs to the viewer (`CGWindowListCopyWindowInfo`). `--cold` calls `purge` via `sudo` and asks for the password once at the beginning for this; the tool itself does not run as root, otherwise the viewers would also start as root.
-  - The terminal needs the "Screen Recording" and "Accessibility" permissions; without them, `run` aborts with a hint.
-  - Candidates: amigo-blinzel, Preview, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ is no longer distributed). Preview does not flip through the folder for a single file; for it there is only the value for opening.
-  - Result to `website/data/race-macos.json`; the website shows it as a separate macOS section (`{{race-macos:…}}`).
-
-**First trial runs** (laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 monitors; proof of function only, no reference figures):
-
-| Viewer | Open warm | Next | Rapid fire 6 keys |
-|---|---|---|---|
-| amigo-blinzel 0.1.0 | 270–295 ms | 9–14 ms | all shown |
-| ImageGlass 8.8 | 1.8 s | 0.8 s | all, slowly |
-| Windows Photos 2026.11 | 1.2 s | 45 ms | 3 shown, keys swallowed |
-
-- 🟡 **Candidates:** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Photos; optionally JPEGView and qimgv. Each with default settings; versions are logged.
-- 🟡 **Metrics:**
-  1. **Open:** time from process start until the image is visible, warm and cold (standby list emptied).
-     - Detected via the Desktop Duplication API (frame timestamp `LastPresentTime`).
-     - The test images carry a unique color signature.
-  2. **Next image:** `SendInput` (right arrow), time until the color signature changes; individually after idle (prefetch case) and as rapid fire at 30 Hz (how many images are really shown).
-  3. **Thumbnails** (from M4): time until the grid of a 1000-image folder is filled, for viewers with a grid mode.
-- 🟡 **Fairness and legal:**
+- A cold run empties the standby list (Windows, administrator rights) or calls `purge` via `sudo` (macOS; the tool itself does not run as root, otherwise the viewers would also start as root).
+- macOS candidates: amigo-blinzel, Preview, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ is no longer distributed). Preview does not flip through the folder for a single file; for it there is only the value for opening. Result in `website/data/race-macos.json`, shown as a separate macOS section.
+- **Candidates (Windows):** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Photos; optionally JPEGView and qimgv. Each with default settings; versions are logged.
+- **Metrics:**
+  1. **Open:** time from process start until the image is visible, warm and cold (standby list emptied). The test images carry a unique color signature.
+  2. **Next image:** right arrow, time until the color signature changes; individually after idle (prefetch case) and as rapid fire at 30 Hz (`--burst N` presses, default 20: how many images are really shown).
+  3. **Thumbnails** (planned, not in the tool yet): time until the grid of a 1000-image folder is filled, for viewers with a grid mode.
+- **Fairness and legal:**
   - Same machine, same files, 10 repetitions, median and p95.
   - Raw data, versions and methodology are published.
   - Thus objective, verifiable and relevant, as comparative advertising law requires (UWG §6).
-- ⬜ **Figures:** Reference values from a defined reference machine (hardware is stated). CI values only as a trend.
-- 🟡 **Feature comparison table** (`compare.html`, DE/EN): license, commercial use, ads, telemetry, ARM64, download size, color profiles, HEIC/AVIF/JPEG XL/WebP/RAW for IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv and Windows Photos. As of 2026-10-23, every cell links its source; anything unconfirmed reads "not documented". Proofread once by hand before publishing. Startup time and memory come from the reference measurement.
+- **Figures:** Reference values from a defined reference machine (hardware is stated). CI values only as a trend.
+- **Feature comparison tables** (on the start page, DE/EN): Windows viewers (IrfanView, ImageGlass, XnView MP, FastStone, JPEGView, qimgv, Windows Photos: license, commercial use, ads, telemetry, ARM64, download size, color profiles, HEIC/AVIF/JPEG XL/WebP/RAW), macOS viewers and batch tools. Every cell links its source; anything unconfirmed reads "not documented". Proofread by hand before publishing. Startup time and memory columns from the reference measurement are planned, not built.
+- Behavior: [competitive-benchmark.md](competitive-benchmark.md). Measurements: [section 15](#competitive-benchmark).
 
 ### Animations (M5)
 
-- 🟡 **GIF:** `decode::gif::decode_animation` composites every frame onto the canvas like browsers do: transparent pixels leave the canvas as is, disposal "background" clears the frame rectangle, "previous" restores the state before; delays under 20 ms play at 100 ms; the loop count from the NETSCAPE extension applies (otherwise once). At most 256 MB of frames; longer animations play what fits.
-- For this, the loader has the stage `Anim`, only for the current image and only once its probe says GIF: the first image appears immediately as before, the animation starts as soon as all frames are on the GPU (480 × 270: 1.2 ms decode per frame). A timer advances the frames; when the image changes, the animation is discarded.
-- 🟡 **WebP:** `decode::webp::decode_animation` (`image-webp` composites the frames itself), same rules for delays, loop counts and the 256 MB budget; the stage `Anim` now applies to GIF and WebP. A still WebP reports the stage as a still image.
-- 🟡 **JPEG XL:** `decode::jxl::decode_animation` renders every keyframe (duration from ticks and `tps`, loop count from the header), same rules and budget. Still files are already detected by the header.
-- 🟡 **Playback while decoding:** The decoders deliver every frame individually (`stream_animation` with a frame callback); the loader uploads it to the GPU immediately and, from the second frame on, sends the current state every 200 ms. Playback thus starts after two frames; if it reaches the last frame decoded so far, it holds there and continues with the next delivery. A decode error midway ends the animation with the frames up to that point. Visual check open (large GIFs).
+- GIF, WebP and JPEG XL animations are decoded natively on every platform (gate table: "Animations native"). Frames are composited onto the canvas like browsers do; delays under 20 ms play at 100 ms; the file's loop count applies; at most 256 MB of frames, longer animations play what fits.
+- The loader has the stage `Anim`, only for the current image: the first image appears immediately as any still image, the animation is decoded in the background behind it. The decoders deliver every frame individually; the loader uploads each one to the GPU at once and sends the current state every 200 ms, so playback starts once two frames are there instead of after the whole file. When the image changes, the animation is discarded.
+- Behavior: [animations.md](animations.md). Measurement: [section 15](#animation-decode-m5).
 
 ## 12. Milestones
 
-| | Contents | Target | Status |
+| | Contents | Target | Feature specs |
 |---|---|---|---|
-| **M0** | Workspace, CI (Linux + Windows), corpus, bench harness | baseline JSON in CI | 🟡 |
-| **M1** | Single image: startup sequence, chrome, menu, view modes, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC fallback, EXIF/MPF | t0 → present ≤ 50 ms warm, ≤ 120 ms cold; no white frame | 🟡 |
-| **M2** | Browsing, prefetch, budgets, full-res when zoomed, folder watch, P/E pools, selection, Ctrl+C/X/S | next ≤ 8 ms p99 prefetched; 10k folder ≤ 25 ms; Ctrl+C < 1 ms | 🟡 |
-| **M3** | `blinzel-jpeg`: parallel decoder | full-res 24 MP ≥ 3× turbo (8 cores); DC-only ≥ 2× | 🟡 targets reached (4.1× and 3.6×), progressive 1.7×; CI confirmation pending |
-| **M4** | Thumbnails: fast paths, pack cache, atlas, filmstrip + grid | 200 tiles from the cache ≤ 30 ms; cold ≥ 150/s | 🟡 done: 287/s cold, 200 from the cache to on screen 16 ms; open: visual check |
-| **M5** | WebP (animated), GIF animation, AVIF, HEIC, JXL, TIFF, RAW native (each with bench gate) | native faster than WIC, otherwise WIC stays | 🟡 GIF and WebP animation, WebP native (gate: lossless and animations native, lossy via WIC once loaded), JPEG XL native (gate passed, +1.7 MB), TIFF native with parallel strips (otherwise WIC), RAW via embedded previews (development still WIC), license notices of the bundled libraries (`THIRD-PARTY-NOTICES.txt`, menu "Third-party notices"), AVIF (`rav1d`) native as long as WIC has no codec, HEIC (`zune-heic`) likewise, but only with the feature `heic` (off by default, HEVC patents); open: gate HEIC/AVIF against WIC on Windows |
-| **M6** | Tray/resident, settings, ICC color management | resident handoff → visible ≤ 25 ms | 🟡 resident, tray, settings menu, app icon, ICC (JPEG/PNG) done; handoff 23–25 ms (median, idle machine); open: visual check |
-| **M7** | Setup exe, release workflow, self-updater, winget | checksums signed, update without user action | 🟡 implemented; open: release key, first release |
-| **M8** | `blinzel-race` + website on Cloudflare Workers | public, reproducible comparison figures | 🟡 tool, website and feature table (with sources) done; Windows measured (amigo-blinzel vs. Windows Photos, without cold); open: macOS measurement, proofreading the table, Cloudflare secrets |
-| **M9** | Batch processing: engine, dialog, multi-selection | faster than ImageMagick; sources never overwritten | 🟡 engine and dialog done, 8.6 instead of 2.1 images/s; open: visual check on Windows and macOS, comparison with vipsthumbnail/XnConvert |
-| **M10** | Linux shell (winit + wgpu), installation, updater | golden test on lavapipe, startup to first image in CI | 🟡 done, checked in CI (Xvfb); open: visual check under Wayland, measure startup times |
-| **M11** | macOS shell (AppKit + Metal), app bundle, updater | Metal golden test, startup to first image in CI | 🟡 done, built in macOS CI; open: visual check on a Mac (Finder, HEIC, color profile, menu bar), measure startup times |
-| **M12** | Screenshots (separate PR after #22) | Print key to overlay without noticeable delay | 🟡 Windows done: Print key (and Ctrl+Shift+Print) in resident mode, GDI capture of the virtual desktop, overlay from `blinzel-ui/src/snip.rs` (window under the mouse highlighted, drag = region, click = window, Enter = screen), always to the clipboard, then as set by three switches (`blinzel-core/src/screenshot.rs`): PNG to `Bilder\Screenshots` (Pictures\Screenshots, configurable), open in the viewer, open in the editor (a shot that is opened but not saved goes to the cache and is deleted after a day); "Open with…" and "Edit with…" (E) on all platforms; CI: `--capture-test`. 🟡 macOS (`macos/screenshot.rs`, `macos/hotkey.rs`): ⌘⇧1 as a Carbon hot key in resident mode, or the menu bar icon; every display frozen through ScreenCaptureKit (`SCScreenshotManager`, converted to sRGB), one borderless panel per display above the menu bar with its own `CAMetalLayer` and `Snip` (a region stays on one display), windows from `CGWindowListCopyWindowInfo`; the Screen Recording permission is asked for once, after that an alert explains where to allow it (macOS applies it after a restart of the app). Open: visual check on Windows 11 and a Mac, measure time Print key → overlay, Linux (X11 GetImage, Wayland portal), HDR |
-
-**Order:**
-1. PR #1: M0–M2 including the Windows 11 baseline and "Save cutout".
-2. M3.
-3. M7, so that releases can be distributed early.
-4. M8 (website with first comparison figures for opening and browsing).
-5. M4, M5, M6. The website figures are extended with every milestone.
+| **M0** | Workspace, CI (Linux + Windows), corpus, bench harness | baseline JSON in CI | [benchmark-gate.md](benchmark-gate.md) |
+| **M1** | Single image: startup sequence, chrome, menu, view modes, i18n, D3D11, JPEG/PNG/BMP/GIF, WIC fallback, EXIF/MPF | t0 → present ≤ 50 ms warm, ≤ 120 ms cold; no white frame | [startup.md](startup.md), [viewing.md](viewing.md), [image-formats.md](image-formats.md), [localization.md](localization.md), [platform-shells.md](platform-shells.md) |
+| **M2** | Browsing, prefetch, budgets, full-res when zoomed, folder watch, P/E pools, selection, Ctrl+C/X/S | next ≤ 8 ms p99 prefetched; 10k folder ≤ 25 ms; Ctrl+C < 1 ms | [browsing.md](browsing.md), [selection-and-export.md](selection-and-export.md) |
+| **M3** | `blinzel-jpeg`: parallel decoder | full-res 24 MP ≥ 3× turbo (8 cores); DC-only ≥ 2× | [jpeg-decoder.md](jpeg-decoder.md) |
+| **M4** | Thumbnails: fast paths, pack cache, atlas, filmstrip + grid | 200 tiles from the cache ≤ 30 ms; cold ≥ 150/s | [thumbnails.md](thumbnails.md) |
+| **M5** | WebP (animated), GIF animation, AVIF, HEIC, JXL, TIFF, RAW native (each with bench gate) | native faster than WIC, otherwise WIC stays | [image-formats.md](image-formats.md), [animations.md](animations.md) |
+| **M6** | Tray/resident, settings, ICC color management | resident handoff → visible ≤ 25 ms | [resident-mode.md](resident-mode.md), [settings.md](settings.md), [color-management.md](color-management.md) |
+| **M7** | Setup exe, release workflow, self-updater, winget | checksums signed, update without user action | [installation.md](installation.md), [release.md](release.md), [updates.md](updates.md) |
+| **M8** | `blinzel-race` + website on Cloudflare Workers | public, reproducible comparison figures | [competitive-benchmark.md](competitive-benchmark.md), [website.md](website.md) |
+| **M9** | Batch processing: engine, dialog, multi-selection | faster than ImageMagick; sources never overwritten | [batch-resize.md](batch-resize.md) |
+| **M10** | Linux shell (winit + wgpu), installation, updater | golden test on lavapipe, startup to first image in CI | [platform-shells.md](platform-shells.md), [installation.md](installation.md), [updates.md](updates.md) |
+| **M11** | macOS shell (AppKit + Metal), app bundle, updater | Metal golden test, startup to first image in CI | [platform-shells.md](platform-shells.md), [installation.md](installation.md), [updates.md](updates.md) |
+| **M12** | Screenshots in resident mode (Windows, macOS): freeze the screen, overlay for region, window or monitor, clipboard, then file, viewer, editor | Print key to overlay without noticeable delay | [screenshots.md](screenshots.md) |
 
 ## 13. Verification
 
-- **Linux (container/CI):**
-  - `cargo test --workspace`: core, jpeg, i18n, scheduler, layout, selection, export.
-  - `cargo clippy -D warnings`, `cargo fmt --check`.
-  - `cargo xwin clippy --target x86_64-pc-windows-msvc`.
-- **Windows CI:**
-  - Build, tests, WARP golden tests (shader against CPU reference: orientations, tile seams, zoom, crop, gray, alpha, text).
-  - `blinzel-bench`, `blinzel.exe --bench`, startup smoke test.
-  - `blinzel-bench` additionally as an x86-64-v3 build; `blinzel-bench compare` writes both runs side by side into the step summary.
-  - ARM64 build.
-- **Locally on Windows 11** (developer machine):
-  - The rustup host there is `windows-gnu`; builds use `cargo +1.99.1-x86_64-pc-windows-msvc …`.
-  - NASM is under `%LOCALAPPDATA%\bin\NASM`, CMake comes from Visual Studio (`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`); both must be in the `PATH`.
-  - Laptop measurements vary by up to 30 % between consecutive runs (throttling). Therefore measure builds alternately and run libjpeg-turbo alongside as a control.
-- **Manually on Windows 11:**
-  - Double-click start and browsing (including rapid fire).
-  - View modes, snap layouts, menu via mouse and keyboard, language switch.
-  - Selection → paste into Paint/Word/GIMP; Ctrl+X/Esc; Ctrl+S with both paths (lossless and re-encoded).
-  - Recycle Bin, drag & drop, single instance.
-- **Linux CI:** golden test of the wgpu shaders on lavapipe, startup to first image under Xvfb, display profile via `_ICC_PROFILE` on Xvfb, license notices up to date.
-- **macOS CI (macos-14):** Clippy and tests, Metal golden test, app bundle with signature check, startup to first image.
-- **Manually on a Mac:** opening from the Finder and via drag & drop, HEIC via ImageIO, color profile of a P3 display, menu bar and context menu, batch processing, Gatekeeper notice on first start.
-- **Manually on Linux:** GNOME (Wayland) and KDE (X11): startup, moving the window, file dialog, clipboard, `--install`.
-- **Release (M7):** SmartScreen notice on first start as described on the download page; update path from v0.x.y to v0.x.y+1 on a clean VM.
+The automated checks, per CI job, are listed in each feature spec's Evidence and in AGENTS.md §7 (testing) and §10 (commands); the Windows developer toolchain and how to measure on a laptop are in AGENTS.md "Gotchas". What needs a person:
+
+- **Windows 11:** double-click start and browsing (including rapid fire); the GDI → Direct3D transition; view modes, snap layouts, menu via mouse and keyboard, language switch; selection → paste into Paint/Word/GIMP, Ctrl+X/Esc, Ctrl+S with both paths (lossless and re-encoded); Recycle Bin, drag & drop, single instance; grid and filmstrip; tray, waking and color management on a wide-gamut monitor; batch processing; screenshots (overlay, time from the Print key).
+- **Mac:** opening from the Finder and via drag & drop, HEIC via ImageIO, color profile of a P3 display, menu bar and context menu, batch processing, screenshots (⌘⇧1, Screen Recording permission), Gatekeeper notice on first start.
+- **Linux:** GNOME (Wayland) and KDE (X11): startup, moving the window, file dialog, clipboard, `--install`.
+- **Release:** SmartScreen notice on first start as described on the download page; update path from one release to the next on a clean VM.
 
 ## 14. Open items on your side
 
-- ✅ License: MIT.
-- ✅ Release signing key: the public part is in `crates/blinzel-core/src/update.rs`, the secret part is stored as the secret `RELEASE_SIGNING_KEY` (release 1.3.0 carries `SHA256SUMS.sig`). Keep it safe: if it is lost, installed copies no longer accept updates.
-- ⬜ Mac signing certificate: run `packaging/macos/create-signing-cert.sh` once (section 10, "Mac: our own self-signed certificate"); it stores the organization secrets `MACOS_SIGNING_CERT` and `MACOS_SIGNING_CERT_PASSWORD`. Until then releases are signed ad hoc. Check after the next release: the macOS job's step "Signing identity" must not say `MACOS_SIGNING_CERT is not set`, and the signature check shows `Authority=amigo-labs`.
-- 🟡 Cloudflare: Workers Builds is connected; optionally a custom domain. The secrets for the GitHub workflow are therefore not needed.
-- 🟡 Windows measurement in `website/data/race.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. No other viewers are installed there. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
-- ⬜ The same on a Mac (Apple Silicon): `blinzel-race corpus testbilder`, then `blinzel-race run testbilder --cold --json website/data/race-macos.json` (asks once for the `sudo` password). Install the viewers beforehand and grant the terminal "Screen Recording" and "Accessibility".
-- ⬜ Legal notice (Impressum): details of the website operator (name, address, contact), in case the site is operated commercially. The website has no page for this yet; only the operator can provide the details.
-- ⬜ First manual test on Windows 11 (see Verification).
-- ⬜ First manual test on a Mac and on Linux (see Verification).
-- ✅ HEVC patents: decided, our own HEVC decoder (`zune-heic`) sits behind the Cargo feature `heic` and is off by default; releases do not include it, HEIC runs via WIC there. Anyone building it themselves enables it with `cargo build --release -p blinzel-app --features heic` (its license texts are then missing from the `THIRD-PARTY-NOTICES*.txt`, which only cover the default build).
-- ⬜ Measure the HEIC and AVIF gate on Windows: `set BLINZEL_DECODER=native` or `=wic`, then `blinzel.exe --bench <ordner>` with 12/24 MP files, alternately.
+The open items outside the code are listed in [README.md](README.md#open-items-outside-the-code), "Open items outside the code".
 
 ## 15. Measurements (current state)
 
@@ -508,6 +390,83 @@ The runner has no GPU: the startup measurement reports `"adapter": "Microsoft Ba
 
 The C part of libjpeg-turbo was unoptimized here: under MSVC with the Visual Studio generator, cmake-rs removes all `/O` flags, and MSBuild then compiles with `/Od`. Fixed by a patched copy of cmake-rs (`third_party/cmake-rs`, via `[patch.crates-io]`) that keeps CMake's default flags per configuration. libjpeg-turbo also builds as "Release" (`/O2 /Ob2`). `blinzel-bench run --check` fails if zune-jpeg ever beats the shipped JPEG path again. The startup measurement records the adapter name so that software rendering is recognizable.
 
+### JPEG decoder (M3)
+
+Ryzen 7 PRO 6850H, 8 cores / 16 threads, A/B alternating (`blinzel-bench jpeg-ab`), medians:
+
+| File | turbo | blinzel-jpeg, 1 thread | 16 threads | Factor |
+|---|---|---|---|---|
+| 24 MP 4:2:0 full | 77 ms | 90 ms | 20 ms | 3.9× |
+| 24 MP 4:2:0 1/2 | 66 ms | 78 ms | 19 ms | 3.5× |
+| 24 MP 4:2:0 1/8 | 57 ms | 57 ms | 16 ms | 3.6× |
+| 24 MP 4:4:4 full | 102 ms | 109 ms | 26 ms | 3.9× |
+| 45 MP 4:2:0 full | 151 ms | 206 ms | 38 ms | 4.0× |
+| 12 MP 4:2:0 full | 37 ms | 45 ms | 12 ms | 3.1× |
+
+| 24 MP 4:2:0 progressive | turbo | blinzel-jpeg, 1 thread | 16 threads |
+|---|---|---|---|
+| full | 244 ms | 330 ms | 142 ms (1.7×) |
+| 1/8 | 238 ms | 312 ms | 138 ms (1.7×) |
+
+For sequential (baseline) JPEGs, `blinzel-jpeg` has been on par with turbo (1.01×) on one thread since the accumulator bit reader, and 4.1× with 16 threads. App benchmark with a real GPU (Radeon 680M): open a 24 MP JPEG in 28.7 ms total (decode 19.9 ms to 3000 × 2000).
+
+### Startup time
+
+Real GPU, Radeon 680M, 24 MP JPEG, process start → first image:
+
+| State | First image | Direct3D frame |
+|---|---|---|
+| before | 230–330 ms (waited for `D3D11CreateDevice`, 115–150 ms) | same |
+| + message loop instead of blocking, first image via GDI | 65–71 ms | 128–136 ms |
+| + `SW_SHOWNA`, rendering on the loader thread | **54–61 ms** | 127–137 ms |
+
+The time until `main` (20–25 ms) is process creation; delay-load changes nothing about that. After that: reading and decoding approx. 25 ms, CPU frame approx. 5 ms, drawing under 1 ms. Side effect: since the UI thread processes messages instead of blocking, `D3D11CreateDevice` now also takes only approx. 95 instead of 150 ms. Only resident mode (M6) gets below 50 ms.
+
+### Resident handoff
+
+Same machine, 24 MP JPEG, measured with `blinzel --resident --json <datei>`: the handoff carries the creation time of the second process, so the marks count from its process start, as with a cold start.
+
+| State | Handoff received → visible (median) | first handoff after startup |
+|---|---|---|
+| without warm-up | 24.6 ms | 43 ms |
+| + decode/upload warmed up at screen size | 24.7 ms | 33 ms |
+| + window shown cloaked once | **23–25 ms** (range 22–29 ms) | 23–24 ms |
+
+Of this, reading approx. 2 ms, decoding approx. 19 ms (3000 × 2000, all P-cores), upload approx. 1.5 ms, present under 1 ms. The second process needs as long until the handoff as a cold start until `main` (normally 20–25 ms; during this measurement the machine was locked and needed 120–150 ms, the old state too). From the outside, therefore, normally approx. 45–50 ms from double-click to image.
+
+Memory of the hidden instance: 50 MB private after startup, approx. 70 MB after use and stable (60 handoffs, no growth).
+
+### Thumbnail speed (M4)
+
+`blinzel-bench thumbs <dir> [--count N] [--threads T]`: cold (without cache) thumbnails per second over a folder with 12-MP JPEGs with sensor noise (approx. 4 MB per file), warm 200 tiles from the cache. Ryzen 7 PRO 6850H, 16 threads:
+
+| Case | Result |
+|---|---|
+| cold | 287/s (1 thread: 26/s); saving 1.1–1.3 ms per thumbnail (12.6 KB) |
+| warm, 200 from the cache | 23.6 ms (1 thread: 0.9 ms per thumbnail) |
+| Windows thumbnail provider and cache, same files | cold 18/s, warm 432–446 ms for 200 |
+| end to end in the app (`blinzel --bench`, `thumb_grid_200`: open the cache, read and decode 200, load into the atlas, draw the grid, GPU done) | **16 ms** median (BGRA atlas: 37–69 ms) |
+
+### Batch (M9)
+
+`blinzel-bench batch`, Linux container, 4 vCPU, 24 12-MP JPEGs with sensor noise, long edge 1920: JPEG 8.6/s (431 KB per file), WebP 5.1/s (213 KB), AVIF 1.1/s (73 KB, rav1e speed 6). For comparison ImageMagick on the same files (`convert -resize 1920x1920`, 4 processes, run by hand): 2.1/s.
+
+### Animation decode (M5)
+
+480 × 270 GIF: 1.2 ms decode per frame.
+
+### Competitive benchmark
+
+First trial runs (laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 monitors; proof of function only, no reference figures; 6 presses of rapid fire):
+
+| Viewer | Open warm | Next | Rapid fire 6 keys |
+|---|---|---|---|
+| amigo-blinzel 0.1.0 | 270–295 ms | 9–14 ms | all shown |
+| ImageGlass 8.8 | 1.8 s | 0.8 s | all, slowly |
+| Windows Photos 2026.11 | 1.2 s | 45 ms | 3 shown, keys swallowed |
+
+Published Windows measurement in `website/data/race.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
+
 ### SIMD levels
 
 Measured locally on AMD Ryzen 7 PRO 6850H (8 cores, AVX2, no AVX-512), Windows 11, on AC power, power plan "Balanced"; medians, one core per decode.
@@ -535,7 +494,7 @@ The packed kernels are memory-bound. If AVX2 gains 0.5–1.5 ms there, that is a
 
 **Upper bound "everything with AVX2"** (x86-64-v3 build, so the crates `png` and `fdeflate` as well): three alternating runs yield 2–5 % for PNG (minima); JPEG stays the same because the C part is unaffected by `RUSTFLAGS`. A single back-to-back comparison had shown 24 %, but the baseline run was throttled.
 
-**Result by the criterion (≥ 10 % on a hot path):** No level reaches it. Therefore there is no runtime dispatch; the kernels run with `Level::Baseline`, the baseline remains x86-64-v2. The kernel module and the bench group `simd` remain as tools for M3 (AVX2 IDCT, color conversion in our own decoder).
+**Result by the criterion (≥ 10 % on a hot path):** No level reaches it. Therefore there is no runtime dispatch; the kernels run with `Level::Baseline`, the baseline remains x86-64-v2. The kernel module and the bench group `simd` remain as tools.
 
 **Windows CI** (PR #4, `windows-2025`, AMD EPYC 7763, AVX2; the runs are quiet, the minimum is at the median):
 
@@ -551,73 +510,3 @@ The packed kernels are memory-bound. If AVX2 gains 0.5–1.5 ms there, that is a
 | x86-64-v3 vs. v2: JPEG (C code unchanged) | 1.01–1.03× |
 
 This confirms the local measurement. At 1/8, SIMD no longer brings libjpeg-turbo anything at all on the runner.
-
-## 16. Handover: next steps
-
-**Status (2026-10-25), PR #22:** Code signing removed; `blinzel-ui` as a platform-independent interface; batch processing (M9); Linux shell (M10) and macOS shell (M11) with installation, updater, CI and release jobs; license notices per platform; website with downloads for three platforms. Open are the visual checks from section 13 and the items in section 14.
-
-**Status (2026-10-23):**
-- PR #1–#3 are merged.
-- PR #4 (`simd-levels`): SIMD levels measured, no dispatch ([SIMD levels](#simd-levels)). Waiting for merge.
-- PR #5 (`m3-jpeg`, stacked on #4): own JPEG decoder.
-  - Sequential (baseline and extended, 8-bit, any subsampling, restart markers, multiple scans), scales 8/8, 4/8, 2/8, 1/8.
-  - Parallel: exact with restart markers, otherwise speculative with self-synchronization. A guess that runs into an invalid code restarts one bit later.
-  - Byte-identical with libjpeg-turbo; checked in `blinzel-core/tests/own_jpeg.rs` and with `blinzel-bench run --check` over the whole corpus.
-  - Integrated via `decode::decode_with(data, req, threads)`: the visible image runs on all P-cores via `blinzel-jpeg`; prefetch, regions and error cases stay with libjpeg-turbo.
-  - `blinzel-bench jpeg-ab <datei> [skala] [threads]` measures turbo and `blinzel-jpeg` alternately in the same process.
-
-**M3 measurements** (Ryzen 7 PRO 6850H, 8 cores / 16 threads, A/B alternating, medians):
-
-| File | turbo | blinzel-jpeg, 1 thread | 16 threads | Factor |
-|---|---|---|---|---|
-| 24 MP 4:2:0 full | 77 ms | 90 ms | 20 ms | 3.9× |
-| 24 MP 4:2:0 1/2 | 66 ms | 78 ms | 19 ms | 3.5× |
-| 24 MP 4:2:0 1/8 | 57 ms | 57 ms | 16 ms | 3.6× |
-| 24 MP 4:4:4 full | 102 ms | 109 ms | 26 ms | 3.9× |
-| 45 MP 4:2:0 full | 151 ms | 206 ms | 38 ms | 4.0× |
-| 12 MP 4:2:0 full | 37 ms | 45 ms | 12 ms | 3.1× |
-
-App benchmark with a real GPU (Radeon 680M): open a 24 MP JPEG in 28.7 ms total (decode 19.9 ms to 3000 × 2000).
-
-**Progressive** (since this state): All scans are read up front; with multiple threads each scan runs in its own thread, row by row behind the scans it depends on (same component, overlapping band). Coefficients sit in block rows behind mutexes, are allocated only on first access and released during the parallel IDCT. Refinement scans keep a mask of the non-zero coefficients per block.
-
-| 24 MP 4:2:0 progressive | turbo | blinzel-jpeg, 1 thread | 16 threads |
-|---|---|---|---|
-| full | 244 ms | 330 ms | 142 ms (1.7×) |
-| 1/8 | 238 ms | 312 ms | 138 ms (1.7×) |
-
-Limit: The last Y refinement scan (3.7 MB) alone takes approx. 100 ms. Without knowing the block number it cannot be split speculatively; it only gets faster through a faster sequential decoder.
-
-For sequential (baseline) JPEGs, `blinzel-jpeg` has been on par with turbo (1.01×) since the accumulator bit reader, and 4.1× with 16 threads.
-
-**M7 (branch `m7-install`, PR stacked on `m3-jpeg`):** setup exe, uninstallation, silent mode, self-updater with checks and rollback, release workflow, winget templates, menu entries. Details in [section 10](#10-installation-updates-signing-m7). Only items from section 14 (release key) and the first real release are open.
-
-**Startup time (real GPU, Radeon 680M, 24 MP JPEG, process start → first image):**
-
-| State | First image | Direct3D frame |
-|---|---|---|
-| before | 230–330 ms (waited for `D3D11CreateDevice`, 115–150 ms) | same |
-| + message loop instead of blocking, first image via GDI | 65–71 ms | 128–136 ms |
-| + `SW_SHOWNA`, rendering on the loader thread | **54–61 ms** | 127–137 ms |
-
-The time until `main` (20–25 ms) is process creation; delay-load changes nothing about that. After that: reading and decoding approx. 25 ms, CPU frame approx. 5 ms, drawing under 1 ms. Side effect: since the UI thread processes messages instead of blocking, `D3D11CreateDevice` now also takes only approx. 95 instead of 150 ms.
-
-**Still open:** measurement from the outside with `blinzel-race` and a visual check of the GDI → Direct3D transition. Both only work with an unlocked screen; the machine was locked during the measurement. Only resident mode (M6) gets below 50 ms.
-
-**Resident handoff (M6, branch `m6-resident`, same machine, 24 MP JPEG):** Measured with `blinzel --resident --json <datei>`: the handoff carries the creation time of the second process, so the marks count from its process start, as with a cold start.
-
-| State | Handoff received → visible (median) | first handoff after startup |
-|---|---|---|
-| without warm-up | 24.6 ms | 43 ms |
-| + decode/upload warmed up at screen size | 24.7 ms | 33 ms |
-| + window shown cloaked once | **23–25 ms** (range 22–29 ms) | 23–24 ms |
-
-Of this, reading approx. 2 ms, decoding approx. 19 ms (3000 × 2000, all P-cores), upload approx. 1.5 ms, present under 1 ms. Target ≤ 25 ms reached. The second process needs as long until the handoff as a cold start until `main` (normally 20–25 ms; during this measurement the machine was locked and needed 120–150 ms, the old state too). From the outside, therefore, normally approx. 45–50 ms from double-click to image.
-
-Memory of the hidden instance: 50 MB private after startup, approx. 70 MB after use and stable (60 handoffs, no growth).
-
-**Next, in this order:**
-1. With an unlocked screen: visual check of the GDI transition, look at the tray menu and waking, measure `blinzel-race` with cold start and resident.
-2. Finish M6: visual check of tray, waking and color management on a monitor with a wide-gamut profile.
-3. M4: visual check of grid and filmstrip; then file names under the tiles and a grid scenario in `blinzel-race`.
-4. M5 as in section 12.

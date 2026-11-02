@@ -30,7 +30,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 - The batch dialog and its file list — because it is specified with batch processing; this spec only covers the marked set the grid keeps
 - View modes, zoom and full screen of the single image — because they are specified with the view modes
 - Window placement, window chrome and the platform shells' event loops — because they are specified with the platform shells
-- File names under the tiles and a grid scenario in `blinzel-race` — because they are not built (`blinzel.md` §16)
+- File names under the tiles and a grid scenario in `blinzel-race` — because they are not built
 
 ## Acceptance criteria
 

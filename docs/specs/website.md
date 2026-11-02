@@ -3,7 +3,7 @@ status: todo
 created: 2026-11-02
 size: M
 platforms: all
-design: [blinzel.md §2, blinzel.md §11, blinzel.md §12 (M8), blinzel.md §14]
+design: [blinzel.md §2, blinzel.md §11, blinzel.md §12 (M8)]
 ---
 
 # Website
@@ -26,7 +26,7 @@ The site is a one-page site per language (German, English) plus a privacy page. 
 
 - The measurement that produces `race.json` / `race-macos.json` — because `blinzel-race` has its own spec (`competitive-benchmark.md`).
 - The content of the hand-written feature comparison tables (Windows viewers, macOS viewers, batch tools) — because they are prose with sources that a person proofreads, not generated from data.
-- A legal notice (Impressum) page — because only the operator can provide its details (`blinzel.md` §14); it does not exist yet.
+- A legal notice (Impressum) page — because only the operator can provide its details (`README.md`, open items outside the code); it does not exist yet.
 - Charts from `blinzel-bench` or `blinzel --bench` JSON — because the generator only reads the two race reports.
 
 ## Acceptance criteria

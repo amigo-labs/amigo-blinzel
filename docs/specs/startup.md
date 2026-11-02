@@ -3,7 +3,7 @@ status: todo
 created: 2026-11-02
 size: M
 platforms: all
-design: [blinzel.md §5, blinzel.md §12, blinzel.md §13, blinzel.md §15, blinzel.md §16]
+design: [blinzel.md §5, blinzel.md §12, blinzel.md §13, blinzel.md §15]
 ---
 
 # Startup: parallel cold start and its measurement
@@ -98,7 +98,7 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | AC-03 | | open | |
 | AC-04 | | open | |
 | AC-05 | `tracks_the_reference_renderer`, `straight_alpha_blends_over_the_background`, `applies_the_colour_transform_to_the_image_only`, `fast_path_matches_the_general_path` (`crates/blinzel-core/src/preview.rs`; Linux, macOS, Windows) | built | |
-| AC-06 | manual: visual check on Windows 11 pending (`blinzel.md` §16 "visual check of the GDI → Direct3D transition") | open | |
+| AC-06 | manual: visual check on Windows 11 pending (`blinzel.md` §13, the GDI → Direct3D transition) | open | |
 | AC-07 | | open | |
 | AC-08 | | open | |
 | AC-09 | CI step "Linux viewer smoke test" (`.github/workflows/ci.yml`, Linux job: exit code within 120 s, `cat startup.json`); also "App bundle and smoke test (window, first frame)" (macOS job); the Windows "Startup smoke test" is `continue-on-error` | built | |
