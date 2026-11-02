@@ -490,6 +490,7 @@ fn animation_stage<D: Device, S: Services>(
     let mut device = None;
     let mut upload_ms = 0.0;
     let mut sent = None::<Instant>;
+    let mut plays = None;
     let info = stream(data, ANIM_BUDGET, &mut |f: AnimFrame| {
         if cancel.is_cancelled() {
             return false;
@@ -505,6 +506,7 @@ fn animation_stage<D: Device, S: Services>(
         };
         upload_ms += tu.elapsed().as_secs_f64() * 1e3;
         frames.push((Arc::new(gpu), f.delay_ms));
+        plays = f.plays;
         if frames.len() >= 2 && sent.is_none_or(|s| s.elapsed() >= ANIM_UPDATE) {
             send(&frames, None, false, upload_ms);
             sent = Some(Instant::now());
@@ -514,8 +516,15 @@ fn animation_stage<D: Device, S: Services>(
     if cancel.is_cancelled() {
         return;
     }
-    // A decode error ends the animation with the frames decoded so far.
-    let plays = info.ok().and_then(|i| i.plays);
+    // A decode error ends the animation with the frames decoded so far,
+    // at the loop count the file gave up to there.
+    let plays = match info {
+        Ok(i) => i.plays,
+        Err(e) => {
+            shared.services.log(&format!("animation: {e}"));
+            plays
+        }
+    };
     send(&frames, plays, true, upload_ms);
 }
 

@@ -73,6 +73,9 @@ pub(crate) struct FakeDevice {
     pub uploads: Mutex<Vec<(u32, u32)>>,
     /// The texture budget it reports; `None`: 1 GiB, like Linux.
     pub budget: Option<usize>,
+    /// When set, that many more uploads succeed, then every one fails
+    /// (out of GPU memory).
+    pub uploads_left: Mutex<Option<usize>>,
 }
 
 impl Device for FakeDevice {
@@ -82,6 +85,12 @@ impl Device for FakeDevice {
     fn upload(&self, img: &Image, orientation: Orientation) -> Result<FakeImage, String> {
         let size = (img.width, img.height);
         let full_size = (img.full_width, img.full_height);
+        if let Some(left) = self.uploads_left.lock().unwrap().as_mut() {
+            if *left == 0 {
+                return Err("out of memory".into());
+            }
+            *left -= 1;
+        }
         self.uploads.lock().unwrap().push(size);
         Ok(FakeImage {
             size,
@@ -382,6 +391,63 @@ pub(crate) fn jpeg(w: u32, h: u32) -> Vec<u8> {
     };
     let rgb = blinzel_core::testimg::rgb(w, h);
     blinzel_core::decode::jpeg::encode_rgb(&rgb, w, h, opts).unwrap()
+}
+
+/// An animated GIF of `w` × `h`: one frame per entry of `delays`
+/// (centiseconds), frame `i` all in colour `i % 4` of a four-colour
+/// palette, with a NETSCAPE loop count `repeat` (`None`: no extension, it
+/// plays once).
+pub(crate) fn gif(w: u16, h: u16, delays: &[u16], repeat: Option<u16>) -> Vec<u8> {
+    let mut out = b"GIF89a".to_vec();
+    out.extend(w.to_le_bytes());
+    out.extend(h.to_le_bytes());
+    // A global table of four colours.
+    out.extend([0xF1, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]);
+    if let Some(n) = repeat {
+        out.extend(b"\x21\xFF\x0BNETSCAPE2.0\x03\x01");
+        out.extend(n.to_le_bytes());
+        out.push(0);
+    }
+    for (i, delay) in delays.iter().enumerate() {
+        // Graphic control (disposal "keep", no transparency), then the
+        // whole canvas without a local table.
+        out.extend([0x21, 0xF9, 4, 0x04]);
+        out.extend(delay.to_le_bytes());
+        out.extend([0, 0, 0x2C, 0, 0, 0, 0]);
+        out.extend(w.to_le_bytes());
+        out.extend(h.to_le_bytes());
+        out.extend([0, 2]);
+        // LZW with a clear code (4) before every two pixels keeps every
+        // code 3 bits wide; 5 ends the data.
+        let mut codes = Vec::new();
+        for p in 0..w as usize * h as usize {
+            if p % 2 == 0 {
+                codes.push(4);
+            }
+            codes.push(i as u32 % 4);
+        }
+        codes.push(5);
+        let (mut data, mut acc, mut bits) = (Vec::new(), 0u32, 0);
+        for c in codes {
+            acc |= c << bits;
+            bits += 3;
+            while bits >= 8 {
+                data.push(acc as u8);
+                acc >>= 8;
+                bits -= 8;
+            }
+        }
+        if bits > 0 {
+            data.push(acc as u8);
+        }
+        for block in data.chunks(255) {
+            out.push(block.len() as u8);
+            out.extend(block);
+        }
+        out.push(0);
+    }
+    out.push(0x3B);
+    out
 }
 
 // ------------------------------------------------------------------ driver
@@ -954,6 +1020,11 @@ impl Harness {
     /// Decodes so far: the image's size and the threads it was given.
     pub fn decodes(&self) -> Vec<((u32, u32), usize)> {
         self.app.services.decodes.lock().unwrap().clone()
+    }
+
+    /// `n` more uploads to the device succeed, then every one fails.
+    pub fn fail_uploads_after(&self, n: usize) {
+        *self.app.device.uploads_left.lock().unwrap() = Some(n);
     }
 
     /// Every decode fails with `e` from now on (`None`: decode again).
