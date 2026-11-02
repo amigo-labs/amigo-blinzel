@@ -74,7 +74,7 @@ This spec records what the code does today (reverse engineered on 2026-11-02). T
 - **Delete.** `Cmd::Recycle` → `Action::Recycle(path)`; the shell moves the file (`SHFileOperationW` with `FOF_ALLOWUNDO` on Windows, the `trash` crate on Linux, `NSFileManager.trashItemAtURL` on macOS) and calls `App::removed`, which uses `FileList::remove` to pick the next index.
 - **Menu.** `menu::items(&MenuState)` builds the tree every shell shows (Windows `TrackPopupMenuEx`, macOS menu bar, Linux `Popup` drawn by the UI). Commands carry stable ids (`Cmd::id` / `from_id`). Resident and screenshot entries are compiled in only on Windows and macOS (`RESIDENT`, `SCREENSHOTS`).
 - **Editor.** `edit_action` returns `Action::EditWith` or `Action::ChooseEditor { then: Some(file) }`; `App::editor_chosen` saves the editor path unless it contains `"`, `\n` or `\r`.
-- **Testing.** `App` has no headless test harness yet; only `edit_action` is tested in `app.rs`. `popup.rs` has a `NoDevice`/`NoCanvas` backend in its tests that a harness for `App<B>` could build on.
+- **Testing.** The App-level ACs are tested in `crates/blinzel-ui/src/app_viewing_tests.rs` with the headless harness `testkit::Harness`: keys, commands and mouse go in, the returned `Action`s, the view state, the menu model and the recorded frame (texts and their positions) come out. The window-state actions are applied the way the Linux shell does (`Harness::shell`).
 
 ## Edge cases
 
