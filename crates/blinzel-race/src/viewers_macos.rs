@@ -45,6 +45,12 @@ fn roots() -> Vec<PathBuf> {
 
 /// Installed candidates at their default locations, amigo-blinzel first.
 pub fn detect() -> Vec<Viewer> {
+    detect_in(&roots())
+}
+
+/// The known app bundles found under `roots` (the first root holding one
+/// wins).
+fn detect_in(roots: &[PathBuf]) -> Vec<Viewer> {
     let known: &[(&str, &[&str])] = &[
         ("amigo-blinzel", &["amigo-blinzel.app"]),
         ("Preview", &["Preview.app"]),
@@ -54,7 +60,6 @@ pub fn detect() -> Vec<Viewer> {
         ("Phoenix Slides", &["Phoenix Slides.app"]),
         ("Pixea", &["Pixea.app"]),
     ];
-    let roots = roots();
     known
         .iter()
         .filter_map(|(name, rels)| {
@@ -83,5 +88,54 @@ pub fn launch(v: &Viewer, file: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("open -a {} failed", v.launch.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bundle(app: &Path, version: Option<&str>) {
+        std::fs::create_dir_all(app.join("Contents")).unwrap();
+        let key = version.map_or(String::new(), |v| {
+            format!("<key>CFBundleShortVersionString</key><string>{v}</string>")
+        });
+        let plist = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <plist version=\"1.0\"><dict>{key}</dict></plist>\n"
+        );
+        std::fs::write(app.join("Contents/Info.plist"), plist).unwrap();
+    }
+
+    #[test]
+    fn detects_app_bundles_with_their_versions() {
+        let tmp = std::env::temp_dir().join(format!("blinzel-race-viewers-{}", std::process::id()));
+        let (a, b) = (tmp.join("a"), tmp.join("b"));
+        bundle(&b.join("Pixea.app"), Some("6.1"));
+        bundle(&a.join("XnView MP.app"), Some("1.8.2"));
+        bundle(&b.join("amigo-blinzel.app"), Some("1.3.0"));
+        bundle(&a.join("qView.app"), None);
+        // Not a bundle: no Info.plist.
+        std::fs::create_dir_all(a.join("Preview.app")).unwrap();
+        let found = detect_in(&[a.clone(), b.clone()]);
+        let names: Vec<&str> = found.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, ["amigo-blinzel", "XnView MP", "qView", "Pixea"]);
+        let versions: Vec<String> = found.iter().map(Viewer::version).collect();
+        assert_eq!(versions, ["1.3.0", "1.8.2", "?", "6.1"]);
+        assert_eq!(found[0].launch, b.join("amigo-blinzel.app"));
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// What `blinzel-race list` shows on every Mac: Preview from
+    /// `/System/Applications`, with its version.
+    #[test]
+    fn detects_preview_on_this_mac() {
+        let preview = detect().into_iter().find(|v| v.name == "Preview");
+        let preview = preview.expect("Preview.app not detected");
+        let version = preview.version();
+        assert!(
+            version.starts_with(|c: char| c.is_ascii_digit()),
+            "{version}"
+        );
     }
 }
