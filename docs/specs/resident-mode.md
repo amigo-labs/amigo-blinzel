@@ -51,7 +51,7 @@ Opening an image costs a process start, a GPU device and the first use of shader
 - [ ] AC-16 (event, CI: windows): When an instance starts with resident mode on and the sign-in value points to another executable (moved or reinstalled), the value is rewritten to the running executable; before uninstalling, every running instance is asked to quit and awaited (up to 30 s each).
 - [ ] AC-17 (always, CI: macos): On macOS the sign-in item is the LaunchAgent `~/Library/LaunchAgents/io.github.amigo-labs.blinzel.plist` with the label `io.github.amigo-labs.blinzel`, the program path (XML-escaped) and `--resident` as arguments and `RunAtLoad` true.
 - [ ] AC-18 (option, CI: macos): Where resident mode is turned on in a copy that does not run from an app bundle, no LaunchAgent is written (an existing one is removed); turning resident mode off removes it.
-- [ ] AC-19 (error): If the viewer is started with `--resident` while resident mode is off, it exits with code 0 without a window (Windows also removes the sign-in value); on Windows a `--resident` start also exits at once if an instance is already running.
+- [ ] AC-19 (error): If the viewer is started with `--resident` while resident mode is off, it exits with code 0 without a window and removes the sign-in entry (the `Run` value on Windows, the LaunchAgent on macOS); on Windows a `--resident` start also exits at once if an instance is already running.
 - [ ] AC-20 (event, CI: windows): When started with `--resident`, the viewer shows no window and no taskbar button, and before idling decodes, uploads and presents a generated 3072 × 2048 JPEG once and, with colour management on, builds one colour transform (Display P3 → sRGB), so the platform's colour system is loaded.
 - [ ] AC-21 (event): When a window hides while an update has been installed whose version differs from the running one, the instance starts the installed version with `--resident` (macOS: `open -n -g <bundle> --args --resident`) and ends.
 - [ ] AC-22 (state): While the window is hidden, messages for the user (screenshot copied or failed, screenshot key taken) appear as a tray balloon (Windows) or for 4 s as a title next to the menu bar icon (macOS) instead of an in-window notice.
@@ -101,10 +101,12 @@ Opening an image costs a process start, a GPU device and the first use of shader
 | AC-16 |      | open   |        |
 | AC-17 | `launch_agent_starts_the_program_hidden` (`crates/blinzel-app/src/macos/resident.rs`), macOS CI job | built |        |
 | AC-18 |      | open   |        |
-| AC-19 |      | open   |        |
+| AC-19 | `a_resident_start_with_the_setting_off_removes_the_sign_in_value_and_exits` (`crates/blinzel-app/src/run.rs`), Windows CI job; `a_resident_start_with_the_setting_off_removes_the_launch_agent_and_exits` (`crates/blinzel-app/src/macos/shell.rs`), macOS CI job | built |        |
 | AC-20 |      | open   |        |
 | AC-21 |      | open   |        |
 | AC-22 |      | open   |        |
 | AC-23 |      | open   |        |
 
 ## Decisions
+
+- AC-19: the defect from the extraction (a macOS `--resident` start with the setting off left the LaunchAgent in place) is fixed, and the AC now says both shells remove their sign-in entry. The decision is a private pure function in each shell (`resident_start` in `run.rs` and `macos/shell.rs`); the macOS test was written against the old behavior first (it type-checks, `remove_sign_in: false` fails its assertion), but neither test can run on Linux: their first Windows and macOS CI runs are the proof. The Windows half already behaved, its test is green at once.

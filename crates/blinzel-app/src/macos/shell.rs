@@ -1755,6 +1755,28 @@ fn create_shell(mtm: MainThreadMarker) -> Result<(), String> {
     Ok(())
 }
 
+/// What a `--resident` start (the login item) does before AppKit starts
+/// (`docs/specs/resident-mode.md` AC-19).
+#[derive(Debug, PartialEq)]
+enum ResidentStart {
+    /// Start hidden in the menu bar.
+    Run,
+    /// Exit with code 0; `remove_sign_in` when resident mode was turned
+    /// off since, so the LaunchAgent goes too.
+    Exit { remove_sign_in: bool },
+}
+
+/// Resident mode `on` in the settings.
+fn resident_start(on: bool) -> ResidentStart {
+    if on {
+        ResidentStart::Run
+    } else {
+        ResidentStart::Exit {
+            remove_sign_in: true,
+        }
+    }
+}
+
 /// Runs the viewer; returns the process exit code.
 pub fn run() -> i32 {
     timing::init(0);
@@ -1779,7 +1801,12 @@ pub fn run() -> i32 {
     }
     let settings = settings_store::load();
     // The login item of a copy whose resident mode was turned off since.
-    if args.resident && !settings.resident {
+    if args.resident
+        && let ResidentStart::Exit { remove_sign_in } = resident_start(settings.resident)
+    {
+        if remove_sign_in && let Err(e) = super::resident::set_autostart(false) {
+            log(&format!("login item: {e}"));
+        }
         return 0;
     }
     let resident_start = args.resident;
@@ -1846,6 +1873,20 @@ mod tests {
     use super::*;
     use blinzel_core::geom::{Orientation, PixelRect};
     use blinzel_ui::app::ClipSource;
+
+    /// `docs/specs/resident-mode.md` AC-19: a `--resident` start with
+    /// resident mode off removes the LaunchAgent and exits, like the
+    /// Windows shell removes its Run value.
+    #[test]
+    fn a_resident_start_with_the_setting_off_removes_the_launch_agent_and_exits() {
+        assert_eq!(
+            resident_start(false),
+            ResidentStart::Exit {
+                remove_sign_in: true
+            }
+        );
+        assert_eq!(resident_start(true), ResidentStart::Run);
+    }
 
     /// AC-21 (`docs/specs/platform-shells.md`): a deleted image goes to the
     /// Trash (the system names where it is now) and leaves the list; one

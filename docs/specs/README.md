@@ -47,7 +47,6 @@ Behavior the code has today that contradicts the design or is plainly wrong. Eac
 | Defect | Spec |
 | ------ | ---- |
 | The thumbnail cache key lowercases the path on every platform: `A.jpg` and `a.jpg` share an entry on Linux and macOS | [thumbnails](thumbnails.md) |
-| A macOS `--resident` start with the setting off leaves the LaunchAgent in place (Windows removes its Run value) | [resident-mode](resident-mode.md) |
 
 ## Backlog
 
