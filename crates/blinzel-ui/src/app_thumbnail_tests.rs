@@ -579,3 +579,29 @@ fn cloud_placeholders_are_never_read_for_a_thumbnail() {
     assert_eq!(h.thumb_reads(), paths(&h, [0, 4]));
     assert!((1..4).all(|i| placeholder_at(&h, i)));
 }
+
+#[test]
+fn an_evicted_thumbnail_is_asked_for_again_when_it_is_needed() {
+    // 8 atlas pages of 64 slots: 600 thumbnails do not fit.
+    let mut h = folder_of(600);
+    h.key(Letter('G'));
+    let id = h.app.list().get(0).unwrap().cache_id();
+    h.wait_for(|h| h.app.browse.has_thumb(id));
+    while h.grid_selected() != Some(599) {
+        h.wait_for(|h| h.frame().thumbs.len() >= 16);
+        h.key(PageDown);
+    }
+    h.wait_for(|h| h.thumb_reads().len() >= 600);
+    // Tile 0 was drawn least recently: its slot went to another one.
+    assert!(!h.app.browse.has_thumb(id), "evicted");
+    h.key(Home);
+    h.wait_for(|h| h.app.browse.has_thumb(id));
+    h.wait_for(|h| h.frame().thumbs.len() >= 16);
+    let cell = h.grid_cell(0).unwrap();
+    assert!(
+        h.frame()
+            .thumbs
+            .iter()
+            .any(|r| cell.contains((r.x + 1.0, r.y + 1.0)))
+    );
+}
