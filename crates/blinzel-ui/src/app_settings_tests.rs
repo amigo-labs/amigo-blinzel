@@ -413,3 +413,25 @@ fn the_app_never_writes_the_window_placement_itself() {
         );
     }
 }
+
+/// `docs/specs/updates.md` AC-13: "Install updates automatically" is on by
+/// default, and the menu entry toggles and saves it.
+#[test]
+fn install_updates_automatically_is_on_by_default_and_saved_when_toggled() {
+    let mut h = Harness::new();
+    assert!(h.app.settings.auto_update);
+    h.command(ToggleAutoUpdate);
+    assert!(!h.app.settings.auto_update);
+    assert!(!h.saved_settings().unwrap().auto_update);
+    h.command(ToggleAutoUpdate);
+    assert!(h.saved_settings().unwrap().auto_update);
+}
+
+/// `docs/specs/updates.md` AC-15: "Check for updates" hands the check to
+/// the shell at once, whatever the setting says.
+#[test]
+fn check_for_updates_asks_the_shell_to_check() {
+    let mut h = Harness::new();
+    h.app.settings.auto_update = false;
+    assert_eq!(h.command(CheckUpdates), [Action::CheckUpdates]);
+}
