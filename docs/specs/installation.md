@@ -103,8 +103,8 @@ amigo-blinzel has no installer framework (`blinzel.md` §2, "Installer"). On Win
 | AC-09 | `an_unsupported_windows_refuses_the_install_with_2`, `the_viewer_refuses_an_old_windows_with_the_setups_message` (`crates/blinzel-app/src/setup/mod.rs`), `windows_11_24h2_and_newer_are_supported` (`crates/blinzel-app/src/platform/os.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-10 |      | open   |        |
 | AC-11 |      | open   |        |
-| AC-12 | `installs_and_uninstalls` (`crates/blinzel-app/src/linux/install.rs`), Linux CI `cargo test --workspace` | built |        |
-| AC-13 | `installs_and_uninstalls` (`crates/blinzel-app/src/linux/install.rs`), Linux CI; the settings message is not checked | built |        |
+| AC-12 | `installs_and_uninstalls`, `the_data_folder_is_xdg_data_home_else_local_share` (`Layout::user_from`; red with `XDG_DATA_HOME` ignored) (`crates/blinzel-app/src/linux/install.rs`), Linux CI `cargo test --workspace` | built |        |
+| AC-13 | `installs_and_uninstalls` (`crates/blinzel-app/src/linux/install.rs`: a settings folder next to the cache stays, and `uninstalled`, the printed message, names its path; red with the path left out and with the folder removed), Linux CI | built |        |
 | AC-14 | `leaves_foreign_files_alone` (`crates/blinzel-app/src/linux/install.rs`), Linux CI | built |        |
 | AC-15 | `quotes_exec_paths` (`crates/blinzel-app/src/linux/install.rs`), Linux CI | built |        |
 | AC-16 | `window_class_is_the_desktop_entrys` (`crates/blinzel-app/tests/startup.rs`), Linux CI job's Xvfb step | built |        |

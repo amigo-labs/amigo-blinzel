@@ -81,7 +81,7 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 | ----- | ---- | ------ | ------ |
 | AC-01 | `writes_signature_jpegs_and_keeps_existing_files` (`crates/blinzel-race/src/corpus.rs`, Linux CI) | built | |
 | AC-02 | `colours_are_unambiguous` (`crates/blinzel-race/src/signature.rs`, Linux CI) | built | |
-| AC-03 | `classifies_images_and_ignores_the_rest` (`crates/blinzel-race/src/signature.rs`, Linux CI) | built | |
+| AC-03 | `classifies_images_and_ignores_the_rest` (`crates/blinzel-race/src/signature.rs`, Linux CI; 12 matching samples classify and 11 do not, as literals: red with `>` and with `MIN_MATCHES` = 13) | built | |
 | AC-04 | `waits_for_a_signature` (`crates/blinzel-race/src/frames.rs`, Linux CI) | built | |
 | AC-05 | `counts_shown_images`, `burst_settles_on_the_expected_image_or_records_dropped_presses` (`crates/blinzel-race/src/report.rs`; Linux, Windows and macOS CI) | built | |
 | AC-06 | `median_and_p95` (`crates/blinzel-race/src/report.rs`; Linux, Windows and macOS CI) | built | |

@@ -82,8 +82,8 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 | AC-01 | `corpus_lists_every_file_at_its_size`, `corpus_is_identical_on_every_run_and_keeps_existing_files` (`crates/blinzel-bench/src/main.rs`) | built | |
 | AC-02 | `corpus_lists_every_file_at_its_size`, `corpus_is_identical_on_every_run_and_keeps_existing_files` (`crates/blinzel-bench/src/main.rs`) | built | |
 | AC-03 | `every_candidate_runs_once_untimed_then_9_or_3_times`, `a_result_line_shows_group_candidate_file_median_min_and_rate` (`crates/blinzel-bench/src/main.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |
-| AC-04 | CI step `Library vs. own code benchmarks` (`run … --check`, Windows job) | built | |
-| AC-05 | CI step `Library vs. own code benchmarks` (Windows job); `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) for the decision | built | |
+| AC-04 | `check_fails_on_a_blinzel_jpeg_mismatch`, `a_differing_plane_row_fails_the_comparison` (`crates/blinzel-bench/src/main.rs`, Linux CI: `check` with a mismatch and `compare_planes`, the row comparison of `verify_own_jpeg`, on a differing row; red with either always `Ok`); CI step `Library vs. own code benchmarks` (`run … --check`, Windows job) | built | |
+| AC-05 | `check_fails_on_a_zune_jpeg_win_and_names_file_medians_minima_and_cause`, `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI; red with `check` always `Ok`); CI step `Library vs. own code benchmarks` (Windows job) | built | |
 | AC-06 | `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) | built | |
 | AC-07 | `run_without_a_corpus_says_to_write_it_and_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-08 | `json_has_the_machine_and_one_result_per_line` (`crates/blinzel-bench/src/main.rs`); `run_times_every_group_and_writes_every_result` (`crates/blinzel-bench/tests/cli.rs`) | built | |

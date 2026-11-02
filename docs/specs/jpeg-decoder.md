@@ -88,7 +88,7 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 | AC-05 | `parses_baseline_420`, `classifies_subsampling`, `finds_app_segments` (`crates/blinzel-jpeg/src/lib.rs`), CI: Linux | built | |
 | AC-06 | `header_prefix_is_enough` (`crates/blinzel-jpeg/src/lib.rs`), CI: Linux | built | |
 | AC-07 | `dct_scale_choice` (`crates/blinzel-jpeg/src/lib.rs`), `scales_round_up` (`crates/blinzel-jpeg/src/decoder.rs`), CI: Linux | built | |
-| AC-08 | `rejects_garbage` (`crates/blinzel-jpeg/src/lib.rs`), `rejects_garbage` (`crates/blinzel-jpeg/src/decoder.rs`), `rejects_overfull_tables` (`crates/blinzel-jpeg/src/huffman.rs`), CI: Linux | built | |
+| AC-08 | `rejects_garbage` (`crates/blinzel-jpeg/src/lib.rs`; sampling factors 0x55, 0x10 and 0x01: red with 0 allowed), `rejects_garbage` (`crates/blinzel-jpeg/src/decoder.rs`), `rejects_overfull_tables` (`crates/blinzel-jpeg/src/huffman.rs`), CI: Linux | built | |
 | AC-09 | `refuses_unsupported_files_and_scales_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-10 | `refuses_missing_or_short_buffers_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-11 | `truncated_data_decodes_partially_without_panicking` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |

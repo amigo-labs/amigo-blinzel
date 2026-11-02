@@ -11,26 +11,26 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | # | Spec | ACs proven | CI-only | Manual | Next |
 | - | ---- | ---------- | ------- | ------ | ---- |
 | 1 | [selection-and-export](selection-and-export.md) | 20 / 22 | 2 | 2 | the manual checks AC-04 (visual design), AC-15 (save dialog); then `/spec-check` |
-| 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | a test that pins the viewer's atlas at 8 pages (AC-12: `ATLAS_PAGES` = 9 stays green); the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements); then `/spec-check` |
-| 3 | [startup](startup.md) | 11 / 14 | 6 | 3 | the manual checks AC-06 (visual), AC-08 (module-load trace; its Windows test is green in CI run 41532658575), AC-12 (measurement); AC-13's evidence to name `bench::tests::the_report_holds_every_measurement`; then `/spec-check` |
+| 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements); then `/spec-check` |
+| 3 | [startup](startup.md) | 10 / 14 | 6 | 3 | the Windows CI run of AC-11's `the_basic_render_driver_counts_as_warp` (`warp` was false on the Basic Render Driver); the manual checks AC-06 (visual), AC-08 (module-load trace; its Windows test is green in CI run 41532658575), AC-12 (measurement); then `/spec-check` |
 | 4 | [browsing](browsing.md) | 20 / 21 | 4 | 1 | the manual check AC-21 (measurement); then `/spec-check` (the Windows and macOS tests of AC-13, AC-15, AC-16, AC-18 are green in CI run 41532658575) |
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
-| 6 | [image-formats](image-formats.md) | 24 / 24 | 4 | 0 | a test that a raw preview more than 1 % short of the stage is not the stage (AC-20: a 10 % tolerance stays green); then `/spec-check` |
-| 7 | [jpeg-decoder](jpeg-decoder.md) | 16 / 17 | 0 | 1 | a test that a sampling factor of 0 is rejected (AC-08: only 5 is tested); the manual check AC-17 (speed factor on an 8-core machine, `blinzel-bench jpeg-ab`); then `/spec-check` |
+| 6 | [image-formats](image-formats.md) | 24 / 24 | 4 | 0 | `/spec-check` |
+| 7 | [jpeg-decoder](jpeg-decoder.md) | 16 / 17 | 0 | 1 | the manual check AC-17 (speed factor on an 8-core machine, `blinzel-bench jpeg-ab`); then `/spec-check` |
 | 8 | [animations](animations.md) | 13 / 14 | 0 | 1 | the manual check AC-14 (playback smoothness); then `/spec-check` |
-| 9 | [color-management](color-management.md) | 17 / 19 | 3 | 2 | a test that pins the 0.003 colorant tolerance of AC-04 (0.03 stays green); the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
+| 9 | [color-management](color-management.md) | 17 / 19 | 3 | 2 | the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
 | 10 | [batch-resize](batch-resize.md) | 26 / 28 | 1 | 2 | the manual checks AC-21 (measurement), AC-28 (visual design); then `/spec-check` |
-| 11 | [localization](localization.md) | 17 / 17 | 2 | 0 | tests for 12 and 14 (many) and 22, 24 (few) in the east-slavic rule (AC-08: 12–13 instead of 12–14 stays green); then `/spec-check` |
+| 11 | [localization](localization.md) | 17 / 17 | 2 | 0 | `/spec-check` |
 | 12 | [platform-shells](platform-shells.md) | 19 / 24 | 11 | 5 | the manual checks AC-05, AC-06, AC-13, AC-20, AC-22; then `/spec-check` |
-| 13 | [resident-mode](resident-mode.md) | 21 / 23 | 15 | 1 | tests for AC-13's default item "Show" and the re-add after `TaskbarCreated`; the manual check AC-23 (measurement); then `/spec-check` |
-| 14 | [screenshots](screenshots.md) | 21 / 23 | 8 | 1 | a test of AC-03's notice (balloon while hidden, `hint_pending`, 9 s in the window); tests that pin the 4 px click/drag threshold (AC-10, AC-11: 6 px stays green); the manual check AC-21; then `/spec-check` |
-| 15 | [installation](installation.md) | 17 / 21 | 12 | 3 | tests for AC-12's `<data>` folder (`$XDG_DATA_HOME`, else `~/.local/share`) and AC-13's kept settings folder and printed path; the first release run of AC-18; the manual checks AC-10 (setup window), AC-11 (no Direct3D), AC-21 (SmartScreen, Gatekeeper); then `/spec-check` |
+| 13 | [resident-mode](resident-mode.md) | 21 / 23 | 15 | 1 | the Windows CI run of AC-13's tests of the default item "Show" and the re-add after `TaskbarCreated`; the manual check AC-23 (measurement); then `/spec-check` |
+| 14 | [screenshots](screenshots.md) | 21 / 23 | 8 | 1 | the Windows CI run of AC-03's notice test (`route_hint`); the manual check AC-21; then `/spec-check` |
+| 15 | [installation](installation.md) | 17 / 21 | 12 | 3 | the first release run of AC-18; the manual checks AC-10 (setup window), AC-11 (no Direct3D), AC-21 (SmartScreen, Gatekeeper); then `/spec-check` |
 | 16 | [updates](updates.md) | 22 / 23 | 3 | 1 | the manual check AC-23 (a published release on a clean VM); then `/spec-check` |
 | 17 | [release](release.md) | 10 / 18 | 9 | 3 | the first release run of AC-03 … AC-09, AC-13, AC-15 (`release.yml`); the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`); then `/spec-check` |
-| 18 | [benchmark-gate](benchmark-gate.md) | 19 / 19 | 6 | 0 | tests that `run --check` fails on a blinzel-jpeg mismatch (AC-04) and on a zune-jpeg win, naming file, medians, minima and cause (AC-05); a green CI step proves only the passing path; then `/spec-check` |
-| 19 | [competitive-benchmark](competitive-benchmark.md) | 12 / 17 | 3 | 5 | a test that exactly 12 matching samples classify (AC-03: `>` instead of `>=` stays green); the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
+| 18 | [benchmark-gate](benchmark-gate.md) | 19 / 19 | 6 | 0 | `/spec-check` |
+| 19 | [competitive-benchmark](competitive-benchmark.md) | 12 / 17 | 3 | 5 | the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
 | 20 | [website](website.md) | 18 / 21 | 0 | 3 | the manual checks AC-19 (a Cloudflare Workers Builds deploy), AC-20 (the website workflow with and without the Cloudflare secrets), AC-21 (visual design on a phone and a desktop); then `/spec-check` |
-| | **Total** | **363 / 410** | | | |
+| | **Total** | **362 / 410** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 

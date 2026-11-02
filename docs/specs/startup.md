@@ -106,7 +106,7 @@ amigo-blinzel is meant to be measurably faster than any other viewer at opening 
 | AC-10 | `same_window_follows_the_setting` (no hand-over and no socket while measuring), `the_startup_report_goes_to_json_or_startup_json` (`crates/blinzel-app/src/linux/shell.rs`); Windows: `measuring_starts_its_own_instance_and_reports_to_json_or_startup_json` (`crates/blinzel-app/src/run.rs`, Windows CI job) | built | |
 | AC-11 | `measuring_the_first_frame_writes_the_report_and_quits` (`crates/blinzel-ui/src/app_startup_tests.rs`: one object with `adapter`, `warp` from `Device::is_software`, `marks` with `first_present`); `marks_and_json` (`crates/blinzel-core/src/timing.rs`: marks count from the origin given to `timing::init`, which is `process_age_us()` on Windows and 0 at the start of `main` on Linux and macOS); Windows `warp` on the Basic Render Driver: `the_basic_render_driver_counts_as_warp` (`crates/blinzel-app/src/gfx/device.rs`), CI: Windows — written, not run yet | open | |
 | AC-12 | manual: measurement | open | |
-| AC-13 | CI step "App benchmark (offscreen, WARP)" (`.github/workflows/ci.yml`, Windows job: exit code 0; the report's content is not checked) | built | |
+| AC-13 | CI step "App benchmark (offscreen, WARP)" (`.github/workflows/ci.yml`, Windows job: exit code 0); `bench::tests::the_report_holds_every_measurement` (`crates/blinzel-app/src/bench.rs`, `cfg(windows)`: every file's timings on a 2560 × 1440 screen, navigation, listing, thumbnail grid), Windows job ok (CI run 41532658575) | built | |
 | AC-14 | `a_folder_without_images_fails_with_exit_code_1` (`crates/blinzel-app/src/bench.rs`, `cfg(windows)`; Windows job ok (CI run 41504896644, `0acbc36`)) | built | |
 
 ## Decisions
