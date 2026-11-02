@@ -15,7 +15,14 @@ fn index(h: &Harness) -> Option<usize> {
 #[test]
 fn an_opened_file_shows_before_its_folder_is_listed_and_keys_wait_for_the_listing() {
     let mut h = Harness::new();
-    for n in ["a.png", "B.png", "b.png", "c.png"] {
+    // APFS and NTFS fold case: "B.png" would be "b.png" there.
+    h.write_png("b.png", 64, 48);
+    let names: &[&str] = if h.images.join("B.png").exists() {
+        &["a.png", "b.png", "c.png"]
+    } else {
+        &["a.png", "B.png", "b.png", "c.png"]
+    };
+    for n in names {
         h.write_png(n, 64, 48);
     }
     let _ = h.app.open(h.images.join("b.png"));
@@ -29,8 +36,9 @@ fn an_opened_file_shows_before_its_folder_is_listed_and_keys_wait_for_the_listin
     }
     h.release_listing();
     h.pump();
-    assert_eq!(h.names(), ["a.png", "B.png", "b.png", "c.png"]);
-    assert_eq!(index(&h), Some(2), "the exact name, not B.png");
+    assert_eq!(h.names(), names);
+    let exact = names.iter().position(|n| *n == "b.png");
+    assert_eq!(index(&h), exact, "the exact name, not B.png");
     h.key(Right);
     assert_eq!(h.current_name().as_deref(), Some("c.png"));
 }
