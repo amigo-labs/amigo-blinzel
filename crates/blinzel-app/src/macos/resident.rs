@@ -155,15 +155,21 @@ pub fn launch_agent(program: &Path) -> String {
 /// bundle gets one: a bare executable may move.
 pub fn set_autostart(on: bool) -> Result<(), String> {
     let path = agent_path().ok_or("no home folder")?;
-    match super::update::bundle_program().filter(|_| on) {
+    sign_in(&path, on, super::update::bundle_program())
+}
+
+/// The LaunchAgent at `path`: written for `bundle`'s program while `on`,
+/// removed while off or outside an app bundle (`bundle` is `None`).
+fn sign_in(path: &Path, on: bool, bundle: Option<PathBuf>) -> Result<(), String> {
+    match bundle.filter(|_| on) {
         Some(program) => {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
-            std::fs::write(&path, launch_agent(&program))
+            std::fs::write(path, launch_agent(&program))
                 .map_err(|e| format!("{}: {e}", path.display()))
         }
-        None => match std::fs::remove_file(&path) {
+        None => match std::fs::remove_file(path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 Err(format!("{}: {e}", path.display()))
             }
@@ -175,6 +181,28 @@ pub fn set_autostart(on: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docs/specs/resident-mode.md` AC-18: only a copy in an app bundle
+    /// writes the LaunchAgent; outside one, or with resident mode off, an
+    /// existing one is removed (in a temporary folder, never the real one).
+    #[test]
+    fn only_a_copy_in_an_app_bundle_writes_the_launch_agent() {
+        let dir = std::env::temp_dir().join(format!("blinzel-agent-{}", std::process::id()));
+        let path = dir.join("LaunchAgents").join(format!("{AGENT}.plist"));
+        let program = PathBuf::from("/Applications/amigo-blinzel.app/Contents/MacOS/blinzel");
+        sign_in(&path, true, Some(program.clone())).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            launch_agent(&program)
+        );
+        sign_in(&path, true, None).unwrap();
+        assert!(!path.exists(), "outside an app bundle: removed");
+        sign_in(&path, true, None).unwrap();
+        sign_in(&path, true, Some(program.clone())).unwrap();
+        sign_in(&path, false, Some(program)).unwrap();
+        assert!(!path.exists(), "resident mode off: removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn launch_agent_starts_the_program_hidden() {
