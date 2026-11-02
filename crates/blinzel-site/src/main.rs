@@ -195,6 +195,9 @@ fn placeholder(key: &str, lang: Lang, races: &[Race]) -> Result<String, String> 
     if let Some((prefix, kind)) = key.split_once(':')
         && let Some(race) = races.iter().find(|r| r.prefix == prefix)
     {
+        if !charts::KINDS.contains(&kind) {
+            return Err(format!("unknown race chart {kind:?}"));
+        }
         return match &race.data {
             None => Ok(format!("<p class=\"pending\">{}</p>", lang.t("pending"))),
             Some(r) => charts::race(kind, r, &format!("/{}", race.file), |k| lang.t(k)),
@@ -371,6 +374,31 @@ mod tests {
         assert!(expand("{{nope}}", Lang::De, &races).is_err());
         assert!(expand("{{race-other:next}}", Lang::De, &races).is_err());
         assert!(expand("{{version", Lang::De, &races).is_err());
+    }
+
+    /// A page with an unknown placeholder, an unknown race chart kind (with
+    /// or without the report) or an unclosed `{{` stops the build.
+    #[test]
+    fn bad_placeholders_fail_the_build() {
+        let tmp = fresh_site("placeholders");
+        let page = tmp.join("src/en/privacy.html");
+        let good = fs::read_to_string(&page).unwrap();
+        for bad in [
+            "{{nope}}",
+            "{{race:bogus}}",
+            "{{race-macos:tabel}}",
+            "{{version",
+        ] {
+            fs::write(&page, format!("{good}{bad}\n")).unwrap();
+            let e = build(&tmp).expect_err(bad);
+            assert!(e.starts_with("en/privacy: "), "{bad}: {e}");
+        }
+        fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
+        fs::write(&page, format!("{good}{{{{race:bogus}}}}\n")).unwrap();
+        assert!(build(&tmp).is_err());
+        fs::write(&page, good).unwrap();
+        assert!(build(&tmp).is_ok());
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     /// The download placeholders resolve to the stable URLs of the latest
