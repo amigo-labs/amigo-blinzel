@@ -243,7 +243,7 @@ mod tests {
     extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let handled = CLIP.with(|c| {
             c.try_borrow_mut()
-                .is_ok_and(|mut c| on_message(hwnd, msg, wp, &mut *c))
+                .is_ok_and(|mut c| on_message(hwnd, msg, wp, &mut c))
         });
         if handled {
             LRESULT(0)
