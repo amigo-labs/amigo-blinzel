@@ -492,18 +492,7 @@ impl Shell {
                     vec![]
                 }
             }
-            Action::Recycle(path) => {
-                let url = file_url(&path);
-                match NSFileManager::defaultManager()
-                    .trashItemAtURL_resultingItemURL_error(&url, None)
-                {
-                    Ok(()) => self.app.removed(&path),
-                    Err(e) => {
-                        log(&format!("trash: {}", e.localizedDescription()));
-                        vec![]
-                    }
-                }
-            }
+            Action::Recycle(path) => recycle(&path, |p, _| self.app.removed(p)),
             Action::SaveCutout(job) => {
                 self.save(job, mtm);
                 vec![]
@@ -1049,6 +1038,24 @@ fn file_url(p: &Path) -> Retained<NSURL> {
 
 fn url_path(u: &NSURL) -> Option<PathBuf> {
     u.path().map(|p| PathBuf::from(p.to_string()))
+}
+
+/// Moves `path` to the Trash; on success `removed` gets the image and
+/// where it is in the Trash now, a refused one stays where it is.
+fn recycle(path: &Path, removed: impl FnOnce(&Path, &Path) -> Vec<Action>) -> Vec<Action> {
+    let mut trashed = None;
+    match NSFileManager::defaultManager()
+        .trashItemAtURL_resultingItemURL_error(&file_url(path), Some(&mut trashed))
+    {
+        Ok(()) => removed(
+            path,
+            &trashed.and_then(|u| url_path(&u)).unwrap_or_default(),
+        ),
+        Err(e) => {
+            log(&format!("trash: {}", e.localizedDescription()));
+            vec![]
+        }
+    }
 }
 
 fn open_path(p: &Path) {
@@ -1839,6 +1846,41 @@ mod tests {
     use super::*;
     use blinzel_core::geom::{Orientation, PixelRect};
     use blinzel_ui::app::ClipSource;
+
+    /// AC-21 (`docs/specs/platform-shells.md`): a deleted image goes to the
+    /// Trash (the system names where it is now) and leaves the list; one
+    /// the Trash refuses (here: a file that does not exist) stays listed.
+    #[test]
+    fn a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed() {
+        let dir = std::env::temp_dir().join(format!("blinzel-trash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.png");
+        std::fs::write(&file, b"png").unwrap();
+        let mut removed = vec![];
+        let a = recycle(&file, |p, trashed| {
+            removed.push((p.to_path_buf(), trashed.to_path_buf()));
+            vec![Action::Uncloak]
+        });
+        assert_eq!(a, [Action::Uncloak]);
+        assert_eq!(removed.len(), 1);
+        let (gone, trashed) = &removed[0];
+        assert_eq!(gone, &file);
+        assert!(!file.exists());
+        assert!(
+            trashed
+                .components()
+                .any(|c| c.as_os_str() == ".Trash" || c.as_os_str() == ".Trashes"),
+            "in the Trash: {trashed:?}"
+        );
+        // Not left in the Trash of whoever runs the tests.
+        let _ = std::fs::remove_file(trashed);
+
+        let missing = dir.join("b.png");
+        let a = recycle(&missing, |_, _| panic!("the list keeps it"));
+        assert!(a.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// `docs/specs/selection-and-export.md` AC-11: a copy is decoded and
     /// encoded as PNG on its own thread, then lands on the general
