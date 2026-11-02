@@ -658,10 +658,7 @@ impl Shell {
             if double {
                 let actions = match app.double_click(p) {
                     Some(a) => a,
-                    None if !app.fullscreen && p.1 < chrome.caption_height() => {
-                        vec![Action::ToggleMaximize]
-                    }
-                    None => vec![Action::ToggleFullscreen],
+                    None => vec![Action::ToggleMaximize],
                 };
                 self.run(el, actions);
                 return;

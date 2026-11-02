@@ -359,10 +359,9 @@ fn handle(
         }
         WM_LBUTTONDBLCLK => {
             let p = point_from_lparam(lp);
+            // The free caption strip is `HTCAPTION`: Windows maximizes.
             if let Some(a) = app.double_click(p) {
                 actions.extend(a);
-            } else if app.fullscreen || app.chrome().hit(p).is_none() {
-                actions.push(Action::ToggleFullscreen);
             }
             done
         }
