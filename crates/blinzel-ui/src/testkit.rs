@@ -120,6 +120,8 @@ pub(crate) struct Frame {
     pub texts: Vec<String>,
     /// The colour of each of [`Frame::texts`].
     pub text_colors: Vec<Rgba>,
+    /// The top-left corner of each of [`Frame::texts`].
+    pub text_positions: Vec<(f32, f32)>,
 }
 
 /// A canvas that measures text (7 px per character, 16 px high) and
@@ -169,9 +171,10 @@ impl Canvas for FakeCanvas {
     fn text_size(&mut self, text: &str, _: f32, _: f32) -> Option<(u32, u32)> {
         Some((7 * text.chars().count() as u32, 16))
     }
-    fn draw_text(&mut self, text: &str, _: f32, _: f32, _: (f32, f32), color: Rgba) {
+    fn draw_text(&mut self, text: &str, _: f32, _: f32, at: (f32, f32), color: Rgba) {
         self.frame.texts.push(text.to_string());
         self.frame.text_colors.push(color);
+        self.frame.text_positions.push(at);
     }
     fn present(&mut self) {
         self.presented += 1;
@@ -247,6 +250,8 @@ pub(crate) struct FakeServices {
     pub attributes: Mutex<HashMap<String, u32>>,
     /// Seconds the local clock is ahead of UTC, at every moment.
     pub utc_offset: AtomicI32,
+    /// When set, every decode fails with this error (e.g. one from WIC).
+    pub decode_error: Mutex<Option<DecodeError>>,
 }
 
 impl FakeServices {
@@ -281,6 +286,9 @@ impl Services for FakeServices {
         decode::probe(data)
     }
     fn decode(&self, data: &[u8], req: Request, threads: usize) -> Result<Image, DecodeError> {
+        if let Some(e) = self.decode_error.lock().unwrap().clone() {
+            return Err(e);
+        }
         decode::decode_with(data, req, threads)
     }
     fn log(&self, msg: &str) {
@@ -429,6 +437,7 @@ impl Harness {
             reads: Mutex::new(Vec::new()),
             attributes: Mutex::new(HashMap::new()),
             utc_offset: AtomicI32::new(0),
+            decode_error: Mutex::new(None),
         });
         let device = Arc::new(FakeDevice::default());
         let loader = Loader::new(services.clone(), 1, 2, 2);
@@ -830,6 +839,11 @@ impl Harness {
     pub fn set_attributes(&self, name: &str, attributes: u32) {
         let mut a = self.app.services.attributes.lock().unwrap();
         a.insert(name.to_string(), attributes);
+    }
+
+    /// Every decode fails with `e` from now on (`None`: decode again).
+    pub fn set_decode_error(&self, e: Option<DecodeError>) {
+        *self.app.services.decode_error.lock().unwrap() = e;
     }
 
     /// The platform's clock is `secs` ahead of UTC from now on.

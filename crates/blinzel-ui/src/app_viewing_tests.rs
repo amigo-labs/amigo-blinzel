@@ -5,6 +5,7 @@
 use super::*;
 use crate::testkit::{Harness, IMAGE_SIZE};
 use Key::*;
+use blinzel_core::decode::DecodeError;
 use blinzel_core::layout::ViewOptions;
 
 const MODES: [ViewMode; 3] = [
@@ -468,4 +469,227 @@ fn in_fit_image_to_window_the_window_may_grow_for_each_image() {
     assert_eq!(fits(&h.key(Letter('R'))), [((1200, 1600), true)]);
     let strip = strip_height(1.0) as u32;
     assert_eq!(fits(&h.key(Letter('T'))), [((1200, 1600 + strip), true)]);
+}
+
+// ----------------------------------------------------------- full screen
+
+fn centre(r: Rect) -> (f64, f64) {
+    (r.x + r.w / 2.0, r.y + r.h / 2.0)
+}
+
+/// AC-11: the keys.
+#[test]
+fn f11_and_enter_toggle_full_screen_which_hides_the_buttons() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let buttons = h.app.chrome().shapes(None, None, false).len();
+    assert!(buttons > 0);
+    assert_eq!(h.frame().shapes.len(), buttons, "the buttons are drawn");
+    let menu = centre(h.app.chrome().rect(Button::Menu));
+    for key in [F11, Enter] {
+        let a = h.key(key);
+        assert_eq!(a, [Action::ToggleFullscreen], "{key:?}");
+        h.shell(a);
+        assert!(h.app.fullscreen);
+        assert!(h.frame().shapes.is_empty(), "no buttons drawn");
+        h.mouse_move(menu);
+        assert_eq!(h.app.hover, None, "none hovered");
+        assert_eq!(h.click(menu), [], "none clicked");
+        let a = h.key(key);
+        assert_eq!(a, [Action::ToggleFullscreen]);
+        h.shell(a);
+        assert!(!h.app.fullscreen);
+        assert_eq!(h.frame().shapes.len(), buttons);
+        assert!(matches!(h.click(menu)[..], [Action::ShowMenu { .. }]));
+        h.app.popup = None;
+    }
+
+    // Not in the grid, the menu or a dialog.
+    h.key(Letter('G'));
+    let a = h.key(Enter);
+    assert!(!a.contains(&Action::ToggleFullscreen), "{a:?}");
+    assert_eq!(h.grid_selected(), None, "Enter opened the tile");
+    h.app.open_menu((300.0, 200.0));
+    assert!(!h.key(F11).contains(&Action::ToggleFullscreen));
+    assert!(h.app.popup.is_some());
+    h.key(Escape);
+    h.ctrl(Letter('B'));
+    for key in [F11, Enter] {
+        assert!(!h.key(key).contains(&Action::ToggleFullscreen), "{key:?}");
+    }
+    assert!(h.app.dialog.is_some());
+}
+
+/// AC-11: the double click.
+#[test]
+fn a_double_click_below_the_caption_strip_toggles_full_screen() {
+    let mut h = Harness::with_images(&["a.png", "b.png"]);
+    let chrome = h.app.chrome();
+    let caption = chrome.caption_height();
+    let toggle = Some(vec![Action::ToggleFullscreen]);
+    // On the image or beside it.
+    assert_eq!(h.double_click((400.0, 300.0)), toggle);
+    assert_eq!(h.double_click((20.0, caption + 1.0)), toggle);
+    // The caption strip and its buttons are the window's (maximize).
+    for b in [
+        Button::Menu,
+        Button::Minimize,
+        Button::Maximize,
+        Button::Close,
+    ] {
+        assert_eq!(h.double_click(centre(chrome.rect(b))), None, "{b:?}");
+    }
+    assert_eq!(
+        h.double_click((400.0, caption / 2.0)),
+        None,
+        "caption strip"
+    );
+    // Full screen has no buttons and no caption strip.
+    h.shell(vec![Action::ToggleFullscreen]);
+    assert_eq!(h.double_click(centre(chrome.rect(Button::Close))), toggle);
+    assert_eq!(h.double_click((400.0, caption / 2.0)), toggle);
+    h.shell(vec![Action::ToggleFullscreen]);
+    // Not on the filmstrip or the grid.
+    h.key(Letter('T'));
+    assert_eq!(h.double_click((400.0, 595.0)), Some(vec![]), "filmstrip");
+    h.key(Letter('G'));
+    let tile = centre(h.grid_cell(1).unwrap());
+    let a = h.double_click(tile).unwrap();
+    assert!(!a.contains(&Action::ToggleFullscreen), "{a:?}");
+    assert_eq!(
+        h.current_name().as_deref(),
+        Some("b.png"),
+        "it opened the tile"
+    );
+}
+
+// --------------------------------------------------------------- Escape
+
+/// AC-12.
+#[test]
+fn escape_ends_a_drag_clears_the_selection_shows_the_original_leaves_full_screen_and_closes() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let crop = cut(&mut h);
+    let a = h.key(F11);
+    h.shell(a);
+    assert!(h.app.fullscreen);
+    // A selection drag in progress.
+    let (from, to) = (h.at((8.0, 8.0)), h.at((24.0, 20.0)));
+    h.mouse_down(from);
+    h.mouse_move(((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0));
+    h.mouse_move(to);
+    assert!(h.app.is_dragging());
+    let sel = h.app.selection().unwrap();
+    assert_eq!(h.key(Escape), []);
+    assert!(!h.app.is_dragging(), "the drag ended");
+    h.mouse_move((to.0 + 10.0, to.1 + 10.0));
+    h.mouse_up();
+    assert_eq!(h.app.selection(), Some(sel), "the selection keeps its size");
+
+    assert_eq!(h.key(Escape), []);
+    assert_eq!(h.app.selection(), None, "the selection");
+    assert_eq!(h.view().crop, Some(crop));
+    assert_eq!(fits(&h.key(Escape)), []);
+    assert_eq!(h.view().crop, None, "the crop");
+    assert!(h.app.fullscreen);
+    let a = h.key(Escape);
+    assert_eq!(a, [Action::ToggleFullscreen], "full screen");
+    h.shell(a);
+    assert_eq!(h.key(Escape), [Action::Close], "the window");
+
+    // The grid, the menu and the dialog take it first.
+    h.key(Letter('G'));
+    assert_eq!(h.key(Escape), []);
+    assert_eq!(h.grid_selected(), None);
+    h.app.open_menu((300.0, 200.0));
+    assert_eq!(h.key(Escape), []);
+    assert!(h.app.popup.is_none());
+    h.ctrl(Letter('B'));
+    assert_eq!(h.key(Escape), []);
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.key(Escape), [Action::Close]);
+}
+
+// -------------------------------------------------------------- messages
+
+/// `text` alone in the frame, centred (7 px per character, 16 px high).
+fn assert_centred_message(h: &Harness, text: &str) {
+    assert_eq!(h.frame().texts, [text]);
+    let w = 7.0 * text.chars().count() as f64;
+    let at = (
+        ((800.0 - w) / 2.0).round() as f32,
+        ((600.0f64 - 16.0) / 2.0).round() as f32,
+    );
+    assert_eq!(h.frame().text_positions, [at]);
+}
+
+/// AC-13: nothing open.
+#[test]
+fn without_an_image_the_window_shows_the_hint_or_why_the_open_failed() {
+    let mut h = Harness::new();
+    h.render();
+    let hint = "Drop an image here or press Ctrl+O";
+    assert_centred_message(&h, hint);
+    h.command(Cmd::Language(blinzel_i18n::lang_from_code("de")));
+    let german = tr(Msg::HintOpen);
+    assert_ne!(german, hint);
+    assert_centred_message(&h, german);
+    h.command(Cmd::Language(Some(blinzel_i18n::FALLBACK)));
+
+    let missing = h.images.join("missing.png");
+    let reason = std::fs::metadata(&missing).unwrap_err().to_string();
+    let a = h.app.open(missing);
+    assert_eq!(a, []);
+    h.pump();
+    assert_centred_message(&h, &format!("Could not open “missing.png”: {reason}"));
+}
+
+/// AC-13: an image that cannot be shown, and one still loading.
+#[test]
+fn a_broken_image_shows_why_instead_of_the_previous_one() {
+    let mut h = Harness::new();
+    h.write_png("a.png", 64, 48);
+    h.write_file("b.png", b"not an image");
+    h.write_file("c.png", &crate::testkit::png(64, 48)[..60]);
+    h.open("a.png");
+    assert_eq!(h.frame().images.len(), 1);
+    // No decoder for it.
+    h.key(Right);
+    assert!(h.frame().images.is_empty(), "not the previous image");
+    assert_centred_message(
+        &h,
+        "Could not open “b.png”: unsupported or damaged image format",
+    );
+    // The decoder's own message.
+    h.key(Right);
+    let id = h.app.current.as_ref().unwrap().cache_id;
+    let e = h.app.error_of(id).unwrap().to_string();
+    assert!(e.starts_with("corrupt image"), "{e}");
+    assert!(h.frame().images.is_empty());
+    assert_centred_message(&h, &format!("Could not open “c.png”: {e}"));
+    // Back to one that works: no message.
+    h.key(Home);
+    assert_eq!(h.frame().images.len(), 1);
+    assert!(h.frame().texts.is_empty());
+
+    // An error from WIC.
+    drop(h);
+    let mut h = Harness::new();
+    h.write_png("d.png", 64, 48);
+    h.set_decode_error(Some(DecodeError::Corrupt(
+        "WIC: The component cannot be found.".into(),
+    )));
+    h.open("d.png");
+    assert_centred_message(
+        &h,
+        "Could not open “d.png”: unsupported or damaged image format",
+    );
+
+    // Still loading: no message.
+    h.set_decode_error(None);
+    h.write_png("e.png", 64, 48);
+    let _ = h.app.open(h.images.join("e.png"));
+    h.render();
+    assert!(h.frame().texts.is_empty(), "{:?}", h.frame().texts);
+    h.pump();
+    assert_eq!(h.frame().images.len(), 1);
 }
