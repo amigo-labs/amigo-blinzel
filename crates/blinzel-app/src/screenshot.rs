@@ -14,11 +14,11 @@ use blinzel_core::geom::{Orientation, Rect};
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 use blinzel_core::screenshot as core_shot;
 use blinzel_core::settings::Settings;
-use blinzel_i18n::{Msg, tr, trf};
+use blinzel_i18n::{Lang, Msg, fill, tr, tr_in, trf};
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
 use blinzel_ui::snip::{self, Outcome, Snip};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SYSTEMTIME, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmFlush, DwmGetWindowAttribute,
 };
@@ -40,7 +40,7 @@ use windows::Win32::UI::Shell::{
     FOLDERID_Pictures, FOLDERID_Screenshots, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{BOOL, PCWSTR, w};
+use windows::core::{BOOL, GUID, PCWSTR, w};
 
 use crate::backend::{D3dCanvas, D3dDevice};
 use crate::gfx::{Renderer, SwapChain};
@@ -385,31 +385,38 @@ fn save(main: HWND, shot: &Shot, r: Rect) {
         });
 }
 
-/// The folder from the settings, else Windows' screenshot folder
-/// (Pictures\Screenshots).
+/// The folder from the settings, else Windows' screenshot folder.
 fn folder(settings: &Settings) -> PathBuf {
-    if let Some(d) = &settings.screenshot_dir {
-        return PathBuf::from(d);
-    }
-    let known = |id| unsafe {
+    folder_in(settings, |id| unsafe {
         let p = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
         let s = p.to_string().ok();
         CoTaskMemFree(Some(p.0 as *const _));
         s.map(PathBuf::from)
-    };
+    })
+}
+
+/// The folder from the settings, else the Screenshots known folder, else
+/// Pictures\Screenshots, as `known` finds them.
+fn folder_in(settings: &Settings, known: impl Fn(&GUID) -> Option<PathBuf>) -> PathBuf {
+    if let Some(d) = &settings.screenshot_dir {
+        return PathBuf::from(d);
+    }
     known(&FOLDERID_Screenshots)
         .or_else(|| known(&FOLDERID_Pictures).map(|p| p.join("Screenshots")))
         .unwrap_or_else(|| std::env::temp_dir().join("Screenshots"))
 }
 
-/// "Screenshot 2026-10-26 071530" in the UI language.
 fn file_stem() -> String {
-    let t = unsafe { GetLocalTime() };
+    file_stem_at(blinzel_i18n::lang(), &unsafe { GetLocalTime() })
+}
+
+/// "Screenshot 2026-10-26 071530" in `lang`, for the local time `t`.
+fn file_stem_at(lang: Lang, t: &SYSTEMTIME) -> String {
     let date = format!(
         "{:04}-{:02}-{:02} {:02}{:02}{:02}",
         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
     );
-    trf(Msg::ScreenshotName, &[("date", &date)])
+    fill(tr_in(lang, Msg::ScreenshotName), &[("date", &date)])
 }
 
 // ------------------------------------------------------------------ overlay
@@ -676,4 +683,57 @@ pub fn notice(hwnd: HWND, text: String) {
 /// The notice when Windows keeps the Print key.
 pub fn hotkey_taken() -> String {
     tr(Msg::HotkeyTaken).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-18: the folder chosen in the menu, else the Screenshots known
+    /// folder, else Pictures\Screenshots; this machine's folder is a real
+    /// one.
+    #[test]
+    fn the_folder_is_the_chosen_one_else_the_systems() {
+        let chosen = Settings {
+            screenshot_dir: Some("D:\\Shots".into()),
+            ..Settings::default()
+        };
+        assert_eq!(
+            folder_in(&chosen, |_| panic!("not asked")),
+            Path::new("D:\\Shots")
+        );
+        let both = |id: &GUID| {
+            Some(PathBuf::from(if *id == FOLDERID_Screenshots {
+                "C:\\S"
+            } else {
+                "C:\\P"
+            }))
+        };
+        let none = Settings::default();
+        assert_eq!(folder_in(&none, both), Path::new("C:\\S"));
+        let pictures = |id: &GUID| (*id == FOLDERID_Pictures).then(|| PathBuf::from("C:\\P"));
+        assert_eq!(folder_in(&none, pictures), Path::new("C:\\P\\Screenshots"));
+        let real = folder(&none);
+        assert!(real.is_absolute(), "{real:?}");
+        assert!(real.ends_with("Screenshots"), "{real:?}");
+    }
+
+    /// AC-18: the file is named after the local time in the UI language.
+    #[test]
+    fn the_file_is_named_after_the_time_in_the_ui_language() {
+        let t = SYSTEMTIME {
+            wYear: 2026,
+            wMonth: 1,
+            wDay: 9,
+            wHour: 7,
+            wMinute: 5,
+            wSecond: 3,
+            ..Default::default()
+        };
+        assert_eq!(file_stem_at(Lang::En, &t), "Screenshot 2026-01-09 070503");
+        assert_eq!(
+            file_stem_at(Lang::De, &t),
+            "Bildschirmfoto 2026-01-09 070503"
+        );
+    }
 }
