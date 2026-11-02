@@ -229,6 +229,60 @@ pub fn verify_signature(message: &[u8], sig: &[u8], public_key: &[u8; 32]) -> bo
         .is_ok()
 }
 
+/// The GitHub API address of the latest release.
+pub fn latest_release_url() -> String {
+    format!("https://api.github.com/repos/{REPO}/releases/latest")
+}
+
+/// What [`check`] found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Found {
+    /// The latest release is not newer than the running version (given).
+    Current(Version),
+    /// A newer release, downloaded and verified: the shell puts it in place.
+    New { version: Version, download: Vec<u8> },
+}
+
+/// One check against the latest release, the same on every platform
+/// (`docs/specs/updates.md` AC-01..AC-08). `fetch(url, limit)` is the
+/// shell's HTTPS GET of at most `limit` bytes, `hash` its SHA-256. Only a
+/// release newer than `running` is downloaded: first `SHA256SUMS` and its
+/// signature, which must verify with `key`, then `asset` (at most
+/// `max_download` bytes), whose hash must be the one listed for it.
+pub fn check(
+    asset: &str,
+    running: Version,
+    key: Option<[u8; 32]>,
+    max_download: usize,
+    mut fetch: impl FnMut(&str, usize) -> Result<Vec<u8>, String>,
+    hash: impl FnOnce(&[u8]) -> Result<[u8; 32], String>,
+) -> Result<Found, String> {
+    let key = key.ok_or("no release signing key in this build")?;
+    let json = fetch(&latest_release_url(), 1 << 20)?;
+    let json = String::from_utf8(json).map_err(|_| "release info is not UTF-8")?;
+    let Release {
+        version,
+        exe_url,
+        sums_url,
+        sig_url,
+    } = parse_release(&json, asset).ok_or("no usable release")?;
+    if version <= running {
+        return Ok(Found::Current(running));
+    }
+    let sums = fetch(&sums_url, 64 << 10)?;
+    let sig = fetch(&sig_url, 4 << 10)?;
+    if !verify_signature(&sums, &sig, &key) {
+        return Err("checksums are not signed with the release key".into());
+    }
+    let sums = String::from_utf8(sums).map_err(|_| "checksums are not UTF-8")?;
+    let want = sum_for(&sums, asset).ok_or("no checksum for us")?;
+    let download = fetch(&exe_url, max_download)?;
+    if hash(&download)? != want {
+        return Err("download does not match its checksum".into());
+    }
+    Ok(Found::New { version, download })
+}
+
 /// Whether an automatic check is due. A last check in the future (clock
 /// changed) counts as due.
 pub fn check_due(last_check: Option<u64>, now: u64) -> bool {
@@ -382,6 +436,161 @@ mod tests {
         assert!(parse_release(RELEASE, &linux_asset_name("x64")).is_none());
         let pre = RELEASE.replace("\"prerelease\": false", "\"prerelease\": true");
         assert!(parse_release(&pre, &asset_name("x64")).is_none());
+    }
+
+    /// AC-01: drafts, pre-releases, tags other than `x.y.z` / `vx.y.z` and
+    /// releases without the asset, `SHA256SUMS` or `SHA256SUMS.sig` offer
+    /// nothing.
+    #[test]
+    fn parse_release_offers_only_complete_published_releases() {
+        let x64 = asset_name("x64");
+        assert!(parse_release(RELEASE, &x64).is_some());
+        let tag = |t: &str| RELEASE.replace("\"v0.2.0\"", &format!("\"{t}\""));
+        assert!(parse_release(&tag("0.2.0"), &x64).is_some());
+        for bad in ["v0.2", "0.2.0.1", "v0.2.0-rc.1", "latest"] {
+            assert!(parse_release(&tag(bad), &x64).is_none(), "{bad}");
+        }
+        let draft = RELEASE.replace("\"draft\": false", "\"draft\": true");
+        assert!(parse_release(&draft, &x64).is_none(), "draft");
+        let pre = RELEASE.replace("\"prerelease\": false", "\"prerelease\": true");
+        assert!(parse_release(&pre, &x64).is_none(), "pre-release");
+        let without =
+            |name: &str| RELEASE.replace(&format!("\"name\": \"{name}\""), "\"name\": \"x\"");
+        assert!(
+            parse_release(&without(SUMS), &x64).is_none(),
+            "no SHA256SUMS"
+        );
+        assert!(parse_release(&without(SUMS_SIG), &x64).is_none(), "no .sig");
+        assert!(parse_release(&without(&x64), &x64).is_none(), "no asset");
+    }
+
+    /// AC-04: Linux fetches the bare executable for its architecture, macOS
+    /// the zipped universal bundle, out of a release that carries all
+    /// platforms.
+    #[test]
+    fn picks_the_linux_and_macos_assets() {
+        assert_eq!(linux_asset_name("x64"), "amigo-blinzel-linux-x64");
+        assert_eq!(linux_asset_name("arm64"), "amigo-blinzel-linux-arm64");
+        assert_eq!(macos_asset_name(), "amigo-blinzel-macos.zip");
+        let all = RELEASE.replace(
+            "\"assets\": [",
+            r#""assets": [
+            {"name": "amigo-blinzel-linux-x64.tar.gz", "browser_download_url": "https://x/tgz"},
+            {"name": "amigo-blinzel-linux-x64", "browser_download_url": "https://x/linux64"},
+            {"name": "amigo-blinzel-linux-arm64", "browser_download_url": "https://x/linuxarm"},
+            {"name": "amigo-blinzel-macos.dmg", "browser_download_url": "https://x/dmg"},
+            {"name": "amigo-blinzel-macos.zip", "browser_download_url": "https://x/zip"},"#,
+        );
+        let url = |asset: String| parse_release(&all, &asset).unwrap().exe_url;
+        assert_eq!(url(linux_asset_name("x64")), "https://x/linux64");
+        assert_eq!(url(linux_asset_name("arm64")), "https://x/linuxarm");
+        assert_eq!(url(macos_asset_name()), "https://x/zip");
+    }
+
+    /// A release `tag` whose `SHA256SUMS` lists `download` for the x64
+    /// setup, signed with the key from `seed`; the fetcher serves it and
+    /// records every URL asked for.
+    struct Server {
+        files: Vec<(String, Vec<u8>)>,
+        asked: Vec<String>,
+    }
+
+    impl Server {
+        fn new(tag: &str, sums: &str, seed: u8) -> Server {
+            let kp = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([seed; 32]));
+            let sig = kp.sk.sign(sums.as_bytes(), None);
+            Server {
+                files: vec![
+                    (
+                        latest_release_url(),
+                        RELEASE.replace("v0.2.0", tag).into_bytes(),
+                    ),
+                    ("https://x/sums".into(), sums.as_bytes().to_vec()),
+                    ("https://x/sig".into(), sig.as_ref().to_vec()),
+                    ("https://x/exe64".into(), b"new exe".to_vec()),
+                ],
+                asked: Vec::new(),
+            }
+        }
+
+        fn check(&mut self, running: &str) -> Result<Found, String> {
+            let key = *ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32])).pk;
+            let (files, asked) = (&self.files, &mut self.asked);
+            check(
+                &asset_name("x64"),
+                Version::parse(running).unwrap(),
+                Some(key),
+                1 << 20,
+                |url, _| {
+                    asked.push(url.to_string());
+                    let f = files.iter().find(|(u, _)| u == url).ok_or("404")?;
+                    Ok(f.1.clone())
+                },
+                |d| Ok(sha256(d)),
+            )
+        }
+    }
+
+    fn good_sums() -> String {
+        format!(
+            "{}  amigo-blinzel-setup-x64.exe\n",
+            to_hex(&sha256(b"new exe"))
+        )
+    }
+
+    /// AC-05: a latest release that is not newer downloads nothing beyond
+    /// the release info and reports the running version as current.
+    #[test]
+    fn check_downloads_nothing_when_not_newer() {
+        for (latest, running) in [("v0.2.0", "0.2.0"), ("v0.2.0", "0.10.0")] {
+            let mut s = Server::new(latest, &good_sums(), 7);
+            assert_eq!(
+                s.check(running),
+                Ok(Found::Current(Version::parse(running).unwrap()))
+            );
+            assert_eq!(s.asked, [latest_release_url()], "{latest} vs {running}");
+        }
+    }
+
+    /// AC-06..AC-08: a newer release is handed over only with a valid
+    /// signature, a line for the asset and a matching hash; otherwise the
+    /// check fails with its reason and hands nothing over.
+    #[test]
+    fn check_hands_over_only_a_verified_download() {
+        let mut s = Server::new("v0.3.0", &good_sums(), 7);
+        assert_eq!(
+            s.check("0.2.0"),
+            Ok(Found::New {
+                version: Version::parse("0.3.0").unwrap(),
+                download: b"new exe".to_vec()
+            })
+        );
+        let fails = |sums: &str, seed: u8| Server::new("v0.3.0", sums, seed).check("0.2.0");
+        assert_eq!(
+            fails(&good_sums(), 8),
+            Err("checksums are not signed with the release key".into())
+        );
+        let other = good_sums().replace("setup-x64", "setup-arm64");
+        assert_eq!(fails(&other, 7), Err("no checksum for us".into()));
+        let wrong = format!("{}  amigo-blinzel-setup-x64.exe\n", "00".repeat(32));
+        assert_eq!(
+            fails(&wrong, 7),
+            Err("download does not match its checksum".into())
+        );
+        // A bad signature stops before the download.
+        let mut s = Server::new("v0.3.0", &good_sums(), 8);
+        let _ = s.check("0.2.0");
+        assert!(!s.asked.iter().any(|u| u == "https://x/exe64"));
+        // No key in the build: nothing is asked for.
+        let r = check(
+            "a",
+            Version::parse("0.1.0").unwrap(),
+            None,
+            1,
+            |_, _| unreachable!(),
+            |_| unreachable!(),
+        );
+        assert_eq!(r, Err("no release signing key in this build".into()));
     }
 
     #[test]
