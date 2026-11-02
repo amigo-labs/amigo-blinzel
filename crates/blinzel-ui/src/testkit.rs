@@ -465,6 +465,57 @@ pub(crate) fn gif_on_screen(
     out
 }
 
+/// An animated lossless WebP of `w` × `h`: one full-canvas frame per entry
+/// of `delays` (ms), frame `i` all in colour `i % 4` like [`gif`],
+/// playing `loops` times (0: for ever), with an EXIF chunk giving
+/// `orientation` (1–8).
+pub(crate) fn webp(w: u32, h: u32, delays: &[u32], loops: u16, orientation: u16) -> Vec<u8> {
+    use blinzel_core::batch::encode::{Codec, Quality, encode};
+    fn chunk(code: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut c = code.to_vec();
+        c.extend((data.len() as u32).to_le_bytes());
+        c.extend(data);
+        if data.len() % 2 == 1 {
+            c.push(0);
+        }
+        c
+    }
+    let u24 = |v: u32| v.to_le_bytes()[..3].to_vec();
+    // VP8X: animation and EXIF; canvas size minus one.
+    let vp8x = [vec![0x02 | 0x08, 0, 0, 0], u24(w - 1), u24(h - 1)].concat();
+    let anim = [vec![0, 0, 0, 0], loops.to_le_bytes().to_vec()].concat();
+    let mut body = b"WEBP".to_vec();
+    body.extend(chunk(b"VP8X", &vp8x));
+    body.extend(chunk(b"ANIM", &anim));
+    let q = Quality {
+        webp_lossless: true,
+        ..Quality::default()
+    };
+    let colours = [
+        [0, 0, 255, 255],
+        [0, 255, 0, 255],
+        [255, 0, 0, 255],
+        [255; 4],
+    ];
+    for (i, &delay) in delays.iter().enumerate() {
+        let bgra = colours[i % 4].repeat(w as usize * h as usize);
+        // A simple file: RIFF....WEBP, then the VP8L chunk.
+        let still = encode(&bgra, w, h, Codec::Webp, &q, None, None).unwrap();
+        assert_eq!(&still[12..16], b"VP8L");
+        let mut anmf = [u24(0), u24(0), u24(w - 1), u24(h - 1), u24(delay)].concat();
+        // No blending: each frame replaces the canvas.
+        anmf.push(0x02);
+        anmf.extend(&still[12..]);
+        body.extend(chunk(b"ANMF", &anmf));
+    }
+    // Little-endian TIFF with one IFD entry: Orientation (SHORT).
+    let mut tiff = b"II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+    tiff.extend(orientation.to_le_bytes());
+    tiff.extend([0; 6]);
+    body.extend(chunk(b"EXIF", &tiff));
+    chunk(b"RIFF", &body)
+}
+
 // ------------------------------------------------------------------ driver
 
 /// Size of the images [`Harness::with_images`] writes.

@@ -2,7 +2,7 @@
 //! errors (`docs/specs/animations.md`).
 
 use super::*;
-use crate::testkit::{Harness, gif, gif_on_screen};
+use crate::testkit::{Harness, gif, gif_on_screen, webp};
 
 /// `n` GIF frames of 50 ms.
 fn frames(n: usize) -> Vec<u16> {
@@ -273,4 +273,47 @@ fn the_frames_so_far_go_to_the_window_at_most_every_200_ms() {
         assert!(w[1].0 > w[0].0 && w[1].3 - w[0].3 >= 200.0, "{got:?}");
     }
     assert!(partial.iter().all(|p| p.1.is_none() && !p.2), "{got:?}");
+}
+
+/// How the current image would be shown as a still (its animation set
+/// aside): orientation and layout.
+fn still_view(h: &mut Harness) -> (Orientation, Layout) {
+    let id = h.app.current.as_ref().unwrap().cache_id;
+    let a = h.app.animations.remove(&id).unwrap();
+    let (img, o, l) = h.app.displayed().unwrap();
+    assert!(Arc::ptr_eq(&img, &h.app.best_texture(id).unwrap()));
+    h.app.animations.insert(id, a);
+    (o, l)
+}
+
+/// Every frame of one play is shown like the still.
+fn every_frame_like_the_still(h: &mut Harness, want: Orientation) {
+    let still = still_view(h);
+    assert_eq!(still.0, want);
+    for i in 0..3 {
+        let (_, o, l) = h.app.displayed().unwrap();
+        assert_eq!((shown_frame(h), (o, l)), (Some(i), still), "frame {i}");
+        tick(h);
+    }
+}
+
+#[test]
+fn view_mode_zoom_pan_rotation_and_exif_orientation_apply_to_every_frame() {
+    // Stored 640 × 480, EXIF orientation 6: shown 480 × 640 upright.
+    let data = webp(640, 480, &[50; 3], 0, 6);
+    let mut h = open_gif(&data, "a.webp");
+    assert_eq!(anim(&h), Some((3, None, true)));
+    let exif = Orientation::from_exif(6);
+    every_frame_like_the_still(&mut h, exif);
+    h.key(Key::Digit(3));
+    assert_eq!(h.mode(), ViewMode::ActualSize);
+    every_frame_like_the_still(&mut h, exif);
+    h.key(Key::Plus);
+    assert!(h.view().zoom.is_some());
+    every_frame_like_the_still(&mut h, exif);
+    h.middle_drag((400.0, 300.0), (360.0, 200.0));
+    assert!(h.view().center.is_some(), "panned");
+    every_frame_like_the_still(&mut h, exif);
+    h.key(Key::Letter('R'));
+    every_frame_like_the_still(&mut h, exif.then(Orientation::NORMAL.rotated_cw()));
 }
