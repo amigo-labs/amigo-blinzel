@@ -176,13 +176,28 @@ impl BatchDialog {
         self.files.paths()
     }
 
+    /// Where `hit` was drawn last (tests).
+    #[cfg(test)]
+    fn drawn_at(&self, hit: Hit) -> Option<Rect> {
+        self.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| *r)
+    }
+
     /// Where the "Open folder" button was drawn last (tests).
     #[cfg(test)]
     pub(crate) fn open_folder_button(&self) -> Option<Rect> {
-        self.hits
-            .iter()
-            .find(|(_, h)| *h == Hit::OpenFolder)
-            .map(|(r, _)| *r)
+        self.drawn_at(Hit::OpenFolder)
+    }
+
+    /// Where the Cancel button was drawn last (tests).
+    #[cfg(test)]
+    pub(crate) fn cancel_button(&self) -> Option<Rect> {
+        self.drawn_at(Hit::Cancel)
+    }
+
+    /// Where the "sharpen" switch was drawn last (tests).
+    #[cfg(test)]
+    pub(crate) fn sharpen_switch(&self) -> Option<Rect> {
+        self.drawn_at(Hit::Sharpen)
     }
 
     pub fn is_running(&self) -> bool {
@@ -832,6 +847,17 @@ mod tests {
         std::fs::write(&a, b"x").unwrap();
         assert_eq!(d.add(vec![a.clone()]), Outcome::Inspect(vec![a.clone()]));
         assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "header still read");
+
+        // A readable file next to one still being read: no start either.
+        let mut d = dialog();
+        assert!(matches!(d.start(), Outcome::Start(..)), "readable alone");
+        assert_eq!(d.add(vec![a.clone()]), Outcome::Inspect(vec![a.clone()]));
+        assert_eq!(
+            d.key(Key::Enter),
+            Outcome::Unchanged,
+            "one header still read"
+        );
+        assert!(d.run.is_none());
         std::fs::remove_file(&a).unwrap();
     }
 

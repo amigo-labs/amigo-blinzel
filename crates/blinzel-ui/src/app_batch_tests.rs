@@ -3,9 +3,10 @@
 
 use super::*;
 use crate::testkit::Harness;
+use crate::widgets;
 use Key::*;
 use blinzel_core::batch::run::{Progress, Summary};
-use blinzel_i18n::{Msg, tr};
+use blinzel_i18n::{Msg, tr, trf};
 use std::sync::atomic::AtomicBool;
 
 fn centre(r: Rect) -> (f64, f64) {
@@ -202,4 +203,158 @@ fn progress_counts_and_the_first_four_errors_are_shown() {
         texts.iter().any(|t| t == "Cancelled after 1 of 3"),
         "{texts:?}"
     );
+}
+
+/// `docs/specs/batch-resize.md` AC-13: a file date in a name is read with
+/// the platform's offset (`Services::utc_offset`), in the list and in the
+/// run.
+#[test]
+fn file_dates_in_names_use_the_platforms_offset() {
+    let mut h = Harness::new();
+    let file = h.write_png("undated.png", 40, 30);
+    // 2024-02-29 23:30:05 UTC; two hours ahead it is already March.
+    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_709_249_405);
+    let f = std::fs::File::options().write(true).open(&file).unwrap();
+    f.set_modified(t).unwrap();
+    drop(f);
+    h.set_utc_offset(2 * 3600);
+    open_dialog(&mut h);
+    h.key(Tab);
+    h.key(Tab);
+    for _ in 0.."{name}".len() {
+        h.key(Backspace);
+    }
+    h.app.text_input("{date:YYYY-MM-DD_hh-mm}");
+    let a = h.app.files_dropped(vec![file]);
+    h.shell(a);
+    h.wait_for(headers_read);
+    assert_eq!(new_names(&h), ["2024-03-01_01-30.png"]);
+    h.key(Enter);
+    h.wait_for(|h| h.app.dialog.as_ref().is_some_and(|d| !d.is_running()));
+    let out = h.images.join("resized/2024-03-01_01-30.png");
+    assert!(out.is_file(), "the run writes the name shown");
+}
+
+/// `docs/specs/batch-resize.md` AC-20: the Cancel button stops a running
+/// batch instead of closing the dialog.
+#[test]
+fn the_cancel_button_cancels_a_running_batch() {
+    let mut h = Harness::with_images(&["a.png"]);
+    open_dialog(&mut h);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    h.app
+        .dialog
+        .as_mut()
+        .unwrap()
+        .started(3, rx, cancel.clone());
+    h.render();
+    let button = h.app.dialog.as_ref().unwrap().cancel_button();
+    h.click(centre(button.expect("a Cancel button")));
+    assert!(
+        cancel.load(std::sync::atomic::Ordering::Relaxed),
+        "cancelled"
+    );
+    let d = h.app.dialog.as_ref().expect("the dialog stays open");
+    assert!(d.is_running(), "files in progress finish");
+    tx.send(RunMsg::Finished(Summary {
+        done: 1,
+        failed: 0,
+        skipped: 2,
+    }))
+    .unwrap();
+    h.app.on_batch();
+    h.render();
+    let texts = drawn(&h);
+    assert!(
+        texts.iter().any(|t| t == "Cancelled after 1 of 3"),
+        "{texts:?}"
+    );
+}
+
+/// `docs/specs/batch-resize.md` AC-24: an unreadable file's row says so,
+/// with its reason, in red.
+#[test]
+fn unreadable_files_show_their_reason_in_red() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let broken = h.write_file("broken.png", b"\x89PNG\r\n\x1a\n nothing else");
+    open_dialog(&mut h);
+    let a = h.app.files_dropped(vec![h.images.join("a.png"), broken]);
+    h.shell(a);
+    h.wait_for(headers_read);
+    h.render();
+    let names = new_names(&h);
+    assert_eq!(names[0], "a.png");
+    let prefix = trf(Msg::BatchUnreadable, &[("reason", &"")]);
+    assert_eq!(prefix, "unreadable: ");
+    assert!(
+        names[1].starts_with(&prefix) && names[1].len() > prefix.len(),
+        "{names:?}"
+    );
+    // The colour of each row's new name (the text after its arrow).
+    let f = h.frame();
+    let colors: Vec<_> = f
+        .texts
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| *s == "→")
+        .map(|(i, _)| f.text_colors[i + 1])
+        .collect();
+    assert_eq!(colors, [widgets::FG, widgets::DANGER]);
+}
+
+/// `docs/specs/batch-resize.md` AC-27: "Open folder" opens the folder of
+/// the first copy written, not of a later one.
+#[test]
+fn open_folder_goes_to_the_first_written_copy() {
+    let mut h = Harness::with_images(&["a.png"]);
+    open_dialog(&mut h);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.started(2, rx, Arc::new(AtomicBool::new(false)));
+    for (i, out) in ["/trip/resized/0.jpg", "/home/resized/1.jpg"]
+        .into_iter()
+        .enumerate()
+    {
+        tx.send(RunMsg::Progress(Progress::Done {
+            index: i,
+            source: format!("/{i}.jpg").into(),
+            output: out.into(),
+            bytes: 1,
+        }))
+        .unwrap();
+    }
+    tx.send(RunMsg::Finished(Summary {
+        done: 2,
+        failed: 0,
+        skipped: 0,
+    }))
+    .unwrap();
+    h.app.on_batch();
+    h.render();
+    let button = h.app.dialog.as_ref().unwrap().open_folder_button();
+    let a = h.click(centre(button.expect("an Open folder button")));
+    assert_eq!(a, vec![Action::OpenFolder("/trip/resized".into())]);
+}
+
+/// `docs/specs/batch-resize.md` AC-06: the "sharpen" switch turns the
+/// mask (amount 0.5, sigma 0.8) on and off.
+#[test]
+fn the_sharpen_switch_sets_the_mask() {
+    let mut h = Harness::with_images(&["a.png"]);
+    open_dialog(&mut h);
+    let job = |h: &Harness| h.app.dialog.as_ref().unwrap().job().unwrap();
+    assert_eq!(job(&h).sharpen, None, "off by default");
+    h.render();
+    let switch = h.app.dialog.as_ref().unwrap().sharpen_switch();
+    let switch = centre(switch.expect("a sharpen switch"));
+    h.click(switch);
+    let mask = blinzel_core::batch::Sharpen {
+        amount: 0.5,
+        radius: 0.8,
+    };
+    assert_eq!(job(&h).sharpen, Some(mask));
+    h.render();
+    h.click(switch);
+    assert_eq!(job(&h).sharpen, None);
 }

@@ -16,7 +16,7 @@
 use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -118,6 +118,8 @@ pub(crate) struct Frame {
     /// Thumbnails, by destination rectangle.
     pub thumbs: Vec<Rect>,
     pub texts: Vec<String>,
+    /// The colour of each of [`Frame::texts`].
+    pub text_colors: Vec<Rgba>,
 }
 
 /// A canvas that measures text (7 px per character, 16 px high) and
@@ -167,8 +169,9 @@ impl Canvas for FakeCanvas {
     fn text_size(&mut self, text: &str, _: f32, _: f32) -> Option<(u32, u32)> {
         Some((7 * text.chars().count() as u32, 16))
     }
-    fn draw_text(&mut self, text: &str, _: f32, _: f32, _: (f32, f32), _: Rgba) {
+    fn draw_text(&mut self, text: &str, _: f32, _: f32, _: (f32, f32), color: Rgba) {
         self.frame.texts.push(text.to_string());
+        self.frame.text_colors.push(color);
     }
     fn present(&mut self) {
         self.presented += 1;
@@ -232,8 +235,9 @@ impl Host for FakeHost {
 // ---------------------------------------------------------------- services
 
 /// The real file system and the crate's own decoders; wakes go into a
-/// channel the [`Harness`] drains. English, UTC, sRGB monitor; log lines
-/// go to the test's output.
+/// channel the [`Harness`] drains. English, UTC unless a test sets an
+/// offset ([`Harness::set_utc_offset`]), sRGB monitor; log lines go to the
+/// test's output.
 pub(crate) struct FakeServices {
     wakes: Mutex<Sender<Wake>>,
     cache: PathBuf,
@@ -241,6 +245,8 @@ pub(crate) struct FakeServices {
     pub reads: Mutex<Vec<(String, PathBuf)>>,
     /// File attributes the listing reports, by name (cloud placeholders).
     pub attributes: Mutex<HashMap<String, u32>>,
+    /// Seconds the local clock is ahead of UTC, at every moment.
+    pub utc_offset: AtomicI32,
 }
 
 impl FakeServices {
@@ -291,6 +297,9 @@ impl Services for FakeServices {
     }
     fn system_language(&self) -> Lang {
         blinzel_i18n::FALLBACK
+    }
+    fn utc_offset(&self, _t: std::time::SystemTime) -> i32 {
+        self.utc_offset.load(Ordering::Relaxed)
     }
 }
 
@@ -419,6 +428,7 @@ impl Harness {
             cache: tmp.join("cache"),
             reads: Mutex::new(Vec::new()),
             attributes: Mutex::new(HashMap::new()),
+            utc_offset: AtomicI32::new(0),
         });
         let device = Arc::new(FakeDevice::default());
         let loader = Loader::new(services.clone(), 1, 2, 2);
@@ -795,6 +805,11 @@ impl Harness {
     pub fn set_attributes(&self, name: &str, attributes: u32) {
         let mut a = self.app.services.attributes.lock().unwrap();
         a.insert(name.to_string(), attributes);
+    }
+
+    /// The platform's clock is `secs` ahead of UTC from now on.
+    pub fn set_utc_offset(&self, secs: i32) {
+        self.app.services.utc_offset.store(secs, Ordering::Relaxed);
     }
 
     /// The marked tiles' names while the grid is open.
