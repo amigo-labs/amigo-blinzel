@@ -1241,11 +1241,9 @@ fn put_png(png: &[u8]) -> bool {
 /// A message: the notice on the window, or next to the menu bar icon while
 /// the window is hidden.
 fn tell(app: &mut App<Mac>, notice_until: &mut Option<Instant>, text: String) {
-    if app.hidden {
-        super::resident::flash(&text);
-    } else {
-        app.show_notice(text);
-        *notice_until = Some(Instant::now() + NOTICE);
+    match app.tell(text) {
+        Some(text) => super::resident::flash(&text),
+        None => *notice_until = Some(Instant::now() + NOTICE),
     }
 }
 

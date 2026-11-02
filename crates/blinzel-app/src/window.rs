@@ -478,16 +478,16 @@ fn handle(
                     let _ = KillTimer(Some(hwnd), TIMER_HOTKEY);
                 }
                 if wanted && left == 0 {
-                    if app.hidden {
+                    match app.tell(screenshot::hotkey_taken()) {
                         // Now in the tray, and again in the window: a
                         // notification may be switched off.
-                        resident::balloon(hwnd, &screenshot::hotkey_taken());
-                        screenshot::hint_pending(true);
-                    } else {
-                        app.show_notice(screenshot::hotkey_taken());
-                        unsafe {
-                            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                        Some(text) => {
+                            resident::balloon(hwnd, &text);
+                            screenshot::hint_pending(true);
                         }
+                        None => unsafe {
+                            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                        },
                     }
                 }
             }
@@ -605,13 +605,11 @@ fn handle(
                 Err(e) => Some(screenshot::failure(&e)),
             };
             if let Some(text) = text {
-                if app.hidden {
-                    resident::balloon(hwnd, &text);
-                } else {
-                    app.show_notice(text);
-                    unsafe {
+                match app.tell(text) {
+                    Some(text) => resident::balloon(hwnd, &text),
+                    None => unsafe {
                         SetTimer(Some(hwnd), TIMER_NOTICE, 3500, None);
-                    }
+                    },
                 }
             }
             done
