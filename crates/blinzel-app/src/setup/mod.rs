@@ -99,7 +99,12 @@ fn uninstall(layout: &Layout, exe: &Path, silent: bool) -> i32 {
         stop_running_instance();
         return match install::uninstall(layout) {
             Ok(()) => 0,
-            Err(_) => 1,
+            Err(e) => {
+                if !silent {
+                    ui::message(&e, true);
+                }
+                1
+            }
         };
     }
     let temp: PathBuf = std::env::temp_dir().join(format!(
