@@ -323,3 +323,148 @@ fn nothing_happens_before_the_header_is_known() {
     assert!(h.app.clip.is_none());
     assert_eq!(h.host().clipboard_offers, 0);
 }
+
+// ----------------------------------------------------------------- saving
+
+/// The save job for the whole image `name` (opened first).
+fn save_job_for(h: &mut Harness, name: &str) -> SaveJob {
+    h.open(name);
+    h.ctrl(Letter('A'));
+    match &h.ctrl(Letter('S'))[..] {
+        [Action::SaveCutout(job)] => job.clone(),
+        a => panic!("{a:?}"),
+    }
+}
+
+/// The names in the images' folder, sorted.
+fn folder(h: &Harness) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(&h.images)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+fn save(h: &Harness, job: &SaveJob, target: &Path) -> String {
+    save_cutout(&*h.app.services, job, target)
+}
+
+#[test]
+fn saving_tells_how_it_went_and_names_the_file() {
+    let mut h = Harness::new();
+    write_jpeg(&h, "photo.jpg", 64, 48);
+    let job = save_job_for(&mut h, "photo.jpg");
+    let out = h.images.join("out.jpg");
+    assert_eq!(save(&h, &job, &out), "Saved “out.jpg” losslessly");
+    assert_eq!(
+        blinzel_core::format::detect(&std::fs::read(&out).unwrap()),
+        blinzel_core::format::Format::Jpeg
+    );
+    assert_eq!(save(&h, &job, &h.images.join("out.PNG")), "Saved “out.PNG”");
+    // Writing fails: no such folder.
+    let t = save(&h, &job, &h.images.join("missing").join("x.png"));
+    assert!(t.starts_with("Could not save “x.png”: "), "{t}");
+    // Decoding fails: the source changed after the question.
+    h.write_file("photo.jpg", b"no longer an image");
+    let t = save(&h, &job, &h.images.join("y.png"));
+    assert!(t.starts_with("Could not save “y.png”: "), "{t}");
+    assert!(t.len() > "Could not save “y.png”: ".len(), "with a reason");
+    // Reading fails: the source is gone.
+    std::fs::remove_file(h.images.join("photo.jpg")).unwrap();
+    let t = save(&h, &job, &h.images.join("z.png"));
+    assert!(t.starts_with("Could not save “z.png”: "), "{t}");
+    assert!(!h.images.join("z.png").exists());
+}
+
+#[test]
+fn saving_runs_on_its_own_thread_and_reports_there() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let job = save_job_for(&mut h, "a.png");
+    let target = h.images.join("cut.png");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ui = std::thread::current().id();
+    save_in_background(h.app.services.clone(), job, target.clone(), move |text| {
+        let t = std::thread::current();
+        tx.send((text, t.id() != ui, t.name().map(str::to_string)))
+            .unwrap();
+    })
+    .unwrap()
+    .join()
+    .unwrap();
+    let (text, elsewhere, name) = rx.recv().unwrap();
+    assert_eq!(text, "Saved “cut.png”");
+    assert!(elsewhere, "not on the UI thread");
+    assert_eq!(name.as_deref(), Some("blinzel-save"));
+    assert!(target.exists());
+}
+
+#[test]
+fn only_the_chosen_target_is_written_through_a_temporary_file() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let source = std::fs::read(h.images.join("a.png")).unwrap();
+    // Selecting, copying and cutting write nothing.
+    select(&mut h, (8.0, 6.0), (40.0, 30.0));
+    h.ctrl(Letter('C'));
+    h.ctrl(Letter('X'));
+    h.command(Cmd::ShowOriginal);
+    assert_eq!(folder(&h), ["a.png"]);
+    let job = save_job_for(&mut h, "a.png");
+    assert_eq!(folder(&h), ["a.png"]);
+    // A stale temporary file is overwritten and renamed away.
+    h.write_file("cut.blinzel-tmp", b"stale");
+    let target = h.images.join("cut.png");
+    assert_eq!(save(&h, &job, &target), "Saved “cut.png”");
+    assert_eq!(folder(&h), ["a.png", "cut.png"]);
+    assert_eq!(std::fs::read(h.images.join("a.png")).unwrap(), source);
+    let saved = std::fs::read(&target).unwrap();
+    assert_eq!(
+        blinzel_core::decode::png::header_size(&saved).unwrap(),
+        (W, H)
+    );
+}
+
+#[test]
+fn the_source_is_never_replaced_other_files_are() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let source = std::fs::read(h.images.join("a.png")).unwrap();
+    let job = save_job_for(&mut h, "a.png");
+    let refused = "“a.png” is the image the cutout comes from: it is not replaced";
+    let spellings = [
+        h.images.join("a.png"),
+        h.images.join(".").join("a.png"),
+        h.images.join("sub").join("..").join("a.png"),
+    ];
+    std::fs::create_dir(h.images.join("sub")).unwrap();
+    for target in &spellings {
+        assert_eq!(save(&h, &job, target), refused, "{target:?}");
+        assert_eq!(std::fs::read(h.images.join("a.png")).unwrap(), source);
+        assert!(!h.images.join("a.blinzel-tmp").exists());
+    }
+    #[cfg(unix)]
+    {
+        let link = h.images.join("link.png");
+        std::os::unix::fs::symlink(h.images.join("a.png"), &link).unwrap();
+        assert_eq!(
+            save(&h, &job, &link),
+            "“link.png” is the image the cutout comes from: it is not replaced"
+        );
+        assert_eq!(std::fs::read(h.images.join("a.png")).unwrap(), source);
+    }
+    // Any other existing file is replaced (the dialog asked).
+    h.write_file("other.png", b"old");
+    assert_eq!(
+        save(&h, &job, &h.images.join("other.png")),
+        "Saved “other.png”"
+    );
+    let other = std::fs::read(h.images.join("other.png")).unwrap();
+    assert_eq!(
+        blinzel_core::decode::png::header_size(&other).unwrap(),
+        (W, H)
+    );
+    // In every language.
+    h.command(Cmd::Language(blinzel_i18n::lang_from_code("de")));
+    let t = save(&h, &job, &spellings[0]);
+    assert_ne!(t, refused);
+    assert!(t.contains("a.png"), "{t}");
+}

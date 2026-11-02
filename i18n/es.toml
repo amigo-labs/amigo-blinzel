@@ -35,6 +35,7 @@ save_suffix = "recorte"
 saved = "«{name}» guardado"
 saved_lossless = "«{name}» guardado sin pérdida"
 error_save = "No se pudo guardar «{name}»: {reason}"
+error_save_source = "«{name}» es la imagen de la que procede el recorte: no se reemplaza"
 show_original = "Mostrar original"
 
 nav_next = "Imagen siguiente"

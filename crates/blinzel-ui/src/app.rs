@@ -2309,6 +2309,11 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // docs/specs/blinzel.md §2: the viewer never modifies the image it
+    // shows, even after the dialog's overwrite confirmation.
+    if same_file(&job.source, target) {
+        return trf(Msg::ErrorSaveSource, &[("name", &name)]);
+    }
     let result = (|| -> Result<bool, String> {
         let data = services.read_file(&job.source).map_err(|e| e.to_string())?;
         let decode = |d: &[u8], req| services.decode(d, req, 1);
@@ -2331,6 +2336,27 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
 #[cfg(test)]
 #[path = "app_selection_tests.rs"]
 mod selection_tests;
+
+/// `a` and `b` name the same existing file, whatever the spelling (`.`,
+/// `..`, symbolic links, letter case on a case-insensitive volume).
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+/// `a` and `b` name the same existing file, whatever the spelling: the
+/// final paths Windows resolves them to (case, short names, links) match.
+#[cfg(not(unix))]
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
 
 /// Read access to private state for the headless harness
 /// ([`crate::testkit`]); nothing here changes behaviour.

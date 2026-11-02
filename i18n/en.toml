@@ -39,6 +39,7 @@ save_suffix = "cutout"
 saved = "Saved “{name}”"
 saved_lossless = "Saved “{name}” losslessly"
 error_save = "Could not save “{name}”: {reason}"
+error_save_source = "“{name}” is the image the cutout comes from: it is not replaced"
 show_original = "Show original"
 
 nav_next = "Next image"
