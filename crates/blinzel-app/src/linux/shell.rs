@@ -1160,4 +1160,11 @@ mod tests {
         assert_eq!(d.take(), Some(vec![b, a]));
         assert_eq!(d.take(), None);
     }
+
+    /// `docs/specs/browsing.md` AC-14: changes in the folder are collected
+    /// for about 150 ms before it is listed again.
+    #[test]
+    fn folder_changes_settle_for_150_ms_before_relisting() {
+        assert_eq!(DIR_SETTLE, Duration::from_millis(150));
+    }
 }
