@@ -274,14 +274,7 @@ impl Host for MacHost {
     }
 
     fn watch_dir(&self, dir: &Path) -> Option<Box<dyn std::any::Any>> {
-        use notify::Watcher;
-        let mut w = notify::recommended_watcher(move |r: notify::Result<notify::Event>| {
-            if r.is_ok_and(|e| !e.kind.is_access()) {
-                post(UserEvent::Wake(Wake::DirChanged));
-            }
-        })
-        .ok()?;
-        w.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+        let w = crate::watch::folder(dir, || post(UserEvent::Wake(Wake::DirChanged)))?;
         Some(Box::new(w))
     }
 }

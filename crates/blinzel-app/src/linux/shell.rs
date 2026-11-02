@@ -218,18 +218,13 @@ impl Host for LinuxHost {
     }
 
     fn watch_dir(&self, dir: &Path) -> Option<Box<dyn std::any::Any>> {
-        use notify::Watcher;
         let proxy = Mutex::new(self.proxy.clone());
-        let mut w = notify::recommended_watcher(move |r: notify::Result<notify::Event>| {
-            if r.is_ok_and(|e| !e.kind.is_access()) {
-                let _ = proxy
-                    .lock()
-                    .unwrap()
-                    .send_event(UserEvent::Wake(Wake::DirChanged));
-            }
-        })
-        .ok()?;
-        w.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+        let w = crate::watch::folder(dir, move || {
+            let _ = proxy
+                .lock()
+                .unwrap()
+                .send_event(UserEvent::Wake(Wake::DirChanged));
+        })?;
         Some(Box::new(w))
     }
 }
