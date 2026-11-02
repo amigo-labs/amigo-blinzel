@@ -21,6 +21,8 @@ mod signature;
 // The measurement needs a screen capture with present times, synthetic
 // key presses and process control: Windows (Desktop Duplication) and macOS
 // (ScreenCaptureKit).
+#[cfg(any(windows, target_os = "macos", test))]
+mod plan;
 #[cfg(any(windows, target_os = "macos"))]
 mod race;
 #[cfg(any(windows, target_os = "macos", test))]
@@ -92,10 +94,7 @@ fn corpus_cmd(args: &[String]) -> Result<(), String> {
 
 #[cfg(any(windows, target_os = "macos"))]
 mod measure {
-    use std::path::PathBuf;
-
-    use super::{number, option, usage};
-    use crate::{capture, corpus, race, report, sys, viewers};
+    use crate::{capture, corpus, plan, race, report, sys, viewers};
 
     pub fn list() -> Result<(), String> {
         for v in viewers::detect() {
@@ -105,31 +104,27 @@ mod measure {
     }
 
     pub fn run(args: &[String]) -> Result<(), String> {
-        let dir = PathBuf::from(args.first().ok_or_else(usage)?);
         let count = corpus::Spec::default().count;
+        let a = plan::RunArgs::parse(args, count)?;
         // Absolute paths with backslashes: some viewers (Photos) reject
         // mixed separators.
-        let dir = std::path::absolute(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let files = corpus::check(&dir, count)?;
+        let dir = std::path::absolute(&a.dir).map_err(|e| format!("{}: {e}", a.dir.display()))?;
         let opts = race::Options {
-            files,
-            reps: number(args, "--reps", 10)?,
-            cold: args.iter().any(|a| a == "--cold"),
-            burst: number(args, "--burst", 20)?.min(count - 2),
+            files: corpus::check(&dir, count)?,
+            reps: a.reps,
+            cold: a.cold,
+            burst: a.burst,
         };
-        let mut candidates = viewers::detect();
-        for (i, a) in args.iter().enumerate() {
-            if a == "--viewer"
-                && let Some(v) = args.get(i + 1).and_then(|s| viewers::parse_override(s))
-            {
-                candidates.retain(|c| c.name != v.name);
-                candidates.push(v);
-            }
-        }
-        if let Some(only) = option(args, "--only") {
-            let names: Vec<&str> = only.split(',').map(str::trim).collect();
-            candidates.retain(|c| names.iter().any(|n| c.name.eq_ignore_ascii_case(n)));
-        }
+        let overrides = a
+            .viewers
+            .into_iter()
+            .map(|(name, path)| viewers::Viewer::custom(name, path));
+        let candidates = plan::select(
+            viewers::detect(),
+            overrides.collect(),
+            a.only.as_deref(),
+            |v| &v.name,
+        );
         sys::prepare(opts.cold)?;
         let cap = capture::Capture::start()?;
         let machine = sys::machine(&cap);
@@ -143,9 +138,10 @@ mod measure {
             print_result(&r);
             results.push(r);
         }
-        if let Some(out) = option(args, "--json") {
-            std::fs::write(out, report::to_json(&machine, &results)).map_err(|e| e.to_string())?;
-            println!("wrote {out}");
+        if let Some(out) = a.json {
+            std::fs::write(&out, report::to_json(&machine, &results))
+                .map_err(|e| format!("{}: {e}", out.display()))?;
+            println!("wrote {}", out.display());
         }
         Ok(())
     }

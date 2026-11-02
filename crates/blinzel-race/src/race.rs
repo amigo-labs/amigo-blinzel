@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::capture::Capture;
+use crate::plan;
 use crate::report::{self, Result_, last_change};
 use crate::signature::COLORS;
 use crate::sys;
@@ -87,41 +88,29 @@ fn navigate(cap: &Capture, v: &Viewer, opts: &Options, r: &mut Result_) -> Resul
     Ok(())
 }
 
+/// The steps on this platform's screen.
+struct Live<'a> {
+    cap: &'a Capture,
+    v: &'a Viewer,
+    opts: &'a Options,
+}
+
+impl plan::Steps for Live<'_> {
+    fn open(&mut self, cold: bool) -> Result<f64, String> {
+        open(self.cap, self.v, self.opts, cold)
+    }
+
+    fn navigate(&mut self, r: &mut Result_) -> Result<(), String> {
+        navigate(self.cap, self.v, self.opts, r)
+    }
+
+    fn close(&mut self) {
+        sys::close_all(&self.v.process_name());
+    }
+}
+
+/// Measures one viewer (`plan::measure`).
 pub fn measure(cap: &Capture, v: &Viewer, opts: &Options) -> Result_ {
-    let mut r = Result_ {
-        name: v.name.clone(),
-        version: v.version(),
-        ..Default::default()
-    };
-    // Untimed first start: loads the executable and its libraries.
-    if let Err(e) = open(cap, v, opts, false) {
-        r.errors.push(format!("warm-up: {e}"));
-        sys::close_all(&v.process_name());
-        return r;
-    }
-    for rep in 0..opts.reps {
-        match open(cap, v, opts, false) {
-            Ok(ms) => {
-                r.open_warm.push(ms);
-                if let Err(e) = navigate(cap, v, opts, &mut r) {
-                    r.errors.push(format!("rep {rep} navigate: {e}"));
-                }
-            }
-            Err(e) => r.errors.push(format!("rep {rep} open: {e}")),
-        }
-        println!("  {} {}/{}", v.name, rep + 1, opts.reps);
-    }
-    if opts.cold {
-        for rep in 0..opts.reps {
-            match open(cap, v, opts, true) {
-                Ok(ms) => r.open_cold.push(ms),
-                Err(e) => {
-                    r.errors.push(format!("cold {rep}: {e}"));
-                    break;
-                }
-            }
-        }
-    }
-    sys::close_all(&v.process_name());
-    r
+    let mut live = Live { cap, v, opts };
+    plan::measure(&mut live, &v.name, v.version(), opts.reps, opts.cold)
 }

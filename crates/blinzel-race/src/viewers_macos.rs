@@ -12,6 +12,11 @@ pub struct Viewer {
 }
 
 impl Viewer {
+    /// A viewer given on the command line (`--viewer name=/path/App.app`).
+    pub fn custom(name: String, app: PathBuf) -> Viewer {
+        Viewer { name, launch: app }
+    }
+
     /// The bundle path, which identifies the viewer's processes.
     pub fn process_name(&self) -> String {
         self.launch.display().to_string()
@@ -79,13 +84,4 @@ pub fn launch(v: &Viewer, file: &Path) -> Result<(), String> {
     } else {
         Err(format!("open -a {} failed", v.launch.display()))
     }
-}
-
-/// `name=/path/App.app` from the command line.
-pub fn parse_override(s: &str) -> Option<Viewer> {
-    let (name, path) = s.split_once('=')?;
-    Some(Viewer {
-        name: name.trim().into(),
-        launch: PathBuf::from(path.trim()),
-    })
 }

@@ -26,6 +26,14 @@ pub struct Viewer {
 }
 
 impl Viewer {
+    /// A viewer given on the command line (`--viewer name=path.exe`).
+    pub fn custom(name: String, exe: PathBuf) -> Viewer {
+        Viewer {
+            name,
+            launch: Launch::Exe(exe),
+        }
+    }
+
     /// The executable's file name, used to close every instance.
     pub fn process_name(&self) -> String {
         match &self.launch {
@@ -111,15 +119,6 @@ pub fn launch(v: &Viewer, file: &Path) -> Result<(), String> {
             open_uri(&template.replace("{file}", &file.display().to_string()))
         }
     }
-}
-
-/// `name=path` from the command line.
-pub fn parse_override(s: &str) -> Option<Viewer> {
-    let (name, path) = s.split_once('=')?;
-    Some(Viewer {
-        name: name.trim().into(),
-        launch: Launch::Exe(PathBuf::from(path.trim())),
-    })
 }
 
 /// ProductVersion from the version resource.
