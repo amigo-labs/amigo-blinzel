@@ -1611,11 +1611,14 @@ define_class!(
                         .filter_map(|o| o.downcast::<NSURL>().ok().and_then(|u| url_path(&u))),
                 );
             }
+            // No early `return`: define_class! turns the body's `bool` into
+            // objc2's `Bool`, and a `return false` inside it does not convert.
             if paths.is_empty() {
-                return false;
+                false
+            } else {
+                deliver(UserEvent::Dropped(paths));
+                true
             }
-            deliver(UserEvent::Dropped(paths));
-            true
         }
     }
 );
