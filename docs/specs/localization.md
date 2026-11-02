@@ -1,5 +1,5 @@
 ---
-status: todo
+status: implemented
 created: 2026-11-02
 size: M
 platforms: all
@@ -31,23 +31,23 @@ Every user-visible string goes through `blinzel-i18n` (AGENTS.md §5.5, §9). Th
 
 ## Acceptance criteria
 
-- [ ] AC-01 (always): The viewer ships exactly nine UI languages: English (`en`), German (`de`), Spanish (`es`), French (`fr`), Italian (`it`), Japanese (`ja`), Portuguese (Brazil) (`pt-br`), Russian (`ru`) and Simplified Chinese (`zh-cn`); English is the reference and the fallback language.
-- [ ] AC-02 (always): Every shipped language has a non-empty text for every message, and each text has the same set of `{placeholders}` as the English one.
-- [ ] AC-03 (always): No German message falls back to English.
-- [ ] AC-04 (always): No message of any other shipped language falls back to English.
-- [ ] AC-05 (error): If a translation file lacks a message that English has, then the build succeeds, prints a build warning naming the message key and the language, and the viewer shows the English text for that message in that language.
-- [ ] AC-06 (error): If a translation file has a text whose placeholders differ from English (for a plural message: from the English `other` form), a key English does not have, an unknown plural category, a plural message without an `other` form, a key that is not snake_case, or a `[meta] direction` other than `"ltr"` or `"rtl"`, then the build fails with a message naming the language or file and the key.
-- [ ] AC-07 (always): Filling a message replaces every `{name}` with the matching argument and leaves a placeholder without an argument, and an unclosed `{`, as written.
-- [ ] AC-08 (always): A counted message picks its form by the CLDR integer rule family: "one-other" (1 → one, else other), "zero-one-other" (0 and 1 → one, else other), "east-slavic" (n mod 10 = 1 except n mod 100 = 11 → one; n mod 10 in 2–4 except n mod 100 in 12–14 → few; else many), "polish", "czech", and "none" (always other); a form a language does not define falls back to its `other` form, and `{n}` is filled with the count.
-- [ ] AC-09 (always): English, German, Spanish and Italian use "one-other", French and Portuguese (Brazil) "zero-one-other", Russian "east-slavic", Japanese and Simplified Chinese "none".
-- [ ] AC-10 (event): When the viewer starts and the settings name no shipped language, then it takes the UI language from the system's ordered preference list: the user's preferred UI languages on Windows, the preferred languages on macOS, and on Linux the variables `LANGUAGE` (colon-separated), `LC_ALL`, `LC_MESSAGES` and `LANG` in that order, ignoring `C`, `POSIX` and any `.encoding` or `@modifier` suffix.
-- [ ] AC-11 (always): A preference list maps to a shipped language by trying, per tag in order: the exact tag, then its base language (`de-AT` → `de`), then a shipped regional variant of the base (`pt-PT` → `pt-br`, `fr-CA` → `fr`, `zh-SG` and `zh-Hans-CN` → `zh-cn`); `_` counts as `-`, case is ignored, and Traditional Chinese (`zh-TW`, `zh-HK`, `zh-MO`, `zh-Hant-*`) never maps to Simplified Chinese; if no tag maps, English.
-- [ ] AC-12 (always): Menu → Language lists "Automatic (system)" first, then every shipped language under its own name in that language (e.g. "Deutsch", "日本語"), with a check mark on the current choice.
-- [ ] AC-13 (event): When the user picks a language in Menu → Language, then the menu, the window title and every text drawn afterwards are in that language without a restart, and the choice is saved; picking "Automatic (system)" saves no language and switches to the system language.
-- [ ] AC-14 (state): While the UI language is right-to-left, the caption buttons are mirrored (menu button at the right edge, close, maximize and minimize from the left edge), and the menu drawn by the viewer opens leftwards from the point it is opened at.
-- [ ] AC-15 (state): While the UI language is right-to-left, → shows the previous image and ← the next one.
-- [ ] AC-16 (state, CI: windows): While the UI language is right-to-left on Windows, the native image menu and tray menu are mirrored and open leftwards, text is laid out right to left, and message boxes are right-aligned with right-to-left reading.
-- [ ] AC-17 (always): No shipped language is right-to-left.
+- [x] AC-01 (always): The viewer ships exactly nine UI languages: English (`en`), German (`de`), Spanish (`es`), French (`fr`), Italian (`it`), Japanese (`ja`), Portuguese (Brazil) (`pt-br`), Russian (`ru`) and Simplified Chinese (`zh-cn`); English is the reference and the fallback language.
+- [x] AC-02 (always): Every shipped language has a non-empty text for every message, and each text has the same set of `{placeholders}` as the English one.
+- [x] AC-03 (always): No German message falls back to English.
+- [x] AC-04 (always): No message of any other shipped language falls back to English.
+- [x] AC-05 (error): If a translation file lacks a message that English has, then the build succeeds, prints a build warning naming the message key and the language, and the viewer shows the English text for that message in that language.
+- [x] AC-06 (error): If a translation file has a text whose placeholders differ from English (for a plural message: from the English `other` form), a key English does not have, an unknown plural category, a plural message without an `other` form, a key that is not snake_case, or a `[meta] direction` other than `"ltr"` or `"rtl"`, then the build fails with a message naming the language or file and the key.
+- [x] AC-07 (always): Filling a message replaces every `{name}` with the matching argument and leaves a placeholder without an argument, and an unclosed `{`, as written.
+- [x] AC-08 (always): A counted message picks its form by the CLDR integer rule family: "one-other" (1 → one, else other), "zero-one-other" (0 and 1 → one, else other), "east-slavic" (n mod 10 = 1 except n mod 100 = 11 → one; n mod 10 in 2–4 except n mod 100 in 12–14 → few; else many), "polish", "czech", and "none" (always other); a form a language does not define falls back to its `other` form, and `{n}` is filled with the count.
+- [x] AC-09 (always): English, German, Spanish and Italian use "one-other", French and Portuguese (Brazil) "zero-one-other", Russian "east-slavic", Japanese and Simplified Chinese "none".
+- [x] AC-10 (event): When the viewer starts and the settings name no shipped language, then it takes the UI language from the system's ordered preference list: the user's preferred UI languages on Windows, the preferred languages on macOS, and on Linux the variables `LANGUAGE` (colon-separated), `LC_ALL`, `LC_MESSAGES` and `LANG` in that order, ignoring `C`, `POSIX` and any `.encoding` or `@modifier` suffix.
+- [x] AC-11 (always): A preference list maps to a shipped language by trying, per tag in order: the exact tag, then its base language (`de-AT` → `de`), then a shipped regional variant of the base (`pt-PT` → `pt-br`, `fr-CA` → `fr`, `zh-SG` and `zh-Hans-CN` → `zh-cn`); `_` counts as `-`, case is ignored, and Traditional Chinese (`zh-TW`, `zh-HK`, `zh-MO`, `zh-Hant-*`) never maps to Simplified Chinese; if no tag maps, English.
+- [x] AC-12 (always): Menu → Language lists "Automatic (system)" first, then every shipped language under its own name in that language (e.g. "Deutsch", "日本語"), with a check mark on the current choice.
+- [x] AC-13 (event): When the user picks a language in Menu → Language, then the menu, the window title and every text drawn afterwards are in that language without a restart, and the choice is saved; picking "Automatic (system)" saves no language and switches to the system language.
+- [x] AC-14 (state): While the UI language is right-to-left, the caption buttons are mirrored (menu button at the right edge, close, maximize and minimize from the left edge), and the menu drawn by the viewer opens leftwards from the point it is opened at.
+- [x] AC-15 (state): While the UI language is right-to-left, → shows the previous image and ← the next one.
+- [x] AC-16 (state, CI: windows): While the UI language is right-to-left on Windows, the native image menu and tray menu are mirrored and open leftwards, text is laid out right to left, and message boxes are right-aligned with right-to-left reading.
+- [x] AC-17 (always): No shipped language is right-to-left.
 
 ## Technical notes
 
@@ -78,23 +78,33 @@ Every user-visible string goes through `blinzel-i18n` (AGENTS.md §5.5, §9). Th
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | `exactly_nine_languages_ship_with_english_first_and_as_fallback` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-02 | `every_language_has_every_key_and_same_placeholders` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-03 | `german_is_complete` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-04 | `no_shipped_language_falls_back_to_english` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-05 | `a_missing_text_warns_and_falls_back_to_english`, `a_complete_translation_builds_without_warnings` (`crates/blinzel-i18n/src/build_tests.rs`), CI: Linux, Windows | built | |
-| AC-06 | `placeholders_that_differ_from_english_fail_the_build`, `plural_placeholders_that_differ_from_the_english_other_form_fail_the_build`, `a_key_english_does_not_have_fails_the_build`, `an_unknown_plural_category_fails_the_build`, `a_plural_message_without_an_other_form_fails_the_build`, `a_key_that_is_not_snake_case_fails_the_build`, `a_direction_other_than_ltr_or_rtl_fails_the_build` (`crates/blinzel-i18n/src/build_tests.rs`), CI: Linux, Windows | built | |
-| AC-07 | `translate_and_fill` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-08 | `rules` (`crates/blinzel-i18n/src/plural.rs`; east-slavic 12, 14 many and 22, 24 few: red with 12–13 in place of 12–14), `plural_messages`, `plural_forms_of_shipped_languages` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-09 | `shipped_languages_use_their_plural_rule_family` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
-| AC-10 | `a_setting_without_a_shipped_language_asks_the_system` (`crates/blinzel-i18n/src/lib.rs`), `the_system_language_comes_from_the_locale_variables_in_order` (`crates/blinzel-app/src/linux/shell.rs`), `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux; `the_system_language_comes_from_the_preferred_ui_languages_in_order` (`crates/blinzel-app/src/run.rs`), CI: Windows, Windows job ok (CI run 41504896644, `0acbc36`) | built | |
-| AC-11 | `negotiation`, `negotiation_of_regional_variants` (`crates/blinzel-i18n/src/lib.rs`; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-HK` each fall through to the next tag or English, never `zh-cn`), CI: Linux, Windows | built | |
-| AC-12 | `the_language_menu_lists_automatic_then_every_language_in_its_own_name` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
-| AC-13 | `picking_a_language_switches_menu_title_and_drawn_text_at_once_and_saves_it` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
-| AC-14 | `right_to_left_mirrors` (`crates/blinzel-ui/src/chrome.rs`), `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), CI: Linux | built | |
-| AC-15 | `right_to_left_swaps_what_the_arrow_keys_show` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
-| AC-16 | `right_to_left_menus_are_mirrored_and_open_leftwards` (`crates/blinzel-app/src/menu.rs`), `right_to_left_text_reads_right_to_left` (`crates/blinzel-app/src/gfx/text.rs`), `right_to_left_message_boxes_are_right_aligned_and_read_right_to_left` (`crates/blinzel-app/src/platform/mod.rs`), CI: Windows, Windows job ok (CI run 41504896644, `0acbc36`) | built | |
-| AC-17 | `shipped_languages_are_left_to_right` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
+| AC-01 | `exactly_nine_languages_ship_with_english_first_and_as_fallback` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | 181fa49 |
+| AC-02 | `every_language_has_every_key_and_same_placeholders` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | — |
+| AC-03 | `german_is_complete` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | — |
+| AC-04 | `no_shipped_language_falls_back_to_english` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | 181fa49 |
+| AC-05 | `a_missing_text_warns_and_falls_back_to_english`, `a_complete_translation_builds_without_warnings` (`crates/blinzel-i18n/src/build_tests.rs`), CI: Linux, Windows | verified | 2f8bb7e |
+| AC-06 | `placeholders_that_differ_from_english_fail_the_build`, `plural_placeholders_that_differ_from_the_english_other_form_fail_the_build`, `a_key_english_does_not_have_fails_the_build`, `an_unknown_plural_category_fails_the_build`, `a_plural_message_without_an_other_form_fails_the_build`, `a_key_that_is_not_snake_case_fails_the_build`, `a_direction_other_than_ltr_or_rtl_fails_the_build` (`crates/blinzel-i18n/src/build_tests.rs`), CI: Linux, Windows | verified | 2f8bb7e |
+| AC-07 | `translate_and_fill` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | — |
+| AC-08 | `rules` (`crates/blinzel-i18n/src/plural.rs`; east-slavic 12, 14 many and 22, 24 few: red with 12–13 in place of 12–14), `plural_messages`, `plural_forms_of_shipped_languages` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | 0cfbfd0 |
+| AC-09 | `shipped_languages_use_their_plural_rule_family` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | 181fa49 |
+| AC-10 | `a_setting_without_a_shipped_language_asks_the_system` (`crates/blinzel-i18n/src/lib.rs`), `the_system_language_comes_from_the_locale_variables_in_order` (`crates/blinzel-app/src/linux/shell.rs`), `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux; `the_system_language_comes_from_the_preferred_ui_languages_in_order` (`crates/blinzel-app/src/run.rs`), CI: Windows, Windows job ok (CI run 41543618744, `8707b8b`) | verified | 309d0cd |
+| AC-11 | `negotiation`, `negotiation_of_regional_variants` (`crates/blinzel-i18n/src/lib.rs`; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-HK` each fall through to the next tag or English, never `zh-cn`), CI: Linux, Windows | verified | 4ba7bd4 |
+| AC-12 | `the_language_menu_lists_automatic_then_every_language_in_its_own_name` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | verified | 75f0d25 |
+| AC-13 | `picking_a_language_switches_menu_title_and_drawn_text_at_once_and_saves_it` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | verified | 75f0d25 |
+| AC-14 | `right_to_left_mirrors` (`crates/blinzel-ui/src/chrome.rs`), `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), CI: Linux | verified | — |
+| AC-15 | `right_to_left_swaps_what_the_arrow_keys_show` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | verified | 75f0d25 |
+| AC-16 | `right_to_left_menus_are_mirrored_and_open_leftwards` (`crates/blinzel-app/src/menu.rs`), `right_to_left_text_reads_right_to_left` (`crates/blinzel-app/src/gfx/text.rs`), `right_to_left_message_boxes_are_right_aligned_and_read_right_to_left` (`crates/blinzel-app/src/platform/mod.rs`), CI: Windows, Windows job ok (CI run 41543618744, `8707b8b`) | verified | 1e4162a |
+| AC-17 | `shipped_languages_are_left_to_right` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | verified | — |
+
+## Summary
+
+> Completed: 2026-11-02
+
+- Nine UI languages from compile-time tables generated out of `i18n/*.toml`; English is the reference and the fallback, and every shipped language is complete with English's placeholders.
+- The build script's checks (`crates/blinzel-i18n/build/tables.rs`) warn on a missing text and fail on broken placeholders, unknown keys or plural categories, a plural without `other`, a non-snake_case key or a bad `[meta] direction`, each named by file and key.
+- Placeholder filling and CLDR integer plural rules, with the rule family per shipped language.
+- The UI language from the setting or the system's preference list (`choose`, `negotiate`) on Windows, macOS and Linux, switched in Menu → Language without a restart.
+- Right-to-left support for the caption buttons, the UI-drawn menu, the arrow keys and, on Windows, the native menus, DirectWrite and message boxes, prepared for a later language.
 
 ## Decisions
 
