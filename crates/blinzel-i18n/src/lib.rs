@@ -300,6 +300,8 @@ mod tests {
         assert_eq!(code(&["zh-TW"]), "en");
         assert_eq!(code(&["zh-Hant-HK", "ja-JP"]), "ja");
         assert_eq!(code(&["zh-HK"]), "en");
+        assert_eq!(code(&["zh-MO"]), "en");
+        assert_eq!(code(&["zh_MO", "it"]), "it");
     }
 
     #[test]

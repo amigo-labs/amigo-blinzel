@@ -88,7 +88,7 @@ Every user-visible string goes through `blinzel-i18n` (AGENTS.md §5.5, §9). Th
 | AC-08 | `rules` (`crates/blinzel-i18n/src/plural.rs`), `plural_messages`, `plural_forms_of_shipped_languages` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-09 | `shipped_languages_use_their_plural_rule_family` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
 | AC-10 | `a_setting_without_a_shipped_language_asks_the_system` (`crates/blinzel-i18n/src/lib.rs`), `the_system_language_comes_from_the_locale_variables_in_order` (`crates/blinzel-app/src/linux/shell.rs`), `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux; `the_system_language_comes_from_the_preferred_ui_languages_in_order` (`crates/blinzel-app/src/run.rs`), CI: Windows — written, not run yet | open | |
-| AC-11 | `negotiation`, `negotiation_of_regional_variants` (`crates/blinzel-i18n/src/lib.rs`), CI: Linux, Windows | built | |
+| AC-11 | `negotiation`, `negotiation_of_regional_variants` (`crates/blinzel-i18n/src/lib.rs`; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-HK` each fall through to the next tag or English, never `zh-cn`), CI: Linux, Windows | built | |
 | AC-12 | `the_language_menu_lists_automatic_then_every_language_in_its_own_name` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
 | AC-13 | `picking_a_language_switches_menu_title_and_drawn_text_at_once_and_saves_it` (`crates/blinzel-ui/src/app_language_tests.rs`), CI: Linux | built | |
 | AC-14 | `right_to_left_mirrors` (`crates/blinzel-ui/src/chrome.rs`), `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), CI: Linux | built | |
