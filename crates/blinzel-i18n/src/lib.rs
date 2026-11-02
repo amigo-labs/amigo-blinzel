@@ -5,6 +5,9 @@
 
 mod plural;
 
+#[cfg(test)]
+mod build_tests;
+
 pub use plural::Category;
 
 use std::fmt::Display;
