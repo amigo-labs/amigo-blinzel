@@ -2267,8 +2267,6 @@ impl<B: Backend> App<B> {
     }
 }
 
-/// Reads the source, exports the cutout and writes it atomically (temp
-/// file + rename). Returns the message for the notice toast.
 /// The platform's decoders and clock for batch work.
 struct BatchSource<S>(Arc<S>);
 
@@ -2288,6 +2286,22 @@ impl<S: Services> blinzel_core::batch::run::Source for BatchSource<S> {
     }
 }
 
+/// Saves the cutout ([`save_cutout`]) on a thread of its own,
+/// `blinzel-save`, and hands the notice text to `done` there: the UI
+/// thread never waits for the file.
+pub fn save_in_background<S: Services>(
+    services: Arc<S>,
+    job: SaveJob,
+    target: PathBuf,
+    done: impl FnOnce(String) + Send + 'static,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("blinzel-save".into())
+        .spawn(move || done(save_cutout(&*services, &job, &target)))
+}
+
+/// Reads the source, exports the cutout and writes it atomically (temp
+/// file + rename). Returns the message for the notice toast.
 pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> String {
     use blinzel_core::export::{SaveFormat, export};
     use blinzel_i18n::{Msg, trf};
