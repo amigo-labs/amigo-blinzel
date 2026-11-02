@@ -125,7 +125,8 @@ pub fn sum_for(sums: &str, name: &str) -> Option<[u8; 32]> {
 /// Fixed-size bytes from hex (either case).
 pub fn parse_hex<const N: usize>(hex: &str) -> Option<[u8; N]> {
     let hex = hex.trim();
-    if hex.len() != 2 * N || !hex.is_ascii() {
+    // Digits only: `from_str_radix` would also take a sign.
+    if hex.len() != 2 * N || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let mut out = [0u8; N];
@@ -654,6 +655,16 @@ mod tests {
         assert_eq!(sum_for(&sums, "other.exe"), Some([0xcd; 32]));
         assert_eq!(sum_for(&sums, "missing.exe"), None);
         assert_eq!(sum_for("zz  x", "x"), None);
+    }
+
+    #[test]
+    fn parse_hex_takes_hex_digits_only() {
+        assert_eq!(parse_hex::<2>(" 0aFf\n"), Some([0x0a, 0xff]));
+        // `u8::from_str_radix` alone would read "+1" as 1.
+        assert_eq!(parse_hex::<2>("+1+1"), None);
+        assert_eq!(parse_hex::<2>("0a-1"), None);
+        assert_eq!(parse_hex::<2>("0a f"), None);
+        assert_eq!(parse_hex::<2>("0a0"), None);
     }
 
     #[test]
