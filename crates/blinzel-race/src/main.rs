@@ -108,14 +108,7 @@ mod measure {
         // Absolute paths with backslashes: some viewers (Photos) reject
         // mixed separators.
         let dir = std::path::absolute(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let files = corpus::files(&dir, count);
-        if let Some(missing) = files.iter().find(|f| !f.is_file()) {
-            return Err(format!(
-                "{} missing: run `blinzel-race corpus {}` first",
-                missing.display(),
-                dir.display()
-            ));
-        }
+        let files = corpus::check(&dir, count)?;
         let opts = race::Options {
             files,
             reps: number(args, "--reps", 10)?,

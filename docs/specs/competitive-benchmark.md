@@ -79,7 +79,7 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | — (no test of `corpus::write`) | open | |
+| AC-01 | `writes_signature_jpegs_and_keeps_existing_files` (`crates/blinzel-race/src/corpus.rs`, Linux CI) | built | |
 | AC-02 | `colours_are_unambiguous` (`crates/blinzel-race/src/signature.rs`, Linux CI) | built | |
 | AC-03 | `classifies_images_and_ignores_the_rest` (`crates/blinzel-race/src/signature.rs`, Linux CI) | built | |
 | AC-04 | `waits_for_a_signature` (`crates/blinzel-race/src/frames.rs`, Linux CI) | built | |
@@ -89,14 +89,16 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 | AC-08 | manual | open | |
 | AC-09 | manual | open | |
 | AC-10 | — | open | |
-| AC-11 | — | open | |
+| AC-11 | `check_names_the_first_missing_file` (`crates/blinzel-race/src/corpus.rs`, Linux CI); `run_without_a_corpus_says_how_to_write_one` (`crates/blinzel-race/tests/cli.rs`, Windows and macOS CI) | built | |
 | AC-12 | manual | open | |
 | AC-13 | macOS CI step `cargo run -q -p blinzel-race -- list` only checks the exit status, not the list | open | |
 | AC-14 | — | open | |
 | AC-15 | — (`to_json` untested; the website test uses a hand-written sample) | open | |
-| AC-16 | — | open | |
+| AC-16 | `unknown_commands_print_the_usage_and_exit_2`, `list_and_run_print_the_usage_on_linux` (`crates/blinzel-race/tests/cli.rs`, Linux CI) | built | |
 | AC-17 | manual | open | |
 
 ## Decisions
 
 - 2026-11-02: Extracted from the code. `--burst N` exists (default 20) although the design spec does not list it; the first trial runs in the design spec used 6 presses.
+- 2026-11-02: The code existed before its tests (the spec was extracted), so the new tests were green at once; each was proven by breaking the code on purpose (no skip of existing files, another quality, default count or file name, base colour, flat pixels, missing-file message, exit status, unknown command accepted) and seeing it go red.
+- 2026-11-02: `run` checks the corpus with `corpus::check`, compiled on Windows, macOS and in tests only, so Linux tests it without the platform code; the end-to-end `run <empty dir>` test runs only where `run` exists (Windows and macOS CI), its first CI run is its proof.
