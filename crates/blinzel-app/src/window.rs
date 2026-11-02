@@ -1379,6 +1379,82 @@ mod tests {
         }
     }
 
+    extern "system" fn plain_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        unsafe { DefWindowProcW(h, m, w, l) }
+    }
+
+    /// AC-08: in full screen the window covers the monitor, yet what is
+    /// remembered for the next start is the rect from before full screen
+    /// and whether the window was maximized then.
+    #[test]
+    fn full_screen_remembers_the_rect_from_before() {
+        let instance = unsafe { GetModuleHandleW(None) }.unwrap().into();
+        let class = w!("BlinzelFullscreenTest");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(plain_proc),
+            hInstance: instance,
+            lpszClassName: class,
+            ..Default::default()
+        };
+        let hwnd = unsafe {
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("test"),
+                WS_OVERLAPPEDWINDOW,
+                100,
+                100,
+                480,
+                360,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .unwrap();
+        let remembered = || {
+            let mut s = Settings::default();
+            remember_placement(hwnd, &mut s);
+            (s.window.unwrap(), s.maximized)
+        };
+        let window_rect = || {
+            let mut r = RECT::default();
+            unsafe { GetWindowRect(hwnd, &mut r) }.unwrap();
+            r
+        };
+        let (normal, maximized) = remembered();
+        assert!(!maximized);
+
+        toggle_fullscreen(hwnd);
+        assert_eq!(
+            Some(window_rect()),
+            monitor_rect(hwnd, false),
+            "full screen"
+        );
+        assert_eq!(remembered(), (normal, false));
+        toggle_fullscreen(hwnd);
+        assert_eq!(remembered(), (normal, false));
+
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+        }
+        toggle_fullscreen(hwnd);
+        assert_eq!(
+            Some(window_rect()),
+            monitor_rect(hwnd, false),
+            "full screen"
+        );
+        assert_eq!(remembered(), (normal, true));
+        toggle_fullscreen(hwnd);
+        assert!(is_maximized(hwnd), "maximized again");
+        assert_eq!(remembered(), (normal, true));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
     fn cloaked(hwnd: HWND) -> bool {
         let mut c = 0u32;
         // SAFETY: `c` is a live u32, the size passed.
