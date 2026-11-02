@@ -84,17 +84,17 @@ Opening an image costs a process start, a GPU device and the first use of shader
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
 | AC-01 |      | open   |        |
-| AC-02 |      | open   |        |
+| AC-02 | `toggling_resident_mode_saves_it_and_switches_the_icon_and_the_key` (`crates/blinzel-ui/src/app_resident_tests.rs`) proves the App half; the shells' `SetResident` handlers (tray icon, sign-in entry) have no test yet | open   |        |
 | AC-03 |      | open   |        |
 | AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
+| AC-05 | `hiding_drops_the_session_and_keeps_device_and_loader` (`crates/blinzel-ui/src/app_resident_tests.rs`) | built |        |
 | AC-06 | `decodes_requests` (`crates/blinzel-app/src/instance.rs`), Windows CI job | built |        |
 | AC-07 |      | open   |        |
 | AC-08 |      | open   |        |
-| AC-09 |      | open   |        |
-| AC-10 |      | open   |        |
+| AC-09 | `a_woken_instance_stays_cloaked_until_its_first_frame_then_takes_the_foreground` (`crates/blinzel-ui/src/app_resident_tests.rs`) proves the App half; the shells' show without activation and the 400 ms fallback have no test yet | open   |        |
+| AC-10 | `a_woken_instance_reloads_the_settings_from_disk` (`crates/blinzel-ui/src/app_resident_tests.rs`) | built |        |
 | AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
+| AC-12 | `the_tray_menu_shows_opens_takes_screenshots_and_exits` (`crates/blinzel-ui/src/app_resident_tests.rs`) | built |        |
 | AC-13 |      | open   |        |
 | AC-14 |      | open   |        |
 | AC-15 | `installs_updates_and_uninstalls_in_a_sandbox` (`crates/blinzel-app/tests/setup.rs`), Windows CI job | built |        |
@@ -110,3 +110,5 @@ Opening an image costs a process start, a GPU device and the first use of shader
 ## Decisions
 
 - AC-19: the defect from the extraction (a macOS `--resident` start with the setting off left the LaunchAgent in place) is fixed, and the AC now says both shells remove their sign-in entry. The decision is a private pure function in each shell (`resident_start` in `run.rs` and `macos/shell.rs`); the macOS test was written against the old behavior first (it type-checks, `remove_sign_in: false` fails its assertion), but neither test can run on Linux: their first Windows and macOS CI runs are the proof. The Windows half already behaved, its test is green at once.
+- AC-05, AC-09, AC-10, AC-12: the wake state (reload the settings unless a file was just opened, cloak, foreground on uncloak, the buffer pool back) and "a file chosen in the open dialog wakes the window" were the same lines in the Windows and macOS shells; they moved into `App::wake` and `App::open_chosen` (new public API of `blinzel-ui`) so one Linux test covers both shells, and `menu::tray_items_with` (crate-private) gives the tray menu of a platform with screenshots on Linux. The tests describe existing behavior and were green at once; each was checked by breaking the code it covers (no save on toggle, the watch, textures or pool kept on hide, no reload, no colour or language switch, no cloak or foreground on wake, no wake after the dialog, "Exit" closing instead of exiting), and each break turned its test red.
+- AC-02 and AC-09 stay open: their App halves are tested, the shell halves (tray icon and sign-in entry on `SetResident`; showing without activation, alpha 0 and the 400 ms fallback) are not.

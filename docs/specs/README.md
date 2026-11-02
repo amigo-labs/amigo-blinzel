@@ -22,7 +22,7 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | `/spec-check` round 3 (round 2's blockers fixed: tile tags, Linux multi-file drops, mutation-proof tests); the Windows CI run of AC-13 (`backend.rs`); the manual checks AC-21 (measurement), AC-28 (visual design) |
 | 11 | [localization](localization.md) | 15 / 17 | 2 | 0 | the first Windows CI runs of AC-10's Windows half (`run.rs`) and AC-16 (`menu.rs`, `gfx/text.rs`, `platform/mod.rs`), both written; then `/spec-check` |
 | 12 | [platform-shells](platform-shells.md) | 12 / 24 | 11 | 5 | the first Windows CI runs of AC-01 (`platform/os.rs`, `setup/mod.rs`), AC-02 (`tests/manifest.rs`), AC-03, AC-04, AC-08 (`window.rs`) and AC-10 (smoke step) and the first macOS CI run of AC-21 (`macos/shell.rs`), all written; the manual checks AC-05, AC-06, AC-13, AC-20, AC-22; then `/spec-check` |
-| 13 | [resident-mode](resident-mode.md) | 3 / 23 | 13 | 0 | `/spec-build` |
+| 13 | [resident-mode](resident-mode.md) | 7 / 23 | 13 | 0 | the first CI runs of AC-06, AC-15, AC-19 (Windows `instance.rs`, `tests/setup.rs`, `run.rs`) and AC-17, AC-19 (macOS `macos/resident.rs`, `macos/shell.rs`); `/spec-build` for the rest |
 | 14 | [screenshots](screenshots.md) | 8 / 23 | 8 | 1 | `/spec-build` |
 | 15 | [installation](installation.md) | 11 / 21 | 7 | 3 | `/spec-build` |
 | 16 | [updates](updates.md) | 9 / 23 | 2 | 1 | `/spec-build` |
