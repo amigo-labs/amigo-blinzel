@@ -207,3 +207,120 @@ fn decode_with_threads_matches_the_turbojpeg_path() {
         assert!(matches!(b.pixels, Pixels::Ycc { .. }));
     }
 }
+
+const SENTINEL: u8 = 0xA5;
+
+/// Decodes into the given buffers (pre-filled with [`SENTINEL`]) and tells
+/// whether any byte of them was written.
+fn own_into(
+    data: &[u8],
+    scale: u32,
+    mut bufs: Vec<Vec<u8>>,
+) -> (Result<usize, blinzel_jpeg::Error>, bool) {
+    for b in &mut bufs {
+        b.fill(SENTINEL);
+    }
+    let mut planes: Vec<&mut [u8]> = bufs.iter_mut().map(|b| b.as_mut_slice()).collect();
+    let r = blinzel_jpeg::decode_planes(data, scale, &mut planes, 4);
+    let written = bufs.iter().flatten().any(|&b| b != SENTINEL);
+    (r, written)
+}
+
+/// Buffers of exactly the plane layout at full size.
+fn full_bufs(data: &[u8]) -> Vec<Vec<u8>> {
+    let info = blinzel_jpeg::parse(data).unwrap();
+    blinzel_jpeg::plane_layouts(&info, 8)
+        .iter()
+        .map(|l| vec![0; l.len()])
+        .collect()
+}
+
+/// `data` with its SOF0 marker turned into `marker` and the sample
+/// precision set to `precision`; the rest of the file stays as it is.
+fn with_frame(data: &[u8], marker: u8, precision: u8) -> Vec<u8> {
+    let mut d = data.to_vec();
+    let at = d.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+    d[at + 1] = marker;
+    d[at + 4] = precision;
+    d
+}
+
+/// Arithmetic-coded, lossless and 12-bit files and scales other than 1, 2,
+/// 4 and 8 eighths are refused before any output is written (AC-09).
+#[test]
+fn refuses_unsupported_files_and_scales_without_writing() {
+    let data = encode(64, 48, EncodeOptions::default());
+    // The unpatched file decodes into the same buffers.
+    let (r, written) = own_into(&data, 8, full_bufs(&data));
+    assert!(r.is_ok() && written);
+    for (name, marker, precision) in [
+        ("arithmetic", 0xC9, 8),
+        ("progressive arithmetic", 0xCA, 8),
+        ("lossless", 0xC3, 8),
+        ("lossless arithmetic", 0xCB, 8),
+        ("12-bit", 0xC1, 12),
+        ("16-bit", 0xC1, 16),
+    ] {
+        let d = with_frame(&data, marker, precision);
+        assert!(
+            !blinzel_jpeg::is_supported(&blinzel_jpeg::parse(&d).unwrap()),
+            "{name}"
+        );
+        let (r, written) = own_into(&d, 8, full_bufs(&data));
+        assert!(
+            matches!(r, Err(blinzel_jpeg::Error::Unsupported(_))),
+            "{name}: {r:?}"
+        );
+        assert!(!written, "{name}: output written");
+    }
+    for scale in [0, 3, 5, 6, 7, 9, 16] {
+        let (r, written) = own_into(&data, scale, full_bufs(&data));
+        assert!(
+            matches!(r, Err(blinzel_jpeg::Error::Unsupported(_))),
+            "scale {scale}: {r:?}"
+        );
+        assert!(!written, "scale {scale}: output written");
+    }
+}
+
+/// Too few buffers, or one shorter than its plane layout, are refused
+/// before any output is written (AC-10).
+#[test]
+fn refuses_missing_or_short_buffers_without_writing() {
+    for opts in [
+        EncodeOptions::default(),
+        EncodeOptions {
+            progressive: true,
+            ..Default::default()
+        },
+    ] {
+        let data = encode(64, 48, opts);
+        let name = if opts.progressive {
+            "progressive"
+        } else {
+            "baseline"
+        };
+        let (r, written) = own_into(&data, 8, full_bufs(&data));
+        assert!(r.is_ok() && written, "{name}");
+        for keep in 0..3 {
+            let mut bufs = full_bufs(&data);
+            bufs.truncate(keep);
+            let (r, written) = own_into(&data, 8, bufs);
+            assert!(
+                matches!(r, Err(blinzel_jpeg::Error::Unsupported(_))),
+                "{name} {keep}: {r:?}"
+            );
+            assert!(!written, "{name}: {keep} buffers written");
+        }
+        for short in 0..3 {
+            let mut bufs = full_bufs(&data);
+            bufs[short].pop();
+            let (r, written) = own_into(&data, 8, bufs);
+            assert!(
+                matches!(r, Err(blinzel_jpeg::Error::Unsupported(_))),
+                "{name} {short}: {r:?}"
+            );
+            assert!(!written, "{name}: short buffer {short} written");
+        }
+    }
+}

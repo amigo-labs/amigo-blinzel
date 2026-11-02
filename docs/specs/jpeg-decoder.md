@@ -89,8 +89,8 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 | AC-06 | `header_prefix_is_enough` (`crates/blinzel-jpeg/src/lib.rs`), CI: Linux | built | |
 | AC-07 | `dct_scale_choice` (`crates/blinzel-jpeg/src/lib.rs`), `scales_round_up` (`crates/blinzel-jpeg/src/decoder.rs`), CI: Linux | built | |
 | AC-08 | `rejects_garbage` (`crates/blinzel-jpeg/src/lib.rs`), `rejects_garbage` (`crates/blinzel-jpeg/src/decoder.rs`), `rejects_overfull_tables` (`crates/blinzel-jpeg/src/huffman.rs`), CI: Linux | built | |
-| AC-09 | — | open | |
-| AC-10 | — | open | |
+| AC-09 | `refuses_unsupported_files_and_scales_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
+| AC-10 | `refuses_missing_or_short_buffers_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-11 | `truncated_data_decodes_partially_without_panicking` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-12 | `decode_with_threads_matches_the_turbojpeg_path` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-13 | — (no test tells which decoder ran) | open | |
@@ -102,3 +102,4 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 ## Decisions
 
 - 2026-11-02: Extracted from the code (`/spec-extract`). The design spec's "pipeline of entropy decode and IDCT" exists only for progressive files (scans pipelined across threads); sequential files decode and transform each block in one pass.
+- 2026-11-02: AC-09 and AC-10 already held in `decode_planes`; their tests were green at once. They went red with the `is_supported`/scale check and the buffer check disabled, so they guard the behavior. The unsupported files are a real baseline file with only the frame marker and precision byte patched, so without the check the decoder would write output.
