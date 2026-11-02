@@ -144,6 +144,29 @@ pub struct ClipSource {
     pub orientation: Orientation,
 }
 
+impl ClipSource {
+    /// The region's pixels in the orientation shown, decoded from the file
+    /// at full resolution (not taken from the screen): straight-alpha BGRA
+    /// (tight rows), width, height.
+    pub fn pixels(&self, services: &impl Services) -> Result<(Vec<u8>, u32, u32), String> {
+        let data = services.read_file(&self.path).map_err(|e| e.to_string())?;
+        let img = services
+            .decode(
+                &data,
+                blinzel_core::decode::Request::Region(self.stored_rect),
+                1,
+            )
+            .map_err(|e| e.to_string())?;
+        let bgra = img.to_bgra();
+        Ok(selection::orient_bgra(
+            &bgra,
+            img.width,
+            img.height,
+            self.orientation,
+        ))
+    }
+}
+
 pub struct Current {
     pub path: PathBuf,
     pub entry: Entry,
