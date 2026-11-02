@@ -85,14 +85,14 @@ This spec records what the code does today.
 | AC-05 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
 | AC-06 | `roundtrip` (`crates/blinzel-core/src/settings.rs`), CI: Linux | built | |
 | AC-07 | `auto_and_empty_language_both_mean_the_system_language` (`crates/blinzel-core/src/settings.rs`) | built | |
-| AC-08 | — | open | |
+| AC-08 | `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
 | AC-09 | `invalid_background_and_paths_keep_their_defaults` (`crates/blinzel-core/src/settings.rs`) | built | |
-| AC-10 | — | open | |
-| AC-11 | — | open | |
-| AC-12 | — | open | |
-| AC-13 | — | open | |
+| AC-10 | `a_setting_changed_in_the_menu_writes_the_file_at_once_with_all_settings` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
+| AC-11 | `a_picked_path_with_a_quote_or_line_break_is_not_stored` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
+| AC-12 | `an_unwritable_file_keeps_the_change_in_memory_without_a_message` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
+| AC-13 | `menu_settings_offers_each_platforms_entries`, `each_check_item_is_checked_when_its_setting_is_on`, `prefetch_and_background_can_only_be_changed_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
 | AC-14 | — | open | |
-| AC-15 | — | open | |
+| AC-15 | `exiting_writes_the_settings_once_more`, `only_a_hidden_instance_on_windows_skips_the_write_on_exit` (`crates/blinzel-ui/src/app_settings_tests.rs`) | built | |
 | AC-16 | `ram_budget_mb_is_neither_read_nor_written`, `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply` (`crates/blinzel-core/src/settings.rs`) | built | |
 
 ## Decisions
@@ -102,3 +102,7 @@ This spec records what the code does today.
 - `background` must be six hex digits after `#` (AC-09): `u32::from_str_radix` alone also took a sign, so `"#+12345"` was read as a colour.
 - AC-01 green at once: the paths were right; `dirs::config` and `dirs::cache` now take the platform and the environment as parameters internally (`config_in`, `cache_in`), so the Windows and macOS conventions are tested on Linux too.
 - AC-02 and AC-07 green at once: the defaults and the meaning of `"auto"` / `""` already held; the tests pin the documented values.
+- AC-13: `menu::items` is now `menu::items_for(state, THIS_PLATFORM)` with a crate-private `menu::Platform` (resident mode, screenshots, macOS key name), so the Settings menus of Windows, macOS and Linux are all tested on Linux; each build still shows only its own.
+- AC-15: the exit write moved into `blinzel-ui` as `App::save_settings_on_exit` (new public API), which the Windows, Linux and macOS shells call where they used to call `settings_store::save` on exit. Whether a hidden instance skips it is the constant `HIDDEN_EXIT_KEEPS_FILE = cfg!(windows)`; the rule is tested for both values on Linux. The shells' call sites themselves run in no test (they need a display, Windows or macOS).
+- AC-08: tested through `App::reload_settings` (a hidden instance waking), which resolves the language with the same `lang_from_code(…).unwrap_or(system language)` as the three shells' starts.
+- AC-08, AC-10 to AC-13 green at once: the behavior existed. Counter-checks went red: dropping the save after "Install updates automatically" (AC-10), the quote filter of `screenshot_folder_picked` (AC-11), keeping an unknown language in memory (AC-08) and the "only while resident" rule of the screenshot key (AC-13).

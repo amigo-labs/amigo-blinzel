@@ -1104,7 +1104,7 @@ pub fn run() -> i32 {
         return 1;
     }
     if let Some(app) = &shell.app {
-        settings_store::save(&app.settings);
+        app.save_settings_on_exit();
     }
     0
 }

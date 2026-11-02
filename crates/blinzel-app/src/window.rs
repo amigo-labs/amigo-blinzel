@@ -23,6 +23,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use blinzel_core::settings::Settings;
 use blinzel_ui::app::Action;
 use blinzel_ui::backend::{CursorKind, Key};
 use blinzel_ui::chrome::Button;
@@ -963,11 +964,12 @@ pub fn restore_placement(hwnd: HWND, saved: Option<[i32; 4]>, maximized: bool) -
     unsafe { SetWindowPlacement(hwnd, &wp) }.is_ok() && maximized
 }
 
-/// Remembers where the window is, for the next start.
-fn remember_placement(hwnd: HWND, a: &mut App) {
+/// Remembers where the window is, for the next start: its normal (not
+/// maximized) rect and whether it is maximized.
+pub fn remember_placement(hwnd: HWND, settings: &mut Settings) {
     if let Some((rect, maximized)) = placement(hwnd) {
-        a.settings.window = Some(rect);
-        a.settings.maximized = maximized;
+        settings.window = Some(rect);
+        settings.maximized = maximized;
     }
 }
 
@@ -975,12 +977,11 @@ fn remember_placement(hwnd: HWND, a: &mut App) {
 /// tray icon and closes the window (which ends the message loop).
 fn exit(hwnd: HWND) {
     let clip = with_app(|a| {
-        // A hidden instance's copy may be older than what another window
-        // saved.
+        // A hidden window's placement was remembered when it hid.
         if !a.hidden {
-            remember_placement(hwnd, a);
-            settings_store::save(&a.settings);
+            remember_placement(hwnd, &mut a.settings);
         }
+        a.save_settings_on_exit();
         a.clip.take()
     })
     .flatten();
@@ -1000,7 +1001,7 @@ fn hide_window(hwnd: HWND) {
         toggle_fullscreen(hwnd);
     }
     with_app(|a| {
-        remember_placement(hwnd, a);
+        remember_placement(hwnd, &mut a.settings);
         settings_store::save(&a.settings);
     });
     set_cloak(hwnd, true);

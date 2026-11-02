@@ -1357,7 +1357,7 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, _app: &NSApplication) -> NSApplicationTerminateReply {
-            with_shell(|s| settings_store::save(&s.app.settings));
+            with_shell(|s| s.app.save_settings_on_exit());
             NSApplicationTerminateReply::TerminateNow
         }
     }
