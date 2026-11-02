@@ -568,6 +568,11 @@ mod tests {
                 assert_eq!(got_icc.as_deref(), Some(&icc[..]), "{codec:?} ICC");
                 let got_exif = crate::batch::meta::read_exif(&file, fmt);
                 assert_eq!(got_exif.as_deref(), Some(&exif[..]), "{codec:?} EXIF");
+                if codec == Codec::Avif {
+                    // HEIC keeps its EXIF in the same HEIF item as AVIF.
+                    let heif = crate::batch::meta::read_exif(&file, Format::Heif);
+                    assert_eq!(heif.as_deref(), Some(&exif[..]), "HEIF EXIF");
+                }
 
                 let img = decode::decode(&file, Request::Full).unwrap();
                 let back = img.to_bgra();

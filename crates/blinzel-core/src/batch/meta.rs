@@ -5,7 +5,8 @@
 //!
 //! - Orientation becomes 1 (the pixels are already turned).
 //! - `PixelXDimension`/`PixelYDimension` get the new size.
-//! - The IFD1 thumbnail and the maker notes are dropped. The thumbnail
+//! - The IFD1 thumbnail, the source's image-data tags (strips, tiles,
+//!   compression, sizes) and the maker notes are dropped. The thumbnail
 //!   shows the uncropped original, and maker notes hold offsets that break
 //!   when moved (and serial numbers).
 //! - GPS goes on request.
@@ -24,9 +25,11 @@ const PIXEL_X: u16 = 0xA002;
 const PIXEL_Y: u16 = 0xA003;
 const DATE_TAKEN: u16 = 0x9003;
 /// Dropped wherever they appear: they describe the source's own image
-/// data (TIFF strips, sizes, thumbnails) or cannot be moved (maker notes).
-const DROPPED: [u16; 10] = [
-    0x00FE, 0x0100, 0x0101, 0x0103, 0x0111, 0x0115, 0x0116, 0x0117, 0x0201, 0x927C,
+/// data (TIFF strips and tiles, compression, sizes, the thumbnail) or
+/// cannot be moved (maker notes).
+const DROPPED: [u16; 15] = [
+    0x00FE, 0x0100, 0x0101, 0x0103, 0x0111, 0x0115, 0x0116, 0x0117, 0x0142, 0x0143, 0x0144, 0x0145,
+    0x0201, 0x0202, 0x927C,
 ];
 
 /// The raw EXIF block (TIFF, starting with `II*\0`/`MM\0*`) of a source
@@ -399,6 +402,77 @@ pub(crate) mod tests {
         assert!(!out.windows(4).any(|w| w == b"junk"));
         assert!(!out.windows(4).any(|w| w == [0xFF, 0xD8, 0xFF, 0xD9]));
         assert!(out.len() < src.len());
+    }
+
+    /// A little-endian EXIF block whose IFD0 and Exif IFD carry the
+    /// image-data tags of a TIFF or RAW source (strips, tiles,
+    /// compression, sizes, thumbnail pointer) next to entries that stay.
+    fn image_data_sample() -> Vec<u8> {
+        let image_data: [u16; 15] = [
+            0x00FE, 0x0100, 0x0101, 0x0103, 0x0111, 0x0115, 0x0116, 0x0117, 0x0142, 0x0143, 0x0144,
+            0x0145, 0x0201, 0x0202, 0x927C,
+        ];
+        let entries = |kept: &[(u16, u16, [u8; 4])]| {
+            let mut e: Vec<(u16, u16, [u8; 4])> = image_data
+                .iter()
+                .map(|&t| (t, 4, 1234u32.to_le_bytes()))
+                .collect();
+            e.extend_from_slice(kept);
+            e.sort_by_key(|e| e.0);
+            e
+        };
+        let ifd0 = entries(&[
+            (0x0110, 2, *b"Cam\0"),
+            (0x0128, 3, [2, 0, 0, 0]),
+            (EXIF_IFD, 4, [0; 4]),
+        ]);
+        let exif = entries(&[
+            (0x8827, 3, [100, 0, 0, 0]),
+            (PIXEL_X, 4, 6000u32.to_le_bytes()),
+            (PIXEL_Y, 4, 4000u32.to_le_bytes()),
+        ]);
+        let exif_at = 8 + 2 + 12 * ifd0.len() + 4;
+        let mut d = b"II*\0\x08\0\0\0".to_vec();
+        for (ifd, next) in [(&ifd0, 0u32), (&exif, 0)] {
+            d.extend((ifd.len() as u16).to_le_bytes());
+            for &(tag, typ, v) in ifd {
+                let v = if tag == EXIF_IFD {
+                    (exif_at as u32).to_le_bytes()
+                } else {
+                    v
+                };
+                d.extend(tag.to_le_bytes());
+                d.extend(typ.to_le_bytes());
+                d.extend(if typ == 2 { 4u32 } else { 1 }.to_le_bytes());
+                d.extend(v);
+            }
+            d.extend(next.to_le_bytes());
+        }
+        d
+    }
+
+    /// `docs/specs/batch-resize.md` AC-09: strips, tiles, compression and
+    /// the source's sizes go wherever they appear; the rest stays.
+    #[test]
+    fn image_data_tags_of_the_source_are_dropped() {
+        let src = image_data_sample();
+        let t = Tiff::new(&src).unwrap();
+        assert_eq!(tags(&src, t.first_ifd().unwrap()).len(), 18, "sample");
+        let out = rewrite(&src, (300, 200), true).unwrap();
+        let t = Tiff::new(&out).unwrap();
+        let (ifd0, next) = t.ifd(t.first_ifd().unwrap()).unwrap();
+        assert_eq!(next, 0);
+        assert_eq!(
+            ifd0.iter().map(|e| e.tag).collect::<Vec<_>>(),
+            [0x0110, 0x0128, EXIF_IFD]
+        );
+        assert_eq!(&out[t.payload(&ifd0[0]).unwrap()], b"Cam\0");
+        assert_eq!(t.int(&ifd0[1]), Some(2));
+        let exif = t.int(&ifd0[2]).unwrap() as usize;
+        assert_eq!(tags(&out, exif), [0x8827, PIXEL_X, PIXEL_Y]);
+        let (e, _) = t.ifd(exif).unwrap();
+        assert_eq!(t.int(&e[0]), Some(100));
+        assert_eq!((t.int(&e[1]), t.int(&e[2])), (Some(300), Some(200)));
     }
 
     #[test]
