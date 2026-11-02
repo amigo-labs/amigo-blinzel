@@ -89,16 +89,16 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 | AC-02 | `new_drag_snaps_and_clamps` (`blinzel-core/src/selection.rs`, Linux) | built | |
 | AC-03 | `move_and_resize`, `hit_testing` (`blinzel-core/src/selection.rs`, Linux) | built | |
 | AC-04 | manual | open | |
-| AC-05 | | open | |
-| AC-06 | | open | |
-| AC-07 | | open | |
-| AC-08 | partial: `stored_mapping_roundtrips_all_orientations`, `orient_pixels` (`blinzel-core/src/selection.rs`) cover the region mapping only, not the app | open | |
+| AC-05 | `a_short_click_outside_the_selection_clears_it`, `a_short_click_clears_the_selection_while_left_drag_pans` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-06 | `select_all_takes_the_whole_image_or_the_cropped_region` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-07 | `escape_ends_a_drag_then_clears_then_uncrops_then_leaves_full_screen_then_closes` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-08 | `copy_announces_the_selection_else_the_crop_else_the_whole_image`, `copy_maps_a_rotated_view_back_to_the_file_at_full_resolution`, `clip_pixels_are_the_files_region_in_the_orientation_shown` (`blinzel-ui/src/app_selection_tests.rs`, Linux); `stored_mapping_roundtrips_all_orientations` (`blinzel-core/src/selection.rs`) | built | |
 | AC-09 | | open | |
 | AC-10 | | open | |
 | AC-11 | | open | |
-| AC-12 | partial: `crop_restricts_content` (`blinzel-core/src/layout.rs`) covers the cropped layout only | open | |
-| AC-13 | | open | |
-| AC-14 | | open | |
+| AC-12 | `cut_crops_the_view_to_the_selection_and_needs_one` (`blinzel-ui/src/app_selection_tests.rs`, Linux); `crop_restricts_content` (`blinzel-core/src/layout.rs`) | built | |
+| AC-13 | `show_original_navigation_and_rotation_drop_the_crop` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-14 | `save_asks_with_a_name_by_source_type_and_prefers_the_selection`, `nothing_happens_before_the_header_is_known` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
 | AC-15 | manual | open | |
 | AC-16 | `png_output_and_format_from_path`, `webp_and_avif_cutouts` (`blinzel-core/src/export.rs`, Linux) | built | |
 | AC-17 | `aligned_jpeg_crop_is_lossless`, `lossless_crop_keeps_exif_but_drops_mpf_and_thumbnail_link` (`blinzel-core/src/export.rs`, Linux) | built | |
@@ -111,4 +111,8 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 ## Decisions
 
 - 2026-11-02: "Save cutout as" never replaces its own source; other existing files may be replaced after the system dialog's confirmation (AC-22). Because the viewer never modifies the image it shows (`blinzel.md` §2, AGENTS.md §9), while numbering an existing name would break the save dialog people know.
+- 2026-11-02 (spec-build): the AC-05 test went red for a larger image: a left click there started a pan, and releasing it kept the selection. A left-button pan now remembers its start until the pointer moves more than 3 logical px, and a release before that clears the selection like a click on a fitting image (a middle-button pan never does). Because the AC says "on the image", not "on an image that fits".
+- 2026-11-02 (spec-build): the App-level tests of AC-06, AC-07, AC-08 (the clip's region), AC-12, AC-13 and AC-14 were green at once: the behavior was extracted from the code. The cut tests do not apply the `FitWindow` a cut returns, because the test harness has no minimum window size and the window would shrink under the menu button; they check that the action is returned.
+- 2026-11-02 (spec-build): decoding a copied region moved into `blinzel-ui` as `ClipSource::pixels` (read the file, decode the region at full resolution, orient it), which the Linux and macOS shells call on their `blinzel-copy` thread. Windows keeps decoding in `clipboard.rs` through `wic::decode_any` (the native decoders plus WIC). Because the behavior belongs in the shared crate (AGENTS.md §5.4) and a test there proves AC-08 for both shells.
+- 2026-11-02 (spec-build): the edge case "image still loading (no header yet)" is tested with a file whose header cannot be read: both leave the App without a probe for the current image, which is what Ctrl+C and Ctrl+S check.
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's 🟡 markers for §7 were not taken as evidence.

@@ -38,7 +38,7 @@ use crate::browse::grid_layout;
 use crate::color::ColorManager;
 use crate::gfx::{AtlasPages, ImageInfo, Placed, Rgba, Shape};
 use crate::loader::Loader;
-use crate::menu::{Cmd, MenuState};
+use crate::menu::{Cmd, MenuItem, MenuState};
 
 // ------------------------------------------------------------------ device
 
@@ -464,6 +464,12 @@ impl Harness {
         self.record(a)
     }
 
+    /// Left button down with Shift held.
+    pub fn shift_down(&mut self, p: (f64, f64)) -> Vec<Action> {
+        let a = self.app.mouse_down(p, true, false, false);
+        self.record(a)
+    }
+
     pub fn mouse_move(&mut self, p: (f64, f64)) {
         self.app.mouse_move(p);
         self.pump();
@@ -700,6 +706,27 @@ impl Harness {
 
     pub fn menu_state(&self) -> MenuState {
         self.app.menu_state()
+    }
+
+    /// Whether the window menu offers `cmd` enabled (it must be in it).
+    pub fn menu_enabled(&self, cmd: Cmd) -> bool {
+        fn find(items: &[MenuItem], cmd: Cmd) -> Option<bool> {
+            items.iter().find_map(|i| match i {
+                MenuItem::Item {
+                    cmd: c, enabled, ..
+                } if *c == cmd => Some(*enabled),
+                MenuItem::Sub(_, sub) => find(sub, cmd),
+                _ => None,
+            })
+        }
+        find(&crate::menu::items(&self.menu_state()), cmd)
+            .unwrap_or_else(|| panic!("{cmd:?} not in the menu"))
+    }
+
+    /// The client point where image point `p` (oriented full-resolution
+    /// pixels) is shown.
+    pub fn at(&self, p: (f64, f64)) -> (f64, f64) {
+        self.layout().unwrap().image_to_client().apply(p)
     }
 
     /// The selected tile while the grid is open.

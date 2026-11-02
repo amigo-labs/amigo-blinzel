@@ -177,6 +177,9 @@ pub struct Current {
 enum DragState {
     Pan {
         last: (f64, f64),
+        /// Where a left-button press started, until it moves more than
+        /// 3 logical px: released before that, it was a click.
+        click: Option<(f64, f64)>,
     },
     /// Pressed on the image; becomes a new selection once it moves.
     Pending {
@@ -1319,7 +1322,10 @@ impl<B: Backend> App<B> {
             return vec![];
         };
         if middle {
-            self.drag = Some(DragState::Pan { last: p });
+            self.drag = Some(DragState::Pan {
+                last: p,
+                click: None,
+            });
             return vec![];
         }
         let pi = self.image_point(&l, p);
@@ -1332,7 +1338,10 @@ impl<B: Backend> App<B> {
             }
         }
         self.drag = Some(match left_drag_action(&l, shift) {
-            LeftDrag::Pan => DragState::Pan { last: p },
+            LeftDrag::Pan => DragState::Pan {
+                last: p,
+                click: Some(p),
+            },
             LeftDrag::Select => DragState::Pending {
                 start: p,
                 start_img: pi,
@@ -1449,14 +1458,14 @@ impl<B: Backend> App<B> {
         }
         let Some(l) = self.layout() else { return };
         match self.drag.take() {
-            Some(DragState::Pan { last }) => {
+            Some(DragState::Pan { last, click }) => {
                 layout::pan(&mut self.view, &l, (p.0 - last.0, p.1 - last.1));
-                self.drag = Some(DragState::Pan { last: p });
+                let click = click.filter(|s| self.is_click(*s, p));
+                self.drag = Some(DragState::Pan { last: p, click });
                 self.invalidate();
             }
             Some(DragState::Pending { start, start_img }) => {
-                let moved = (p.0 - start.0).abs().max((p.1 - start.1).abs());
-                if moved > 3.0 * self.scale() {
+                if !self.is_click(start, p) {
                     let d = Drag::New { anchor: start_img };
                     self.selection = d.update(self.image_point(&l, p), &Self::content_bounds(&l));
                     self.drag = Some(DragState::Select(d));
@@ -1481,13 +1490,19 @@ impl<B: Backend> App<B> {
             d.mouse_up();
             return;
         }
-        if let Some(DragState::Pending { .. }) = self.drag {
+        if let Some(DragState::Pending { .. } | DragState::Pan { click: Some(_), .. }) = self.drag {
             // A click without dragging clears the selection.
             if self.selection.take().is_some() {
                 self.invalidate();
             }
         }
         self.drag = None;
+    }
+
+    /// The pointer moved at most 3 logical px from `start` to `p`: still a
+    /// click, not a drag.
+    fn is_click(&self, start: (f64, f64), p: (f64, f64)) -> bool {
+        (p.0 - start.0).abs().max((p.1 - start.1).abs()) <= 3.0 * self.scale()
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -2298,6 +2313,10 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
         Err(e) => trf(Msg::ErrorSave, &[("name", &name), ("reason", &e)]),
     }
 }
+
+#[cfg(test)]
+#[path = "app_selection_tests.rs"]
+mod selection_tests;
 
 /// Read access to private state for the headless harness
 /// ([`crate::testkit`]); nothing here changes behaviour.
