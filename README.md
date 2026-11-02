@@ -22,7 +22,7 @@ An image viewer with one goal: **maximum speed** when opening an image, when fli
 |---|---|---|
 | Windows | `%APPDATA%\amigo-blinzel` | `%LOCALAPPDATA%\amigo-blinzel` |
 | macOS | `~/Library/Application Support/amigo-blinzel` | `~/Library/Caches/amigo-blinzel` |
-| Linux | `~/.config/amigo-blinzel` | `~/.cache/amigo-blinzel` |
+| Linux | `$XDG_CONFIG_HOME/amigo-blinzel` (default `~/.config`) | `$XDG_CACHE_HOME/amigo-blinzel` (default `~/.cache`) |
 
 ## Usage
 

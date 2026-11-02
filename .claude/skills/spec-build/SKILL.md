@@ -6,7 +6,7 @@ argument-hint: '<spec-name>'
 
 # Spec Build: $ARGUMENTS
 
-You implement `docs/specs/$0.md` **without asking**. The spec is the brief, the tests are the proof, and the last word belongs to a verifier that has never seen your chat. You only ask the user when a precondition is violated or a AGENTS.md stopping point needs them — otherwise you run until `READY` or the round limit. In commit mode `ask` you additionally ask before every commit (see Commit mode).
+You implement `docs/specs/$0.md` **without asking**. The spec is the brief, the tests are the proof, and the last word belongs to a verifier that has never seen your chat. You only ask the user when a precondition is violated or an AGENTS.md stopping point needs them — otherwise you run until `READY` or the round limit. In commit mode `ask` you additionally ask before every commit (see Commit mode).
 
 Without an argument: take the feature spec with `status: todo` from Context; if there are several, let the user pick once via AskUserQuestion.
 

@@ -237,7 +237,7 @@ cargo run --release -p blinzel-bench -- run testdata/generated --check --json be
 cargo run --release -p blinzel-site           # website/dist
 ```
 
-`.claude/gates.json` holds the gate commands: `fast` (Stop hook) and `full` (`/qa`, the Linux job of `.github/workflows/ci.yml`). The Windows and macOS jobs (Direct3D/WARP golden test, benchmarks, Metal golden test, app bundle) run in CI only.
+`.claude/gates.json` holds the gate commands: `fast` (Stop hook) and `full` (`/qa`, the Linux job of `.github/workflows/ci.yml` without its two Xvfb steps). The Xvfb steps (viewer smoke test, X11 display profile) and the Windows and macOS jobs (Direct3D/WARP golden test, benchmarks, Metal golden test, app bundle) run in CI only.
 
 ---
 

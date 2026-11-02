@@ -1,11 +1,11 @@
 ---
 name: qa
-description: Runs the project's full QA pass (rustfmt, clippy with -D warnings, cargo test for the whole workspace, third-party notices current) — independent stages in parallel, with exactly the commands the Linux CI job runs. Use this skill before finishing any coding task, before a commit or PR, and whenever the user wants to know whether "everything is green".
+description: Runs the project's full QA pass (rustfmt, clippy with -D warnings, cargo test for the whole workspace, third-party notices current) — independent stages in parallel, with exactly the commands of the Linux CI job. Use this skill before finishing any coding task, before a commit or PR, and whenever the user wants to know whether "everything is green".
 ---
 
 # QA
 
-The commands are not here but in `.claude/gates.json` (list `full`). It mirrors the Linux job of `.github/workflows/ci.yml`; the Windows and macOS jobs run in CI only (AGENTS.md §10). Green here means green in the Linux job.
+The commands are not here but in `.claude/gates.json` (list `full`). It runs the Linux job of `.github/workflows/ci.yml` except its two Xvfb steps (viewer smoke test, X11 display profile), which need a display server; those and the Windows and macOS jobs run in CI only (AGENTS.md §10). Green here means green in those Linux steps.
 
 ## Procedure
 

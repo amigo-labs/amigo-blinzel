@@ -1,5 +1,5 @@
 {
-  "$comment": "Quality gates for the hooks in .claude/hooks/ and the /qa, /spec-build, /spec-check skills. `full` mirrors the Linux job of .github/workflows/ci.yml (the Windows and macOS jobs run in CI only, AGENTS.md §10); `fast` runs in the Stop hook, filtered by `paths` (prefixes of changed repository paths). `needs` lists the ids a gate waits for; gates without needs between them run in parallel.",
+  "$comment": "Quality gates for the hooks in .claude/hooks/ and the /qa, /spec-build, /spec-check skills. `full` runs the Linux job of .github/workflows/ci.yml without its two Xvfb steps (the viewer smoke test and the X11 display-profile test need a display server); those and the Windows and macOS jobs run in CI only (AGENTS.md §10); `fast` runs in the Stop hook, filtered by `paths` (prefixes of changed repository paths). `needs` lists the ids a gate waits for; gates without needs between them run in parallel.",
   "fast": [
     {
       "id": "rust-fmt",

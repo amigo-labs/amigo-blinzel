@@ -6,7 +6,7 @@ All secrets used by the GitHub workflows, what they are for and what happens wit
 |---|---|---|---|---|
 | [`RELEASE_SIGNING_KEY`](#release_signing_key) | repository | **yes** | `release.yml` | the release fails |
 | [`MACOS_SIGNING_CERT`](#macos_signing_cert-and-macos_signing_cert_password) | organization | no | `release.yml` | the Mac app is signed ad hoc |
-| [`MACOS_SIGNING_CERT_PASSWORD`](#macos_signing_cert-and-macos_signing_cert_password) | organization | no | `release.yml` | as above |
+| [`MACOS_SIGNING_CERT_PASSWORD`](#macos_signing_cert-and-macos_signing_cert_password) | organization | with the certificate | `release.yml` | with the certificate set: the macOS job fails at the keychain import |
 | [`RELEASE_PLEASE_TOKEN`](#release_please_token) | repository | no | `release-please.yml` | no CI runs on the release PR |
 | [`CLOUDFLARE_API_TOKEN`](#cloudflare_api_token-and-cloudflare_account_id) | repository | no | `website.yml` | the workflow builds the website but does not deploy it |
 | [`CLOUDFLARE_ACCOUNT_ID`](#cloudflare_api_token-and-cloudflare_account_id) | repository | no | `website.yml` | as above |
