@@ -79,13 +79,13 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | — (CI step `Generate corpus` only checks that it runs; byte stability untested) | open | |
-| AC-02 | — | open | |
+| AC-01 | `corpus_lists_every_file_at_its_size`, `corpus_is_identical_on_every_run_and_keeps_existing_files` (`crates/blinzel-bench/src/main.rs`) | built | |
+| AC-02 | `corpus_lists_every_file_at_its_size`, `corpus_is_identical_on_every_run_and_keeps_existing_files` (`crates/blinzel-bench/src/main.rs`) | built | |
 | AC-03 | — (CI step `Library vs. own code benchmarks` runs it; groups not asserted) | open | |
 | AC-04 | CI step `Library vs. own code benchmarks` (`run … --check`, Windows job) | built | |
 | AC-05 | CI step `Library vs. own code benchmarks` (Windows job); `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) for the decision | built | |
 | AC-06 | `a_noisy_median_alone_is_no_win` (`crates/blinzel-bench/src/main.rs`, Linux CI) | built | |
-| AC-07 | — | open | |
+| AC-07 | `run_without_a_corpus_says_to_write_it_and_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-08 | — (`write_json` untested; `stats` in `crates/blinzel-core/src/timing.rs` covers only the `stats` object) | open | |
 | AC-09 | — (`reads_fields` in `crates/blinzel-bench/src/compare.rs` covers only reading the fields; CI step `Compare with x86-64-v3` runs it) | open | |
 | AC-10 | — | open | |
@@ -93,7 +93,7 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 | AC-12 | — | open | |
 | AC-13 | — | open | |
 | AC-14 | — | open | |
-| AC-15 | — | open | |
+| AC-15 | `an_unknown_subcommand_prints_the_usage_and_exits_2`, `batch_with_an_unknown_format_exits_2` (`crates/blinzel-bench/tests/cli.rs`) | built | |
 | AC-16 | `.github/workflows/ci.yml`, job `windows`, steps `Generate corpus` … `upload-artifact` | built | |
 | AC-17 | CI step `App benchmark (offscreen, WARP)` (Windows job, fails on a non-zero exit) | built | |
 | AC-18 | — (the CI step prints the report but asserts no fields) | open | |
@@ -102,3 +102,5 @@ No library is adopted unchecked (`blinzel.md` §1, §3; AGENTS.md §4): for each
 ## Decisions
 
 - 2026-11-02: Extracted from the code. The only automated gate is the JPEG one (byte identity of blinzel-jpeg and libjpeg-turbo ahead of zune-jpeg); all other comparisons print numbers for a person to judge.
+- 2026-11-02: The corpus is a table (`corpus_files`) written by `write_corpus(dir, large, shrink)`; the tests write it with every side divided by 40, because the full corpus takes minutes in a test build. The behavior existed, so the tests were green at once; each was checked by breaking the code on purpose (no `exists` check, quality 85, a time-dependent pixel) and goes red.
+- 2026-11-02: The CLI tests in `tests/cli.rs` run the real binary (`CARGO_BIN_EXE_blinzel-bench`), because the exit status is set in `main`. The usage now lists `jpeg-ab`, `--keep-cache`, `--from` and `--keep` too; the usage test was red before that.

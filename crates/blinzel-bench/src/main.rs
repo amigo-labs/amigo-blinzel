@@ -46,10 +46,15 @@ fn main() {
 }
 
 fn usage() -> String {
-    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]\n  blinzel-bench compare <a.json> <b.json>
-  blinzel-bench thumbs <dir> [--count N] [--threads T]
+    "usage:
+  blinzel-bench corpus <dir> [--large]
+  blinzel-bench run <dir> [--json <file>] [--quick] [--check]
+  blinzel-bench compare <a.json> <b.json>
+  blinzel-bench jpeg-ab <file> [scale] [threads] [rounds]
+  blinzel-bench thumbs <dir> [--count N] [--threads T] [--keep-cache]
   blinzel-bench resize [--runs N] [--quick]
-  blinzel-bench batch <dir> [--count N] [--threads T] [--format jpeg|png|webp|avif] [--edge E]".into()
+  blinzel-bench batch <dir> [--count N] [--threads T] [--format jpeg|png|webp|avif] [--edge E] [--from <dir>] [--keep <dir>]"
+        .into()
 }
 
 fn flag(args: &[String], name: &str) -> bool {
@@ -63,140 +68,148 @@ fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-struct JpegCase {
+/// What a corpus file holds.
+#[derive(Clone, Copy)]
+enum Content {
+    Jpeg(EncodeOptions),
+    Png(png::ColorType),
+    /// Flat UI-like bands: compresses very differently from photos.
+    Screenshot,
+}
+
+/// One file of the corpus.
+struct CorpusFile {
     name: &'static str,
     w: u32,
     h: u32,
-    opts: EncodeOptions,
+    content: Content,
+    /// Only with `--large`.
     large: bool,
 }
 
-fn jpeg_cases() -> Vec<JpegCase> {
+fn corpus_files() -> Vec<CorpusFile> {
     let base = EncodeOptions {
         quality: 90,
         ..Default::default()
     };
-    let c = |name, w, h, opts, large| JpegCase {
+    let jpeg = |name, w, h, opts| CorpusFile {
         name,
         w,
         h,
-        opts,
-        large,
+        content: Content::Jpeg(opts),
+        large: false,
+    };
+    let at = |subsampling| EncodeOptions {
+        subsampling,
+        ..base
     };
     vec![
-        c("jpeg-12mp-420", 4000, 3000, base, false),
-        c("jpeg-24mp-420", 6000, 4000, base, false),
-        c(
-            "jpeg-24mp-422",
-            6000,
-            4000,
-            EncodeOptions {
-                subsampling: 422,
-                ..base
-            },
-            false,
-        ),
-        c(
-            "jpeg-24mp-444",
-            6000,
-            4000,
-            EncodeOptions {
-                subsampling: 444,
-                ..base
-            },
-            false,
-        ),
-        c(
-            "jpeg-24mp-420-progressive",
+        jpeg("jpeg-12mp-420.jpg", 4000, 3000, base),
+        jpeg("jpeg-24mp-420.jpg", 6000, 4000, base),
+        jpeg("jpeg-24mp-422.jpg", 6000, 4000, at(422)),
+        jpeg("jpeg-24mp-444.jpg", 6000, 4000, at(444)),
+        jpeg(
+            "jpeg-24mp-420-progressive.jpg",
             6000,
             4000,
             EncodeOptions {
                 progressive: true,
                 ..base
             },
-            false,
         ),
-        c(
-            "jpeg-24mp-420-restart",
+        jpeg(
+            "jpeg-24mp-420-restart.jpg",
             6000,
             4000,
             EncodeOptions {
                 restart_rows: 1,
                 ..base
             },
-            false,
         ),
-        c(
-            "jpeg-24mp-gray",
+        jpeg(
+            "jpeg-24mp-gray.jpg",
             6000,
             4000,
             EncodeOptions { gray: true, ..base },
-            false,
         ),
-        c("jpeg-45mp-420", 8256, 5504, base, false),
-        c("jpeg-100mp-420", 12288, 8192, base, true),
+        jpeg("jpeg-45mp-420.jpg", 8256, 5504, base),
+        CorpusFile {
+            large: true,
+            ..jpeg("jpeg-100mp-420.jpg", 12288, 8192, base)
+        },
+        CorpusFile {
+            content: Content::Png(png::ColorType::Rgb),
+            ..jpeg("png-12mp-rgb.png", 4000, 3000, base)
+        },
+        CorpusFile {
+            content: Content::Png(png::ColorType::Rgba),
+            ..jpeg("png-12mp-rgba.png", 4000, 3000, base)
+        },
+        CorpusFile {
+            content: Content::Screenshot,
+            ..jpeg("png-8mp-screenshot.png", 3840, 2160, base)
+        },
     ]
 }
 
-/// Writes the corpus. Existing files are kept (generation is slow).
 fn corpus(args: &[String]) -> Result<(), String> {
     let dir = PathBuf::from(args.first().ok_or_else(usage)?);
-    let large = flag(args, "--large");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let write = |name: &str, make: &dyn Fn() -> Vec<u8>| -> Result<(), String> {
-        let path = dir.join(name);
-        if path.exists() {
-            return Ok(());
+    write_corpus(&dir, flag(args, "--large"), 1)
+}
+
+/// Writes the corpus, every dimension divided by `shrink` (1 for the real
+/// one). Existing files are kept (generation is slow).
+fn write_corpus(dir: &Path, large: bool, shrink: u32) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    for f in corpus_files() {
+        let path = dir.join(f.name);
+        if (f.large && !large) || path.exists() {
+            continue;
         }
         let t = Instant::now();
-        let data = make();
+        let data = render(f.content, f.w / shrink, f.h / shrink);
         fs::write(&path, &data).map_err(|e| format!("{}: {e}", path.display()))?;
         println!(
-            "{name}: {} KiB in {:.1} s",
+            "{}: {} KiB in {:.1} s",
+            f.name,
             data.len() / 1024,
             t.elapsed().as_secs_f64()
         );
-        Ok(())
-    };
-    for c in jpeg_cases() {
-        if c.large && !large {
-            continue;
-        }
-        write(&format!("{}.jpg", c.name), &|| {
-            let px = if c.opts.gray {
-                testimg::gray(c.w, c.h)
-            } else {
-                testimg::rgb(c.w, c.h)
-            };
-            encode_rgb(&px, c.w, c.h, c.opts).expect("encode")
-        })?;
     }
-    write("png-12mp-rgb.png", &|| {
-        png_encode(4000, 3000, png::ColorType::Rgb, &testimg::rgb(4000, 3000))
-    })?;
-    write("png-12mp-rgba.png", &|| {
-        png_encode(4000, 3000, png::ColorType::Rgba, &testimg::rgba(4000, 3000))
-    })?;
-    write("png-8mp-screenshot.png", &|| {
-        // Flat UI-like content compresses very differently from photos.
-        let (w, h) = (3840u32, 2160u32);
-        let mut px = vec![0u8; (w * h * 3) as usize];
-        for (i, p) in px.as_chunks_mut::<3>().0.iter_mut().enumerate() {
-            let (x, y) = (i as u32 % w, i as u32 / w);
-            let band = (y / 40 + x / 300) % 5;
-            p.copy_from_slice(
-                &[
-                    [240, 240, 240],
-                    [30, 30, 30],
-                    [0, 120, 215],
-                    [255, 255, 255],
-                    [200, 60, 60],
-                ][band as usize],
-            );
-        }
-        png_encode(w, h, png::ColorType::Rgb, &px)
-    })?;
     Ok(())
+}
+
+/// The encoded bytes of one corpus file: the same on every run.
+fn render(content: Content, w: u32, h: u32) -> Vec<u8> {
+    match content {
+        Content::Jpeg(opts) => {
+            let px = if opts.gray {
+                testimg::gray(w, h)
+            } else {
+                testimg::rgb(w, h)
+            };
+            encode_rgb(&px, w, h, opts).expect("encode")
+        }
+        Content::Png(color @ png::ColorType::Rgba) => png_encode(w, h, color, &testimg::rgba(w, h)),
+        Content::Png(color) => png_encode(w, h, color, &testimg::rgb(w, h)),
+        Content::Screenshot => {
+            let mut px = vec![0u8; (w * h * 3) as usize];
+            for (i, p) in px.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                let (x, y) = (i as u32 % w, i as u32 / w);
+                let band = (y / 40 + x / 300) % 5;
+                p.copy_from_slice(
+                    &[
+                        [240, 240, 240],
+                        [30, 30, 30],
+                        [0, 120, 215],
+                        [255, 255, 255],
+                        [200, 60, 60],
+                    ][band as usize],
+                );
+            }
+            png_encode(w, h, png::ColorType::Rgb, &px)
+        }
+    }
 }
 
 fn png_encode(w: u32, h: u32, color: png::ColorType, data: &[u8]) -> Vec<u8> {
@@ -760,6 +773,102 @@ mod tests {
             p99: median,
             mean: median,
             n: 10,
+        }
+    }
+
+    /// A fresh folder under the system temp directory.
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("blinzel-bench-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// AC-01, AC-02: the files, their sizes and the JPEG quality.
+    #[test]
+    fn corpus_lists_every_file_at_its_size() {
+        let files: Vec<(&str, u32, u32, bool)> = corpus_files()
+            .iter()
+            .map(|f| (f.name, f.w, f.h, f.large))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("jpeg-12mp-420.jpg", 4000, 3000, false),
+                ("jpeg-24mp-420.jpg", 6000, 4000, false),
+                ("jpeg-24mp-422.jpg", 6000, 4000, false),
+                ("jpeg-24mp-444.jpg", 6000, 4000, false),
+                ("jpeg-24mp-420-progressive.jpg", 6000, 4000, false),
+                ("jpeg-24mp-420-restart.jpg", 6000, 4000, false),
+                ("jpeg-24mp-gray.jpg", 6000, 4000, false),
+                ("jpeg-45mp-420.jpg", 8256, 5504, false),
+                ("jpeg-100mp-420.jpg", 12288, 8192, true),
+                ("png-12mp-rgb.png", 4000, 3000, false),
+                ("png-12mp-rgba.png", 4000, 3000, false),
+                ("png-8mp-screenshot.png", 3840, 2160, false),
+            ]
+        );
+        for f in corpus_files() {
+            if let Content::Jpeg(o) = f.content {
+                assert_eq!(o.quality, 90, "{}", f.name);
+                let sub = if f.name.contains("-422") {
+                    422
+                } else if f.name.contains("-444") {
+                    444
+                } else {
+                    420
+                };
+                assert_eq!(o.subsampling, sub, "{}", f.name);
+                assert_eq!(o.progressive, f.name.contains("progressive"), "{}", f.name);
+                assert_eq!(o.restart_rows > 0, f.name.contains("restart"), "{}", f.name);
+                assert_eq!(o.gray, f.name.contains("gray"), "{}", f.name);
+            }
+        }
+    }
+
+    /// AC-01, AC-02: identical bytes on every run, existing files kept, the
+    /// 100 MP file only with `--large` (small images: every side / 40).
+    #[test]
+    fn corpus_is_identical_on_every_run_and_keeps_existing_files() {
+        let (a, b, l) = (temp("corpus-a"), temp("corpus-b"), temp("corpus-l"));
+        write_corpus(&a, false, 40).unwrap();
+        write_corpus(&b, false, 40).unwrap();
+        let small: Vec<&str> = corpus_files()
+            .iter()
+            .filter(|f| !f.large)
+            .map(|f| f.name)
+            .collect();
+        let mut sorted = small.clone();
+        sorted.sort();
+        assert_eq!(names(&a), sorted);
+        for name in &small {
+            assert_eq!(
+                fs::read(a.join(name)).unwrap(),
+                fs::read(b.join(name)).unwrap(),
+                "{name}"
+            );
+        }
+        let jpeg = fs::read(a.join("jpeg-24mp-420.jpg")).unwrap();
+        let info = blinzel_jpeg::parse(&jpeg).unwrap();
+        assert_eq!((info.width, info.height), (150, 100));
+
+        fs::write(a.join("jpeg-12mp-420.jpg"), b"kept").unwrap();
+        write_corpus(&a, false, 40).unwrap();
+        assert_eq!(fs::read(a.join("jpeg-12mp-420.jpg")).unwrap(), b"kept");
+
+        write_corpus(&l, true, 40).unwrap();
+        assert!(l.join("jpeg-100mp-420.jpg").is_file());
+        assert_eq!(names(&l).len(), small.len() + 1);
+        for d in [a, b, l] {
+            let _ = fs::remove_dir_all(d);
         }
     }
 
