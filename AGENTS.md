@@ -204,7 +204,7 @@ Locally (Linux) runs everything platform-independent plus the Linux shell. The W
 
 ## 9. Forbidden patterns
 
-- **Modifying an image file.** Image files are never written. Every result (cutout, batch output, screenshot) is a new file; an existing name gets a number instead of being replaced.
+- **Modifying an image file.** The viewer never writes to an image it shows. Batch output and screenshots are new files: an existing name gets a number instead of being replaced. "Save cutout as" goes through the system's save dialog and its overwrite confirmation (whether that may replace the source is an open question in `docs/specs/selection-and-export.md`).
 - **Rotating pixels for the EXIF orientation.** Orientation is a transform for the GPU and the CPU reference.
 - **Work on the startup or browsing critical path that can wait.** Loading a DLL, reading settings that are not needed for the first frame, synchronous I/O on the UI thread: move it after the first frame or onto a worker (`docs/specs/blinzel.md` §5).
 - **A decode outside `catch_unwind`.** A broken file must never take the viewer down.
