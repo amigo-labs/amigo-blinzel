@@ -209,7 +209,7 @@ Locally (Linux) runs everything platform-independent plus the Linux shell. The W
 - **Work on the startup or browsing critical path that can wait.** Loading a DLL, reading settings that are not needed for the first frame, synchronous I/O on the UI thread: move it after the first frame or onto a worker (`docs/specs/blinzel.md` §5).
 - **A decode outside `catch_unwind`.** A broken file must never take the viewer down.
 - **Platform types in `blinzel-core` or `blinzel-ui`.**
-- **A user-visible string outside `i18n/`.**
+- **A user-visible string outside `i18n/`.** Technical reasons that come from a decoder, an encoder or the OS (`DecodeError`, `io::Error`) may stay English inside a translated message.
 - **A new dependency without the benchmark gate (§4) or a decision in the design spec.**
 - **New suppressions** (`#[allow(…)]`, `#[expect(…)]`) instead of fixing the cause. Where one is truly justified (e.g. `#[allow(deprecated)]` for an AppKit API without a replacement on macOS 14), the reason is a comment next to it, and the user adds it.
 - **Disabling a test instead of fixing it.** A test that cannot run in CI says why next to its `#[ignore]`.
