@@ -15,6 +15,7 @@ use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 use blinzel_core::screenshot as core_shot;
 use blinzel_core::settings::Settings;
 use blinzel_i18n::{Lang, Msg, fill, tr, tr_in, trf};
+use blinzel_ui::app::Action;
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
 use blinzel_ui::snip::{self, Outcome, Snip};
@@ -25,16 +26,16 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleDC, CreateDIBSection,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, EnumDisplayMonitors, GetDC, GetMonitorInfoW, HDC,
-    HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ReleaseDC, SRCCOPY,
-    SelectObject, ValidateRect,
+    HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ROP_CODE, ReleaseDC,
+    SRCCOPY, SelectObject, ValidateRect,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, ReleaseCapture, SetCapture,
-    SetFocus, UnregisterHotKey, VK_SHIFT, VK_SNAPSHOT,
+    GetKeyState, HOT_KEY_MODIFIERS, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
+    ReleaseCapture, SetCapture, SetFocus, UnregisterHotKey, VK_SHIFT, VK_SNAPSHOT,
 };
 use windows::Win32::UI::Shell::{
     FOLDERID_Pictures, FOLDERID_Screenshots, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
@@ -78,15 +79,39 @@ pub fn set_hotkey(hwnd: HWND, on: bool) -> bool {
         if !on {
             return true;
         }
+        let [(ctrl_shift, ctrl_shift_mods), (print, print_mods)] = hotkeys();
         let _ = RegisterHotKey(
             Some(hwnd),
-            HOTKEY_CTRL_SHIFT_PRINT,
-            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+            ctrl_shift,
+            ctrl_shift_mods,
             VK_SNAPSHOT.0 as u32,
         );
-        RegisterHotKey(Some(hwnd), HOTKEY_PRINT, MOD_NOREPEAT, VK_SNAPSHOT.0 as u32).is_ok()
+        RegisterHotKey(Some(hwnd), print, print_mods, VK_SNAPSHOT.0 as u32).is_ok()
     }
 }
+
+/// The screenshot keys on `VK_SNAPSHOT`, by id: Ctrl+Shift+Print, then
+/// Print.
+fn hotkeys() -> [(i32, HOT_KEY_MODIFIERS); 2] {
+    [
+        (
+            HOTKEY_CTRL_SHIFT_PRINT,
+            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+        ),
+        (HOTKEY_PRINT, MOD_NOREPEAT),
+    ]
+}
+
+/// Whether the screenshot keys belong registered: resident mode and the
+/// key setting both on.
+pub fn hotkey_wanted(settings: &Settings) -> bool {
+    settings.resident && settings.screenshot_hotkey
+}
+
+/// What one of our keys does, with the window shown or hidden.
+pub const ON_HOTKEY: Action = Action::Capture {
+    whole_screen: false,
+};
 
 /// How often, and how far apart, Print is tried again at start (a minute).
 pub const RETRY_TRIES: u32 = 12;
@@ -196,6 +221,11 @@ fn to_rect(r: &RECT, origin: (i32, i32)) -> Rect {
     )
 }
 
+/// A plain copy that includes layered windows.
+fn capture_rop() -> ROP_CODE {
+    SRCCOPY | CAPTUREBLT
+}
+
 /// Copies the whole virtual screen (layered windows included).
 fn grab() -> Result<Shot, String> {
     let vs = virtual_screen();
@@ -237,7 +267,7 @@ fn grab() -> Result<Shot, String> {
                     Some(screen),
                     vs.left,
                     vs.top,
-                    SRCCOPY | CAPTUREBLT,
+                    capture_rop(),
                 )
                 .map_err(|e| e.message());
                 if r.is_ok() {
@@ -491,7 +521,6 @@ fn register_class() -> Result<(), String> {
 /// its first frame is on screen, so nothing flickers.
 fn open_overlay(main: HWND, shot: Shot) -> Result<(), String> {
     close_overlay();
-    register_class()?;
     let (gfx, device) =
         with_app(|a| (a.canvas.gfx.clone(), Arc::clone(&a.device))).ok_or("viewer busy")?;
     let (w, h) = shot.size;
@@ -524,25 +553,7 @@ fn open_overlay(main: HWND, shot: Shot) -> Result<(), String> {
         let _ = GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
         dx.max(96) as f64 / 96.0
     };
-    let hwnd = unsafe {
-        let instance = GetModuleHandleW(None).map_err(|e| e.message())?;
-        CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
-            CLASS,
-            w!("amigo-blinzel"),
-            WS_POPUP,
-            shot.origin.0,
-            shot.origin.1,
-            w as i32,
-            h as i32,
-            None,
-            None,
-            Some(instance.into()),
-            None,
-        )
-        .map_err(|e| e.message())?
-    };
-    set_cloak(hwnd, true);
+    let hwnd = overlay_window(shot.origin, shot.size)?;
     let swap = match SwapChain::new(&gfx, hwnd, (w, h)) {
         Ok(s) => s,
         Err(e) => {
@@ -579,6 +590,32 @@ fn open_overlay(main: HWND, shot: Shot) -> Result<(), String> {
     }
     set_cloak(hwnd, false);
     Ok(())
+}
+
+/// The overlay's window over the virtual screen at `origin`, 1:1:
+/// topmost, without a taskbar button, cloaked until its first frame.
+fn overlay_window(origin: (i32, i32), (w, h): (u32, u32)) -> Result<HWND, String> {
+    register_class()?;
+    let hwnd = unsafe {
+        let instance = GetModuleHandleW(None).map_err(|e| e.message())?;
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
+            CLASS,
+            w!("amigo-blinzel"),
+            WS_POPUP,
+            origin.0,
+            origin.1,
+            w as i32,
+            h as i32,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .map_err(|e| e.message())?
+    };
+    set_cloak(hwnd, true);
+    Ok(hwnd)
 }
 
 fn render() {
@@ -634,6 +671,12 @@ fn point(lp: LPARAM) -> (f64, f64) {
     )
 }
 
+/// Whether `msg` closes the overlay without a shot: a right click, or
+/// losing the foreground (Alt+Tab, the Win key, another app).
+fn cancels(msg: u32, wp: WPARAM) -> bool {
+    msg == WM_RBUTTONUP || (msg == WM_ACTIVATE && (wp.0 & 0xFFFF) as u32 == WA_INACTIVE)
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let o = match msg {
         WM_PAINT => {
@@ -653,7 +696,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             with_snip(|s| s.mouse_up(point(lp)))
         }
-        WM_RBUTTONUP => Some(Outcome::Cancel),
+        m if cancels(m, wp) => Some(Outcome::Cancel),
         WM_KEYDOWN => {
             let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
             match crate::window::key_of(wp.0 as u16) {
@@ -661,8 +704,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 None => None,
             }
         }
-        // Switching away (Alt+Tab, Win key) cancels.
-        WM_ACTIVATE if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE => Some(Outcome::Cancel),
         // It spans monitors with different scaling: stay as created.
         WM_DPICHANGED => return LRESULT(0),
         _ => return unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
@@ -716,6 +757,37 @@ pub fn hotkey_taken() -> String {
 mod tests {
     use super::*;
 
+    /// AC-02: Print and Ctrl+Shift+Print (never repeating) open the
+    /// overlay, shown or hidden, where resident mode and the key are on.
+    #[test]
+    fn print_and_ctrl_shift_print_open_the_overlay_in_resident_mode() {
+        assert_eq!(
+            hotkeys(),
+            [
+                (2, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT),
+                (1, MOD_NOREPEAT)
+            ]
+        );
+        for (id, _) in hotkeys() {
+            assert!(is_hotkey(WPARAM(id as usize)));
+        }
+        assert!(!is_hotkey(WPARAM(3)));
+        assert_eq!(
+            ON_HOTKEY,
+            Action::Capture {
+                whole_screen: false
+            }
+        );
+        for (resident, key) in [(true, true), (true, false), (false, true), (false, false)] {
+            let s = Settings {
+                resident,
+                screenshot_hotkey: key,
+                ..Settings::default()
+            };
+            assert_eq!(hotkey_wanted(&s), resident && key);
+        }
+    }
+
     /// AC-03: Print is tried every 5 s for a minute, then the notice is
     /// due once; a try that gets it, or the setting turned off, stops.
     #[test]
@@ -737,6 +809,49 @@ mod tests {
         assert_eq!(retry(true, || true, 0), Retry::Stop, "the last try got it");
         assert_eq!(retry(true, || true, 5), Retry::Stop);
         assert_eq!(retry(false, || panic!("not tried"), 0), Retry::Stop);
+    }
+
+    /// AC-07: the whole virtual desktop is frozen (layered windows
+    /// included) and the overlay covers it 1:1, topmost, without a taskbar
+    /// button, cloaked until its first frame.
+    #[test]
+    fn a_screenshot_freezes_the_virtual_desktop_under_a_cloaked_overlay() {
+        assert_eq!(capture_rop(), SRCCOPY | CAPTUREBLT);
+        let vs = virtual_screen();
+        let shot = grab().expect("the CI machine has a desktop");
+        let size = ((vs.right - vs.left) as u32, (vs.bottom - vs.top) as u32);
+        assert_eq!((shot.size, shot.origin), (size, (vs.left, vs.top)));
+        assert_eq!(shot.bgra.len(), size.0 as usize * size.1 as usize * 4);
+        assert!(!shot.monitors.is_empty());
+        let hwnd = overlay_window(shot.origin, shot.size).unwrap();
+        let mut r = RECT::default();
+        let mut cloaked = 0u32;
+        unsafe {
+            GetWindowRect(hwnd, &mut r).unwrap();
+            DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), 4).unwrap();
+        }
+        assert_eq!(
+            (r.left, r.top, r.right, r.bottom),
+            (vs.left, vs.top, vs.right, vs.bottom)
+        );
+        assert_ne!(cloaked, 0, "cloaked");
+        let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        let want = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+        assert_eq!(ex & want.0, want.0);
+        unsafe { DestroyWindow(hwnd).unwrap() };
+    }
+
+    /// AC-14: a right click or losing the foreground closes the overlay
+    /// without a shot; becoming active or a left click does not.
+    #[test]
+    fn a_right_click_or_losing_the_foreground_cancels_the_overlay() {
+        assert!(cancels(WM_RBUTTONUP, WPARAM(0)));
+        assert!(cancels(WM_ACTIVATE, WPARAM(WA_INACTIVE as usize)));
+        // Minimized while losing it: the high word is set.
+        assert!(cancels(WM_ACTIVATE, WPARAM(0x1_0000)));
+        assert!(!cancels(WM_ACTIVATE, WPARAM(WA_ACTIVE as usize)));
+        assert!(!cancels(WM_ACTIVATE, WPARAM(WA_CLICKACTIVE as usize)));
+        assert!(!cancels(WM_LBUTTONUP, WPARAM(0)));
     }
 
     /// AC-18: the folder chosen in the menu, else the Screenshots known

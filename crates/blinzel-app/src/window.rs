@@ -469,7 +469,7 @@ fn handle(
             done
         }
         WM_TIMER if wp.0 == TIMER_HOTKEY => {
-            let wanted = app.settings.resident && app.settings.screenshot_hotkey;
+            let wanted = screenshot::hotkey_wanted(&app.settings);
             let left = HOTKEY_TRIES
                 .fetch_sub(1, Ordering::Relaxed)
                 .saturating_sub(1);
@@ -577,9 +577,7 @@ fn handle(
             done
         }
         WM_HOTKEY if screenshot::is_hotkey(wp) => {
-            actions.push(Action::Capture {
-                whole_screen: false,
-            });
+            actions.push(screenshot::ON_HOTKEY);
             done
         }
         screenshot::WM_SCREENSHOT => {

@@ -464,7 +464,7 @@ pub fn run() -> i32 {
 
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let resident_mode = settings.resident;
-    let screenshot_hotkey = settings.screenshot_hotkey;
+    let screenshot_hotkey = crate::screenshot::hotkey_wanted(&settings);
     let mut app = App::new(
         WinHost { hwnd },
         device,
