@@ -366,18 +366,13 @@ fn save(main: HWND, shot: &Shot, r: Rect) {
     let settings = with_app(|a| a.settings.clone()).unwrap_or_default();
     let cache =
         core_shot::cache_folder(&blinzel_ui::dirs::cache().unwrap_or_else(std::env::temp_dir));
-    let dest = core_shot::destination(&settings, &folder(&settings), &cache);
+    let folder = folder(&settings);
     let raw = main.0 as isize;
     let _ = std::thread::Builder::new()
         .name("blinzel-screenshot".into())
         .spawn(move || {
             let result = blinzel_core::export::encode_png_bgra(&bgra, w, h).map(|png| {
-                if dest.as_ref() == Some(&cache) {
-                    core_shot::sweep(&cache, core_shot::CACHE_MAX_AGE);
-                }
-                let file = dest
-                    .map(|d| core_shot::write(&d, &file_stem(), &png))
-                    .transpose();
+                let file = core_shot::store(&settings, &folder, &cache, &file_stem(), &png);
                 Taken {
                     bgra,
                     width: w,

@@ -725,16 +725,12 @@ fn file_stem() -> String {
 pub fn save(bgra: Vec<u8>, w: u32, h: u32, settings: &Settings) {
     let cache =
         core_shot::cache_folder(&blinzel_ui::dirs::cache().unwrap_or_else(std::env::temp_dir));
-    let dest = core_shot::destination(settings, &folder(settings), &cache);
-    let stem = file_stem();
+    let (settings, folder, stem) = (settings.clone(), folder(settings), file_stem());
     let _ = std::thread::Builder::new()
         .name("blinzel-screenshot".into())
         .spawn(move || {
             let result = blinzel_core::export::encode_png_bgra(&bgra, w, h).map(|png| {
-                if dest.as_ref() == Some(&cache) {
-                    core_shot::sweep(&cache, core_shot::CACHE_MAX_AGE);
-                }
-                let file = dest.map(|d| core_shot::write(&d, &stem, &png)).transpose();
+                let file = core_shot::store(&settings, &folder, &cache, &stem, &png);
                 Taken { png, file }
             });
             post(UserEvent::Shot(result));
