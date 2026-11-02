@@ -88,6 +88,33 @@ pub fn set_hotkey(hwnd: HWND, on: bool) -> bool {
     }
 }
 
+/// How often, and how far apart, Print is tried again at start (a minute).
+pub const RETRY_TRIES: u32 = 12;
+pub const RETRY_MS: u32 = 5000;
+
+/// What the retry timer does after a try.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Retry {
+    /// Print is still taken; try again.
+    Again,
+    /// Print is ours, or no longer wanted.
+    Stop,
+    /// The last try failed: say that Windows keeps the key.
+    GiveUp,
+}
+
+/// One retry of the Print key with `left` tries left after it; `free`
+/// registers it and says whether that worked.
+pub fn retry(wanted: bool, free: impl FnOnce() -> bool, left: u32) -> Retry {
+    if !wanted || free() {
+        Retry::Stop
+    } else if left == 0 {
+        Retry::GiveUp
+    } else {
+        Retry::Again
+    }
+}
+
 /// Marks (or clears) the [`hotkey_taken`] notice for the next wake.
 pub fn hint_pending(on: bool) {
     HOTKEY_HINT.store(on, Ordering::Relaxed);
@@ -688,6 +715,29 @@ pub fn hotkey_taken() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AC-03: Print is tried every 5 s for a minute, then the notice is
+    /// due once; a try that gets it, or the setting turned off, stops.
+    #[test]
+    fn a_taken_print_key_is_retried_for_a_minute_then_reported() {
+        assert_eq!(RETRY_TRIES * RETRY_MS, 60_000);
+        assert_eq!(RETRY_MS, 5000);
+        let mut left = RETRY_TRIES;
+        let mut tries = vec![];
+        loop {
+            left -= 1;
+            let r = retry(true, || false, left);
+            tries.push(left);
+            if r != Retry::Again {
+                assert_eq!(r, Retry::GiveUp);
+                break;
+            }
+        }
+        assert_eq!(tries.len() as u32, RETRY_TRIES);
+        assert_eq!(retry(true, || true, 0), Retry::Stop, "the last try got it");
+        assert_eq!(retry(true, || true, 5), Retry::Stop);
+        assert_eq!(retry(false, || panic!("not tried"), 0), Retry::Stop);
+    }
 
     /// AC-18: the folder chosen in the menu, else the Screenshots known
     /// folder, else Pictures\Screenshots; this machine's folder is a real

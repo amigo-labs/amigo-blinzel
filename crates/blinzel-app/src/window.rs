@@ -473,11 +473,12 @@ fn handle(
             let left = HOTKEY_TRIES
                 .fetch_sub(1, Ordering::Relaxed)
                 .saturating_sub(1);
-            if !wanted || screenshot::set_hotkey(hwnd, true) || left == 0 {
+            let retry = screenshot::retry(wanted, || screenshot::set_hotkey(hwnd, true), left);
+            if retry != screenshot::Retry::Again {
                 unsafe {
                     let _ = KillTimer(Some(hwnd), TIMER_HOTKEY);
                 }
-                if wanted && left == 0 {
+                if retry == screenshot::Retry::GiveUp {
                     match app.tell(screenshot::hotkey_taken()) {
                         // Now in the tray, and again in the window: a
                         // notification may be switched off.
@@ -1085,9 +1086,9 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
 /// Print key: tries again for a minute, then leaves a notice for the next
 /// wake. Ctrl+Shift+Print works meanwhile.
 pub fn retry_hotkey(hwnd: HWND) {
-    HOTKEY_TRIES.store(12, Ordering::Relaxed);
+    HOTKEY_TRIES.store(screenshot::RETRY_TRIES, Ordering::Relaxed);
     unsafe {
-        SetTimer(Some(hwnd), TIMER_HOTKEY, 5000, None);
+        SetTimer(Some(hwnd), TIMER_HOTKEY, screenshot::RETRY_MS, None);
     }
 }
 
