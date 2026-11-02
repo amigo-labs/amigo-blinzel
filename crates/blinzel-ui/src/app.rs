@@ -114,6 +114,16 @@ pub enum Action {
     PickScreenshotFolder,
 }
 
+/// Whether a hidden resident instance leaves the settings file alone when
+/// it exits (Windows).
+const HIDDEN_EXIT_KEEPS_FILE: bool = cfg!(windows);
+
+/// Whether an exiting instance writes its settings: not when it is hidden
+/// on a platform where `hidden_keeps_file`.
+fn writes_settings_on_exit(hidden: bool, hidden_keeps_file: bool) -> bool {
+    !(hidden && hidden_keeps_file)
+}
+
 /// `file` in the configured editor, or the question for one first.
 fn edit_action(editor: Option<&str>, file: PathBuf) -> Action {
     match editor {
@@ -384,6 +394,15 @@ impl<B: Backend> App<B> {
             .as_deref()
             .and_then(blinzel_i18n::lang_from_code);
         blinzel_i18n::set_lang(lang.unwrap_or_else(|| self.services.system_language()));
+    }
+
+    /// The viewer exits normally: writes the settings file once more,
+    /// unless it is a hidden resident instance on Windows, whose copy may
+    /// be older than what another window saved meanwhile.
+    pub fn save_settings_on_exit(&self) {
+        if writes_settings_on_exit(self.hidden, HIDDEN_EXIT_KEEPS_FILE) {
+            settings_store::save(&self.settings);
+        }
     }
 
     /// Resident start: decodes, uploads and draws a generated JPEG once
@@ -2412,6 +2431,10 @@ mod selection_tests;
 #[cfg(test)]
 #[path = "app_thumbnail_tests.rs"]
 mod thumbnail_tests;
+
+#[cfg(test)]
+#[path = "app_settings_tests.rs"]
+mod settings_tests;
 
 /// Commands on the image shown, which the grid covers.
 fn acts_on_the_shown_image(cmd: Cmd) -> bool {

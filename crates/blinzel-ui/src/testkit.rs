@@ -831,10 +831,19 @@ impl Harness {
         &self.app.canvas.frame
     }
 
+    /// Where the App saves its settings (`<temp>/config/settings.toml`).
+    pub fn settings_file(&self) -> PathBuf {
+        self.tmp.path().join("config").join("settings.toml")
+    }
+
+    /// The settings file's text as saved (`None`: never saved).
+    pub fn saved_text(&self) -> Option<String> {
+        std::fs::read_to_string(self.settings_file()).ok()
+    }
+
     /// The settings file as saved (`None`: never saved).
     pub fn saved_settings(&self) -> Option<Settings> {
-        let p = self.tmp.path().join("config").join("settings.toml");
-        std::fs::read_to_string(p).ok().map(|t| Settings::parse(&t))
+        self.saved_text().map(|t| Settings::parse(&t))
     }
 }
 
