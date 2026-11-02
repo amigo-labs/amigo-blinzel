@@ -29,6 +29,7 @@ pub struct Settings {
     /// The window's last normal (not maximized) rect, left, top, right,
     /// bottom in workspace coordinates (`GetWindowPlacement`).
     pub window: Option<[i32; 4]>,
+    /// Whether it was maximized; written only together with `window`.
     pub maximized: bool,
     /// The Print key takes screenshots (in resident mode).
     pub screenshot_hotkey: bool,
@@ -176,8 +177,12 @@ impl Settings {
 
     pub fn to_text(&self) -> String {
         let [r, g, b] = self.background;
+        // Only the Windows shell knows the window's placement: no rect, no
+        // placement keys.
         let mut optional = match self.window {
-            Some([l, t, r, b]) => format!("window = {l},{t},{r},{b}\n"),
+            Some([l, t, r, b]) => {
+                format!("window = {l},{t},{r},{b}\nmaximized = {}\n", self.maximized)
+            }
             None => String::new(),
         };
         if let Some(d) = &self.screenshot_dir {
@@ -199,7 +204,6 @@ impl Settings {
              resident = {}\n\
              color_management = {}\n\
              filmstrip = {}\n\
-             maximized = {}\n\
              screenshot_hotkey = {}\n\
              screenshot_save = {}\n\
              screenshot_open = {}\n\
@@ -215,7 +219,6 @@ impl Settings {
             self.resident,
             self.color_management,
             self.filmstrip,
-            self.maximized,
             self.screenshot_hotkey,
             self.screenshot_save,
             self.screenshot_open,
@@ -389,6 +392,29 @@ mod tests {
             };
             assert_eq!(v.as_deref(), Some(r"D:\Bilder #2\a b"));
         }
+    }
+
+    #[test]
+    fn the_window_placement_is_written_only_once_a_rect_is_known() {
+        let text = Settings::default().to_text();
+        for key in ["window", "maximized"] {
+            assert!(
+                !text.lines().any(|l| l.starts_with(key)),
+                "{key} in\n{text}"
+            );
+        }
+        let placed = Settings {
+            window: Some([-1900, 30, 200, 1000]),
+            maximized: true,
+            ..Settings::default()
+        };
+        let text = placed.to_text();
+        assert!(
+            text.lines().any(|l| l == "window = -1900,30,200,1000"),
+            "{text}"
+        );
+        assert!(text.lines().any(|l| l == "maximized = true"), "{text}");
+        assert_eq!(Settings::parse(&text), placed);
     }
 
     #[test]
