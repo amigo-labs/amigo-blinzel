@@ -447,3 +447,135 @@ fn filmstrip_centres_the_current_tile_and_opens_clicked_ones() {
     h.key(Letter('G'));
     assert!(strip_band(&h), "back once the grid closes");
 }
+
+// ------------------------------------------------------ thumbnail requests
+
+/// Paths of list items `items`.
+fn paths(h: &Harness, items: impl IntoIterator<Item = usize>) -> Vec<PathBuf> {
+    items
+        .into_iter()
+        .map(|i| h.app.list().path(i).unwrap())
+        .collect()
+}
+
+/// Waits until the pool has read `n` files and every tile on screen has
+/// its thumbnail, then renders a few more frames (each asks again).
+fn settle(h: &mut Harness, n: usize, drawn: usize) {
+    h.wait_for(|h| h.thumb_reads().len() >= n && h.frame().thumbs.len() >= drawn);
+    for _ in 0..3 {
+        h.app.invalidate();
+        h.pump();
+    }
+}
+
+#[test]
+fn the_grid_asks_for_the_visible_tiles_then_the_next_then_the_previous_screenful() {
+    let mut h = folder_of(60);
+    h.open("40.png");
+    h.key(Letter('G'));
+    let g = grid_layout(60, (800.0, 600.0), 1.0);
+    let visible = g.visible(scroll(&h), 600.0);
+    assert!(visible.start >= 16, "{visible:?}: scrolled down");
+    let page = visible.len();
+    let next = visible.end..(visible.end + page).min(60);
+    let prev = (visible.start - page..visible.start).rev();
+    let want = paths(&h, visible.clone().chain(next).chain(prev));
+    settle(&mut h, want.len(), page);
+    // One pool thread: requests are served in priority order, each once.
+    assert_eq!(h.thumb_reads(), want);
+}
+
+#[test]
+fn the_filmstrip_asks_nearest_first_then_alternating_further_out() {
+    let mut h = folder_of(40);
+    h.open("20.png");
+    h.key(Letter('T'));
+    // 11 tiles fit 800 px (72 + 6 each), the current one in the middle.
+    let visible = [20, 19, 21, 18, 22, 17, 23, 16, 24, 15, 25];
+    let further = (6..=15).flat_map(|k| [20 + k, 20 - k]);
+    let want = paths(&h, visible.into_iter().chain(further));
+    settle(&mut h, want.len(), visible.len());
+    assert_eq!(h.frame().thumbs.len(), visible.len());
+    assert_eq!(h.thumb_reads(), want);
+}
+
+#[test]
+fn thumbnails_are_made_stored_and_taken_from_the_cache_next_session() {
+    use blinzel_core::thumbcache::{Key, ThumbCache};
+    let mut h = folder_of(3);
+    h.key(Letter('G'));
+    settle(&mut h, 3, 3);
+    assert_eq!(h.thumb_reads(), paths(&h, 0..3), "made from the files");
+    let dir = h.app.services.cache_dir().unwrap().join("thumbs");
+    let key = |h: &Harness, i: usize| {
+        let e = h.app.list().get(i).unwrap();
+        Key::new(&h.app.list().path(i).unwrap(), e.size, e.mtime)
+    };
+    let cache = ThumbCache::open(&dir, 1 << 30).unwrap();
+    for i in 0..3 {
+        assert!(cache.get(&key(&h, i)).is_some(), "{i} stored");
+    }
+    // Next session: from the cache, no file read.
+    h.restart();
+    h.open("00.png");
+    h.key(Letter('G'));
+    h.wait_for(|h| h.frame().thumbs.len() == 3);
+    assert_eq!(h.thumb_reads(), [] as [PathBuf; 0]);
+    // A file changed since: its entry is stale, it is made again.
+    h.write_png("01.png", 30, 20);
+    h.restart();
+    h.open("00.png");
+    h.key(Letter('G'));
+    settle(&mut h, 1, 3);
+    assert_eq!(h.thumb_reads(), paths(&h, [1]));
+}
+
+/// The fill drawn exactly over grid tile `i`: its placeholder.
+fn placeholder_at(h: &Harness, i: usize) -> bool {
+    let cell = h.grid_cell(i).unwrap();
+    h.frame()
+        .shapes
+        .iter()
+        .any(|s| matches!(s, Shape::Fill { rect, .. } if *rect == cell))
+}
+
+#[test]
+fn a_broken_file_keeps_its_placeholder_and_is_not_asked_for_again() {
+    let mut h = Harness::new();
+    h.write_png("a.png", 64, 48);
+    h.write_file("b.png", b"not an image");
+    h.write_png("c.png", 64, 48);
+    h.open("a.png");
+    h.key(Letter('G'));
+    settle(&mut h, 3, 2);
+    assert!(placeholder_at(&h, 1));
+    assert!(!placeholder_at(&h, 0) && !placeholder_at(&h, 2));
+    // Closed and opened again: still not asked for.
+    h.key(Letter('G'));
+    h.key(Letter('G'));
+    settle(&mut h, 3, 2);
+    assert_eq!(h.thumb_reads(), paths(&h, 0..3), "each read once");
+    assert!(placeholder_at(&h, 1));
+}
+
+#[test]
+fn cloud_placeholders_are_never_read_for_a_thumbnail() {
+    use blinzel_core::filelist::attr;
+    let mut h = Harness::new();
+    let cloud = [
+        ("b.png", attr::OFFLINE),
+        ("c.png", attr::RECALL_ON_OPEN),
+        ("d.png", attr::RECALL_ON_DATA_ACCESS),
+    ];
+    for name in ["a.png", "b.png", "c.png", "d.png", "e.png"] {
+        h.write_png(name, 64, 48);
+    }
+    for (name, a) in cloud {
+        h.set_attributes(name, a);
+    }
+    h.open("a.png");
+    h.key(Letter('G'));
+    settle(&mut h, 2, 2);
+    assert_eq!(h.thumb_reads(), paths(&h, [0, 4]));
+    assert!((1..4).all(|i| placeholder_at(&h, i)));
+}

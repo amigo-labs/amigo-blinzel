@@ -237,6 +237,19 @@ impl Host for FakeHost {
 pub(crate) struct FakeServices {
     wakes: Mutex<Sender<Wake>>,
     cache: PathBuf,
+    /// Every file read, with the reading thread's name.
+    pub reads: Mutex<Vec<(String, PathBuf)>>,
+    /// File attributes the listing reports, by name (cloud placeholders).
+    pub attributes: Mutex<HashMap<String, u32>>,
+}
+
+impl FakeServices {
+    fn with_attributes(&self, mut e: Entry) -> Entry {
+        if let Some(a) = self.attributes.lock().unwrap().get(&e.name) {
+            e.attributes |= a;
+        }
+        e
+    }
 }
 
 impl Services for FakeServices {
@@ -244,13 +257,19 @@ impl Services for FakeServices {
         let _ = self.wakes.lock().unwrap().send(w);
     }
     fn read_file(&self, path: &Path) -> std::io::Result<PoolBuf> {
+        let thread = std::thread::current().name().unwrap_or("").to_string();
+        self.reads
+            .lock()
+            .unwrap()
+            .push((thread, path.to_path_buf()));
         crate::files::read_file(path)
     }
     fn list_dir(&self, dir: &Path) -> std::io::Result<Vec<Entry>> {
-        crate::files::list_dir(dir)
+        let list = crate::files::list_dir(dir)?;
+        Ok(list.into_iter().map(|e| self.with_attributes(e)).collect())
     }
     fn entry(&self, path: &Path) -> std::io::Result<Entry> {
-        crate::files::entry(path)
+        crate::files::entry(path).map(|e| self.with_attributes(e))
     }
     fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
         decode::probe(data)
@@ -369,10 +388,37 @@ impl Harness {
         std::fs::create_dir_all(&images).unwrap();
         let config = tmp.path().join("config");
         crate::settings_store::TEST_CONFIG_DIR.with(|d| *d.borrow_mut() = Some(config));
+        let (app, wakes) = Harness::start(tmp.path(), settings);
+        Harness {
+            app,
+            images,
+            wakes,
+            actions: Vec::new(),
+            rendered_at: 0,
+            tmp,
+            _serial: serial,
+        }
+    }
+
+    /// A new session over the same folders (images, settings file,
+    /// thumbnail cache), with the settings as saved; nothing open.
+    pub fn restart(&mut self) {
+        let settings = self.saved_settings().unwrap_or_default();
+        let (app, wakes) = Harness::start(self.tmp.path(), settings);
+        self.app = app;
+        self.wakes = wakes;
+        self.actions.clear();
+        self.rendered_at = 0;
+    }
+
+    /// A new App over the folders under `tmp`.
+    fn start(tmp: &Path, settings: Settings) -> (App<TestBackend>, Receiver<Wake>) {
         let (tx, wakes) = channel();
         let services = Arc::new(FakeServices {
             wakes: Mutex::new(tx),
-            cache: tmp.path().join("cache"),
+            cache: tmp.join("cache"),
+            reads: Mutex::new(Vec::new()),
+            attributes: Mutex::new(HashMap::new()),
         });
         let device = Arc::new(FakeDevice::default());
         let loader = Loader::new(services.clone(), 1, 2, 2);
@@ -392,15 +438,7 @@ impl Harness {
             CLIENT,
         );
         app.update_screen_box();
-        Harness {
-            app,
-            images,
-            wakes,
-            actions: Vec::new(),
-            rendered_at: 0,
-            tmp,
-            _serial: serial,
-        }
+        (app, wakes)
     }
 
     /// Writes [`IMAGE_SIZE`] PNGs named `names` and opens the first.
@@ -740,6 +778,23 @@ impl Harness {
     /// The selected tile while the grid is open.
     pub fn grid_selected(&self) -> Option<usize> {
         self.app.browse.grid.as_ref().map(|g| g.selected)
+    }
+
+    /// Files the thumbnail pool read, in order.
+    pub fn thumb_reads(&self) -> Vec<PathBuf> {
+        let reads = self.app.services.reads.lock().unwrap();
+        reads
+            .iter()
+            .filter(|(t, _)| t.starts_with("blinzel-thumb"))
+            .map(|(_, p)| p.clone())
+            .collect()
+    }
+
+    /// The listing reports `name` with `attributes` (e.g. a cloud
+    /// placeholder) from now on.
+    pub fn set_attributes(&self, name: &str, attributes: u32) {
+        let mut a = self.app.services.attributes.lock().unwrap();
+        a.insert(name.to_string(), attributes);
     }
 
     /// The marked tiles' names while the grid is open.
