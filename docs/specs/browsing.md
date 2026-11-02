@@ -131,8 +131,8 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 | ----- | ---- | ------ | ------ |
 | AC-01 | `numbers_compare_numerically`, `case_insensitive_with_stable_tiebreak`, `symbols_before_digits_before_letters` (`crates/blinzel-core/src/natsort.rs`; Linux, macOS, Windows) | built | |
 | AC-02 | `filters_sorts_and_navigates` (`crates/blinzel-core/src/filelist.rs`); `lists_images_only_and_reads_them` (`crates/blinzel-ui/src/files.rs`, the Linux/macOS listing) | built | |
-| AC-03 | `filters_sorts_and_navigates` covers only the case-insensitive `index_of`; the App flow is untested | open | |
-| AC-04 | | open | |
+| AC-03 | `an_opened_file_shows_before_its_folder_is_listed_and_keys_wait_for_the_listing` (`crates/blinzel-ui/src/app_browsing_tests.rs`); `filters_sorts_and_navigates` (`crates/blinzel-core/src/filelist.rs`, the case-insensitive `index_of`) | built | |
+| AC-04 | `navigation_keys_step_jump_wrap_and_pan_a_zoomed_image` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built | |
 | AC-05 | `filters_sorts_and_navigates` (`crates/blinzel-core/src/filelist.rs`, `offset` wraps both ways and by 7 steps) | built | |
 | AC-06 | | open | |
 | AC-07 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`) covers only the cap of `prefetch_ahead` at 32 | open | |
@@ -152,3 +152,6 @@ amigo-blinzel is meant to be measurably faster than any other viewer at flipping
 | AC-21 | manual: measurement | open | |
 
 ## Decisions
+
+- AC-03 and AC-04 held before their tests were written (the tests were green at once): the listing, the keys and wrapping worked; the tests pin them in `App`.
+- No shipped language is right to left (`shipped_languages_are_left_to_right`), so AC-04's swap is tested on `nav_cmd`, the key-to-command mapping `App::key` calls with `blinzel_i18n::is_rtl()`.

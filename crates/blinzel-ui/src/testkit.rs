@@ -645,6 +645,40 @@ impl Harness {
         }
     }
 
+    /// Like [`Harness::pump`], but the folder listing's wake is held
+    /// back: returns once the loader is idle and the listing has been sent
+    /// to the App, which has not taken it yet ([`Harness::release_listing`]).
+    pub fn pump_holding_listing(&mut self) {
+        let t = Instant::now();
+        let mut listed = false;
+        loop {
+            while let Ok(w) = self.wakes.try_recv() {
+                match w {
+                    Wake::List => listed = true,
+                    w => self.deliver(w),
+                }
+            }
+            let a = self.app.on_loaded();
+            self.actions.extend(a);
+            if self.app.host.log.borrow().invalidations != self.rendered_at {
+                self.render();
+            }
+            if listed && self.app.loader.pending() == 0 {
+                break;
+            }
+            assert!(t.elapsed() < PUMP_LIMIT, "the loader did not get idle");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Hands the listing held by [`Harness::pump_holding_listing`] to the
+    /// App, without pumping.
+    pub fn release_listing(&mut self) -> Vec<Action> {
+        let a = self.app.on_list();
+        self.actions.extend(a.iter().map(Action::clone));
+        a
+    }
+
     fn deliver(&mut self, w: Wake) {
         let a = match w {
             Wake::Loaded => self.app.on_loaded(),

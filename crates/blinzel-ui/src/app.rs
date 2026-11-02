@@ -1663,13 +1663,7 @@ impl<B: Backend> App<B> {
             Left if overflow && !ctrl => pan(self, -1.0, 0.0),
             Up if overflow => pan(self, 0.0, -1.0),
             Down if overflow => pan(self, 0.0, 1.0),
-            // Right-to-left languages page leftwards.
-            Right if blinzel_i18n::is_rtl() => self.command(Cmd::Prev),
-            Left if blinzel_i18n::is_rtl() => self.command(Cmd::Next),
-            Right | PageDown | Space | Down => self.command(Cmd::Next),
-            Left | PageUp | Backspace | Up => self.command(Cmd::Prev),
-            Home => self.command(Cmd::First),
-            End => self.command(Cmd::Last),
+            k if let Some(cmd) = nav_cmd(k, blinzel_i18n::is_rtl()) => self.command(cmd),
             Plus => self.command(Cmd::ZoomIn),
             Minus => self.command(Cmd::ZoomOut),
             Digit(0) => self.command(Cmd::ZoomReset),
@@ -2471,6 +2465,25 @@ mod batch_tests;
 #[cfg(test)]
 #[path = "app_viewing_tests.rs"]
 mod viewing_tests;
+
+#[cfg(test)]
+#[path = "app_browsing_tests.rs"]
+mod browsing_tests;
+
+/// The command a navigation key gives in the single-image view;
+/// right-to-left languages page leftwards.
+fn nav_cmd(key: Key, rtl: bool) -> Option<Cmd> {
+    use Key::*;
+    Some(match key {
+        Right if rtl => Cmd::Prev,
+        Left if rtl => Cmd::Next,
+        Right | PageDown | Space | Down => Cmd::Next,
+        Left | PageUp | Backspace | Up => Cmd::Prev,
+        Home => Cmd::First,
+        End => Cmd::Last,
+        _ => return None,
+    })
+}
 
 /// Commands on the image shown, which the grid covers.
 fn acts_on_the_shown_image(cmd: Cmd) -> bool {
