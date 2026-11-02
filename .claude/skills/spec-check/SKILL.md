@@ -69,7 +69,7 @@ In the user's language:
 
 ## Apply the result
 
-**Only on `READY` or `READY (manual: n)`** do you change the spec:
+**Only on `READY`, `READY (manual: n)` or `READY (CI: n)`** do you change the spec:
 
 1. Front matter: `status: todo` → `status: implemented`
 2. All AC checkboxes to `[x]`
