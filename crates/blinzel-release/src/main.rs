@@ -5,6 +5,8 @@
 //! blinzel-release sign <file> <out.sig>      signs with $RELEASE_SIGNING_KEY (hex seed)
 //! blinzel-release verify <file> <sig> <public-key-hex>
 //! blinzel-release notices [--check]          writes (or checks) THIRD-PARTY-NOTICES*.txt
+//! blinzel-release check-release <dir>        the release files are complete, their
+//!                                            architectures and SHA256SUMS right
 //! blinzel-release macos-bundle <out.app> <blinzel>...
 //!                                            the macOS app bundle (universal with
 //!                                            one executable per architecture)
@@ -15,6 +17,7 @@
 //! repository secret `RELEASE_SIGNING_KEY` and nowhere in the repository;
 //! the public key goes into `blinzel-core/src/update.rs` (`RELEASE_KEY`).
 
+mod assets;
 mod macos;
 mod notices;
 
@@ -38,6 +41,7 @@ fn main() {
         ["verify", file, sig, key] => verify(file, sig, key),
         ["notices"] => notices(false),
         ["notices", "--check"] => notices(true),
+        ["check-release", dir] => assets::check_dir(Path::new(dir)),
         ["macos-bundle", out, exes @ ..] => {
             let exes: Vec<&Path> = exes.iter().map(Path::new).collect();
             macos::bundle(Path::new(out), &exes, env!("CARGO_PKG_VERSION"))
@@ -55,6 +59,7 @@ fn usage() -> String {
     "usage:\n  blinzel-release keygen <secret-key-file>\n  blinzel-release sign <file> <out.sig>   \
      (secret from $RELEASE_SIGNING_KEY)\n  blinzel-release verify <file> <sig> <public-key-hex>\n  \
      blinzel-release notices [--check]\n  \
+     blinzel-release check-release <dir>\n  \
      blinzel-release macos-bundle <out.app> <blinzel>...\n  \
      blinzel-release macos-dmg <app> <out.dmg>"
         .into()
