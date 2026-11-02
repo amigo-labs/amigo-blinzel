@@ -693,3 +693,202 @@ fn a_broken_image_shows_why_instead_of_the_previous_one() {
     h.pump();
     assert_eq!(h.frame().images.len(), 1);
 }
+
+// ------------------------------------------------------ opening, deleting
+
+/// AC-14.
+#[test]
+fn ctrl_o_and_open_ask_for_the_dialog_and_a_drop_opens_its_first_file() {
+    let mut h = Harness::new();
+    assert_eq!(
+        h.ctrl(Letter('O')),
+        [Action::OpenDialog],
+        "at an empty start"
+    );
+    assert_eq!(h.command(Cmd::Open), [Action::OpenDialog]);
+    std::fs::create_dir_all(h.images.join("trip")).unwrap();
+    h.write_png("a.png", 64, 48);
+    h.write_png("trip/b.png", 64, 48);
+    h.write_png("trip/c.png", 64, 48);
+    let at = |h: &Harness, f: &str| h.images.join(f);
+    let drop = vec![at(&h, "trip/c.png"), at(&h, "a.png"), at(&h, "trip/b.png")];
+    let a = h.app.files_dropped(drop);
+    h.shell(a);
+    assert_eq!(h.current_path(), Some(at(&h, "trip/c.png")), "the first");
+    assert_eq!(h.names(), ["b.png", "c.png"], "its folder");
+    assert_eq!(
+        h.ctrl(Letter('O')),
+        [Action::OpenDialog],
+        "with an image open"
+    );
+    // With the batch dialog open they go into its list instead.
+    h.ctrl(Letter('B'));
+    let a = h.app.files_dropped(vec![at(&h, "a.png")]);
+    h.shell(a);
+    assert_eq!(h.current_path(), Some(at(&h, "trip/c.png")));
+    assert_eq!(h.batch_files(), Some(vec![at(&h, "a.png")]));
+}
+
+/// AC-15 and the edge case of deleting the folder's last file.
+#[test]
+fn delete_moves_the_file_away_and_shows_the_one_that_took_its_place() {
+    let mut h = Harness::with_images(&["a.png", "b.png", "c.png"]);
+    h.open("b.png");
+    let b = h.images.join("b.png");
+    let a = h.key(Delete);
+    assert_eq!(a, [Action::Recycle(b.clone())]);
+    // Until the platform reports the move the image stays: a failed move
+    // ends here.
+    assert!(b.exists());
+    assert_eq!(h.current_name().as_deref(), Some("b.png"));
+    assert_eq!(h.frame().images.len(), 1);
+    h.shell(a);
+    assert!(!b.exists());
+    assert_eq!(
+        h.current_name().as_deref(),
+        Some("c.png"),
+        "it took b's place"
+    );
+    assert_eq!(h.names(), ["a.png", "c.png"]);
+    // The menu does the same; the last file gives way to the one before.
+    let a = h.command(Cmd::Recycle);
+    assert_eq!(a, [Action::Recycle(h.images.join("c.png"))]);
+    h.shell(a);
+    assert_eq!(h.current_name().as_deref(), Some("a.png"));
+    // The folder's last file: the empty hint and the app's name.
+    let a = h.key(Delete);
+    h.shell(a);
+    assert_eq!(h.current_name(), None);
+    assert_eq!(h.host().title, tr(Msg::AppName));
+    assert!(h.frame().images.is_empty());
+    assert_eq!(h.frame().texts, [tr(Msg::HintOpen)]);
+    assert_eq!(h.key(Delete), [], "nothing to delete");
+}
+
+// ------------------------------------------------------------------ menu
+
+/// AC-18.
+#[test]
+fn the_menu_opens_below_its_button_and_at_a_right_click() {
+    let mut h = Harness::with_images(&["a.png"]);
+    let r = h.app.chrome().rect(Button::Menu);
+    let below = Action::ShowMenu {
+        x: r.x as i32,
+        y: r.bottom() as i32,
+    };
+    assert_eq!(h.click(centre(r)), std::slice::from_ref(&below), "☰");
+    assert_eq!(h.key(F10), std::slice::from_ref(&below), "F10");
+    assert_eq!(h.key(Menu), [below], "the context-menu key");
+    // Right to left: from the button's right corner.
+    assert_eq!(menu_corner(r, false), (r.x, r.bottom()));
+    assert_eq!(menu_corner(r, true), (r.right(), r.bottom()));
+    // A right click: at the pointer, where the drawn menu opens.
+    let a = h.app.right_click((300.0, 200.0));
+    assert_eq!(a, [Action::ShowMenu { x: 300, y: 200 }]);
+    h.shell(a);
+    assert!(h.app.popup.is_some());
+}
+
+/// AC-19.
+#[test]
+fn the_menu_enables_and_checks_its_entries_by_state() {
+    let image = [
+        Cmd::ZoomIn,
+        Cmd::ZoomOut,
+        Cmd::ZoomReset,
+        Cmd::RotateRight,
+        Cmd::RotateLeft,
+        Cmd::Copy,
+        Cmd::SelectAll,
+        Cmd::OpenWith,
+        Cmd::EditWith,
+        Cmd::Recycle,
+    ];
+    let browse = [Cmd::Next, Cmd::Prev, Cmd::First, Cmd::Last];
+    let cut_cmds = [Cmd::Cut, Cmd::ShowOriginal, Cmd::SaveCutout];
+    let on = |h: &Harness, cmds: &[Cmd]| -> Vec<bool> {
+        cmds.iter().map(|&c| h.menu_enabled(c)).collect()
+    };
+    let mut h = Harness::new();
+    assert_eq!(on(&h, &image), [false; 10], "no image");
+    assert_eq!(on(&h, &cut_cmds), [false; 3]);
+    assert_eq!(on(&h, &browse), [false; 4]);
+    h.write_png("a.png", 64, 48);
+    h.open("a.png");
+    assert_eq!(on(&h, &image), [true; 10], "an image");
+    assert_eq!(on(&h, &browse), [false; 4], "the folder's only file");
+    assert_eq!(on(&h, &cut_cmds), [false; 3]);
+    select(&mut h, (4.0, 4.0), (40.0, 30.0));
+    assert_eq!(on(&h, &cut_cmds), [true, false, true], "a selection");
+    h.ctrl(Letter('X'));
+    assert_eq!(on(&h, &cut_cmds), [false, true, true], "a crop");
+    h.key(Escape);
+    assert_eq!(on(&h, &cut_cmds), [false; 3]);
+    h.write_png("b.png", 64, 48);
+    h.app.on_dir_changed();
+    h.pump();
+    assert_eq!(h.names(), ["a.png", "b.png"]);
+    assert_eq!(on(&h, &browse), [true; 4], "two files");
+
+    for m in MODES {
+        h.command(Cmd::View(m));
+        let fit = m == ViewMode::FitImageToWindow;
+        assert_eq!(h.menu_enabled(Cmd::ToggleNoUpscale), fit, "{m:?}");
+        for n in MODES {
+            assert_eq!(h.menu_checked(Cmd::View(n)), n == m, "{m:?} {n:?}");
+        }
+    }
+    assert!(!h.menu_checked(Cmd::Fullscreen));
+    let a = h.key(F11);
+    h.shell(a);
+    assert!(h.menu_checked(Cmd::Fullscreen));
+}
+
+// ---------------------------------------------------------------- editor
+
+/// AC-21 and the edge case of an editor path with a quote or a line break.
+#[test]
+fn e_opens_the_image_in_the_editor_asking_for_one_the_first_time() {
+    let mut h = Harness::new();
+    assert_eq!(h.key(Letter('E')), [], "nothing open");
+    h.write_png("a.png", 64, 48);
+    h.open("a.png");
+    let file = h.images.join("a.png");
+    let ask = Action::ChooseEditor {
+        then: Some(file.clone()),
+    };
+    assert_eq!(h.key(Letter('E')), std::slice::from_ref(&ask));
+    assert_eq!(h.command(Cmd::EditWith), [ask]);
+    for bad in ["/opt/my \"editor\"", "/opt/edit\nor", "/opt/edit\ror"] {
+        let a = h.app.editor_chosen(PathBuf::from(bad), Some(file.clone()));
+        assert_eq!(a, [], "{bad:?}: nothing launched");
+        assert_eq!(h.app.settings.editor, None, "{bad:?}: not saved");
+    }
+
+    let editor = PathBuf::from("/usr/bin/gimp");
+    let edit = Action::EditWith {
+        editor: editor.clone(),
+        file: file.clone(),
+    };
+    let a = h.app.editor_chosen(editor, Some(file.clone()));
+    assert_eq!(a, std::slice::from_ref(&edit), "the image opens with it");
+    let saved = h.saved_settings().unwrap().editor;
+    assert_eq!(saved.as_deref(), Some("/usr/bin/gimp"), "remembered");
+    assert_eq!(h.key(Letter('E')), std::slice::from_ref(&edit));
+    assert_eq!(h.command(Cmd::EditWith), std::slice::from_ref(&edit));
+    h.restart();
+    h.open("a.png");
+    assert_eq!(h.key(Letter('E')), [edit], "also in the next session");
+    assert!(h.press(Letter('E'), true, false).is_none(), "Ctrl+E");
+}
+
+/// AC-22's request to the platform (its chooser is a manual check).
+#[test]
+fn open_with_hands_the_current_file_to_the_platform() {
+    let mut h = Harness::new();
+    assert_eq!(h.command(Cmd::OpenWith), [], "nothing open");
+    h.write_png("a.png", 64, 48);
+    h.open("a.png");
+    let a = h.command(Cmd::OpenWith);
+    assert_eq!(a, [Action::OpenWith(h.images.join("a.png"))]);
+}
