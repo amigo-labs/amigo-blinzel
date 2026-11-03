@@ -74,16 +74,36 @@ fn a_raw_preview_that_covers_the_stage_is_the_stage_and_the_system_decoder_is_no
 fn a_raw_preview_just_over_one_percent_short_shows_first_and_the_system_decoder_is_asked() {
     // 1600 × 1066 against the 1620 × 1080 the screen box needs: 1.2 % and
     // 1.3 % short.
-    let mut h = with_raw("a.raf", (1600, 1066));
+    // Then short in one side only: 1620 × 1060 and 1590 × 1080 (both
+    // within 3 % of the EXIF aspect, so the image stays 6240 × 4160).
+    for preview in [(1600, 1066), (1620, 1060), (1590, 1080)] {
+        let mut h = with_raw("a.raf", preview);
+        h.open("a.raf");
+        let id = current_id(&h);
+        assert!(h.app.has_stage(id, Stage::Preview), "{preview:?}");
+        assert!(h.app.has_stage(id, Stage::Screen));
+        assert_eq!(
+            h.decodes(),
+            [((6240, 4160), 2)],
+            "{preview:?}: the system decoder is asked"
+        );
+    }
+}
+
+/// AC-20: a raw's preview shows first however many of the image's pixels
+/// it has; only a JPEG's must have under a third.
+#[test]
+fn a_raw_preview_shows_first_with_a_third_of_the_pixels_or_more() {
+    // 1000 × 667 of 1500 × 1000 is 44 %, and short of the 1485 × 990
+    // that would make it the stage.
+    let mut h = Harness::new();
+    h.set_system_decoder(Some((1500, 1000)));
+    h.write_file("a.raf", &raf(&jpeg(1000, 667), (1500, 1000)));
     h.open("a.raf");
     let id = current_id(&h);
     assert!(h.app.has_stage(id, Stage::Preview));
     assert!(h.app.has_stage(id, Stage::Screen));
-    assert_eq!(
-        h.decodes(),
-        [((6240, 4160), 2)],
-        "the system decoder is asked"
-    );
+    assert_eq!(h.decodes(), [((1500, 1000), 2)]);
 }
 
 /// AC-20: a smaller raw preview shows first, then the system decoder
@@ -130,13 +150,15 @@ fn a_jpeg_preview_shows_first_only_with_under_a_third_of_the_pixels() {
         ((2100, 1400), false), // 2.94 MP
         ((800, 533), false),   // under half of 1620 × 1080
         ((810, 540), true),    // exactly half
+        ((900, 300), true),    // half the width only
+        ((2400, 1200), false), // exactly a third
     ] {
         let mut h = Harness::new();
         jpeg_with_preview(&h, "a.jpg", preview);
         h.open("a.jpg");
         let id = current_id(&h);
         assert_eq!(h.app.has_stage(id, Stage::Preview), shown, "{preview:?}");
-        assert!(h.app.has_stage(id, Stage::Screen));
+        assert!(h.app.has_stage(id, Stage::Screen), "{preview:?}");
         assert_eq!(h.decodes(), [((3600, 2400), 2)], "the main decode follows");
     }
 }
