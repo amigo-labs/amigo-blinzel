@@ -496,6 +496,68 @@ mod tests {
         assert_eq!(all(&img), [g(1), g(2), g(3), g(4), g(5), g(6), g(7), g(6)]);
     }
 
+    /// AC-08: palette rows are padded to 4 bytes, so a row of 3 pixels at
+    /// 1, 2, 4 or 8 bits takes 4 bytes, not 1, 1, 2 or 3. Pad bytes are 9s.
+    #[test]
+    fn palette_rows_are_padded_to_four_bytes() {
+        let g = |i: u8| [10 * i, 10 * i, 10 * i, 255];
+        let cases: [(u16, [u8; 8]); 4] = [
+            (1, [0b1010_0000, 9, 9, 9, 0b0100_0000, 9, 9, 9]),
+            (2, [0b0110_1100, 9, 9, 9, 0b1001_0000, 9, 9, 9]),
+            (4, [0x12, 0x30, 9, 9, 0x45, 0x60, 9, 9]),
+            (8, [1, 2, 3, 9, 4, 5, 6, 9]),
+        ];
+        let want = [
+            // Top row (stored second), then the bottom row.
+            [g(0), g(1), g(0), g(1), g(0), g(1)],
+            [g(2), g(1), g(0), g(1), g(2), g(3)],
+            [g(4), g(5), g(6), g(1), g(2), g(3)],
+            [g(4), g(5), g(6), g(1), g(2), g(3)],
+        ];
+        for ((bpp, rows), want) in cases.into_iter().zip(want) {
+            let pal = gray_palette(1 << bpp);
+            let img = decode(&bmp(3, 2, bpp, BI_RGB, &pal, &rows)).unwrap();
+            assert_eq!(all(&img), want, "{bpp} bits");
+        }
+    }
+
+    /// AC-08: 16-bit rows are padded to 4 bytes too: 3 pixels take 8 bytes.
+    #[test]
+    fn sixteen_bit_rows_are_padded_to_four_bytes() {
+        let v = |r: u16, g: u16, b: u16| (r << 10 | g << 5 | b).to_le_bytes();
+        let mut rows = Vec::new();
+        for px in [v(31, 0, 0), v(0, 31, 0), v(0, 0, 31)] {
+            rows.extend(px);
+        }
+        rows.extend([9, 9]);
+        for px in [v(0, 0, 0), v(31, 31, 31), v(16, 0, 0)] {
+            rows.extend(px);
+        }
+        rows.extend([9, 9]);
+        let img = decode(&bmp(3, 2, 16, BI_RGB, &[], &rows)).unwrap();
+        assert_eq!(
+            all(&img),
+            [
+                [0, 0, 0, 255],
+                [255, 255, 255, 255],
+                [0, 0, 132, 255],
+                [0, 0, 255, 255],
+                [0, 255, 0, 255],
+                [255, 0, 0, 255],
+            ]
+        );
+    }
+
+    /// A top-down RLE8 file (negative height) fills its first row at the
+    /// top, as the uncompressed ones do.
+    #[test]
+    fn top_down_rle_starts_at_the_top() {
+        let g = |i: u8| [10 * i, 10 * i, 10 * i, 255];
+        let data = [2, 1, 0, 0, 2, 3, 0, 1];
+        let img = decode(&bmp(2, -2, 8, BI_RLE8, &gray_palette(256), &data)).unwrap();
+        assert_eq!(all(&img), [g(1), g(1), g(3), g(3)]);
+    }
+
     #[test]
     fn bit_fields_round_and_16_bit_defaults_to_555() {
         // RGB565: 5-bit 16 is 131.6 (132), 6-bit 32 is 129.5 (130), 5-bit
