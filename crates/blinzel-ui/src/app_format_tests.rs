@@ -220,6 +220,23 @@ fn a_raw_preview_that_covers_half_the_screen_box_shows_first_and_the_developed_s
     assert_eq!(h.decodes(), [((6240, 4160), 2)]);
 }
 
+/// AC-20: a TIFF-based raw (a NEF, `testkit::tiff_raw`) takes its
+/// developed size from the system decoder too, not only a RAF.
+#[test]
+fn a_tiff_raws_developed_size_comes_from_the_system_decoder() {
+    let mut h = Harness::new();
+    h.set_system_decoder(Some(DEVELOPED));
+    let data = tiff_raw(&jpeg(160, 120), &jpeg(1000, 667), (6240, 4160));
+    h.write_file("a.nef", &data);
+    h.open("a.nef");
+    let id = current_id(&h);
+    assert_eq!(probed_size(&h), (6000, 4000), "the system decoder's size");
+    assert!(h.app.has_stage(id, Stage::Preview));
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert_eq!(h.decodes(), [((6240, 4160), 2)]);
+    assert_eq!(h.frame().images[0].full_size, (6000, 4000));
+}
+
 /// A 3600 × 2400 JPEG named `name` followed by a JPEG of `preview`, which
 /// the probe reports as its embedded preview.
 fn jpeg_with_preview(h: &Harness, name: &str, preview: (u32, u32)) {
