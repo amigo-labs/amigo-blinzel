@@ -1295,6 +1295,13 @@ mod tests {
             profile(&hlg),
             Err(DecodeError::Unsupported(Format::Avif))
         ));
+        // A file whose nclx says PQ: probe and decode refuse it.
+        let mut pq_file = RGB420.to_vec();
+        let at = pq_file.windows(4).position(|w| w == b"nclx").unwrap();
+        pq_file[at + 6..at + 8].copy_from_slice(&16u16.to_be_bytes());
+        for r in [info(&pq_file).map(|_| ()), decode(&pq_file, 1).map(|_| ())] {
+            assert!(matches!(r, Err(DecodeError::Unsupported(Format::Avif))));
+        }
         for data in [RGB420, RGBA, GRID, CLAP] {
             for len in (0..data.len()).step_by(37) {
                 let _ = info(&data[..len]);
