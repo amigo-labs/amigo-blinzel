@@ -474,6 +474,54 @@ pub(crate) fn raf(preview: &[u8], size: (u16, u16)) -> Vec<u8> {
     d
 }
 
+/// A TIFF-based camera raw (laid out like a NEF) whose EXIF says `size`:
+/// IFD0 is a reduced-resolution image whose JPEG is `thumb`, its one
+/// sub-IFD a JPEG-compressed strip holding `preview`. Only the system
+/// decoder develops it; the native probe lists both JPEGs.
+pub(crate) fn tiff_raw(thumb: &[u8], preview: &[u8], size: (u32, u32)) -> Vec<u8> {
+    // IFD0 at 8 (5 entries), the sub-IFD at 74 (3), the EXIF IFD at 116
+    // (2), then the JPEGs.
+    let (sub_at, exif_at, thumb_at) = (74u32, 116u32, 146u32);
+    let preview_at = thumb_at + thumb.len() as u32;
+    let ifd = |d: &mut Vec<u8>, entries: &[(u16, u16, u32)]| {
+        d.extend((entries.len() as u16).to_le_bytes());
+        for &(tag, typ, v) in entries {
+            d.extend(tag.to_le_bytes());
+            d.extend(typ.to_le_bytes());
+            d.extend(1u32.to_le_bytes());
+            d.extend(v.to_le_bytes());
+        }
+        d.extend(0u32.to_le_bytes());
+    };
+    let mut d = b"II*\0".to_vec();
+    d.extend(8u32.to_le_bytes());
+    ifd(
+        &mut d,
+        &[
+            (0x00FE, 4, 1),
+            (0x014A, 4, sub_at),
+            (0x0201, 4, thumb_at),
+            (0x0202, 4, thumb.len() as u32),
+            (0x8769, 4, exif_at),
+        ],
+    );
+    assert_eq!(d.len(), sub_at as usize);
+    ifd(
+        &mut d,
+        &[
+            (0x0103, 3, 6),
+            (0x0111, 4, preview_at),
+            (0x0117, 4, preview.len() as u32),
+        ],
+    );
+    assert_eq!(d.len(), exif_at as usize);
+    ifd(&mut d, &[(0xA002, 4, size.0), (0xA003, 4, size.1)]);
+    assert_eq!(d.len(), thumb_at as usize);
+    d.extend_from_slice(thumb);
+    d.extend_from_slice(preview);
+    d
+}
+
 /// An animated GIF of `w` × `h`: one frame per entry of `delays`
 /// (centiseconds), frame `i` all in colour `i % 4` of a four-colour
 /// palette, with a NETSCAPE loop count `repeat` (`None`: no extension, it

@@ -3,7 +3,7 @@
 //! (`docs/specs/image-formats.md`).
 
 use super::*;
-use crate::testkit::{Harness, jpeg, raf};
+use crate::testkit::{Harness, jpeg, raf, tiff_raw};
 
 /// The size every raw here develops to in the system decoder; its EXIF
 /// (cropped-size record) says 6240 × 4160, close enough to be trusted.
@@ -70,6 +70,47 @@ fn a_raw_preview_that_covers_the_stage_is_the_stage_and_the_system_decoder_is_no
     assert_eq!(h.frame().images[0].size, (1500, 1000));
     assert_eq!(h.decodes(), [], "the system decoder is not asked");
     assert_eq!(probed_size(&h), (1500, 1000));
+}
+
+/// AC-20: of a raw's several previews the largest is the one that must
+/// cover the stage: a TIFF raw with a small thumbnail in IFD0 and a
+/// covering preview in its sub-IFD.
+#[test]
+fn a_raw_with_several_previews_takes_its_largest_as_the_stage() {
+    let mut h = Harness::new();
+    h.set_system_decoder(Some(DEVELOPED));
+    let data = tiff_raw(&jpeg(160, 120), &jpeg(1616, 1080), (6240, 4160));
+    h.write_file("a.nef", &data);
+    h.open_settled("a.nef");
+    let id = current_id(&h);
+    let sizes: Vec<_> = h.app.probes[&id]
+        .previews
+        .iter()
+        .map(|p| (p.width, p.height))
+        .collect();
+    assert_eq!(sizes, [(1616, 1080), (160, 120)]);
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert!(!h.app.has_stage(id, Stage::Preview));
+    assert_eq!(h.decodes(), [], "the system decoder is not asked");
+    let drawn = &h.frame().images[0];
+    assert_eq!((drawn.size, drawn.full_size), ((1616, 1080), (6240, 4160)));
+}
+
+/// AC-20: a raw preview that has every pixel of the image is the Full
+/// stage at its own size, even where it is larger than the screen box.
+#[test]
+fn a_raw_preview_with_every_pixel_is_the_full_stage_at_its_full_size() {
+    let mut h = Harness::new();
+    h.set_system_decoder(Some(DEVELOPED));
+    h.write_file("a.raf", &raf(&jpeg(4000, 2667), (4000, 2667)));
+    h.open_settled("a.raf");
+    let id = current_id(&h);
+    assert_eq!(h.frame().images[0].size, (2000, 1334), "the Screen stage");
+    actual_size(&mut h);
+    assert!(h.app.has_stage(id, Stage::Full));
+    assert_eq!(h.decodes(), [], "the system decoder is not asked");
+    let drawn = &h.frame().images[0];
+    assert_eq!((drawn.size, drawn.full_size), ((4000, 2667), (4000, 2667)));
 }
 
 /// AC-20: a preview just over 1 % short of the screen box is not the stage.
