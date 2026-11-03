@@ -580,6 +580,23 @@ mod tests {
         assert_eq!(p.orientation, Orientation::from_exif(6));
         assert_eq!(p.oriented_size(), (8, 16));
 
+        // Every EXIF orientation, in either byte order; others are upright.
+        for v in 1..=9u16 {
+            let o = if v <= 8 {
+                Orientation::from_exif(v)
+            } else {
+                Orientation::NORMAL
+            };
+            let le = crate::exif::tests::tiff_le(v, None);
+            let mut be = b"MM\0*\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01".to_vec();
+            be.extend([0, v as u8, 0, 0, 0, 0, 0, 0]);
+            for tiff in [le, be] {
+                let exif = [b"Exif\0\0".as_slice(), &tiff].concat();
+                let jpeg = with_segment(&jpeg_header(16, 8, 8, 0xC0), 0xE1, &exif);
+                assert_eq!(probe(&jpeg).unwrap().orientation, o, "{v}: {tiff:x?}");
+            }
+        }
+
         let jxl = probe(include_bytes!("../../testdata/orient6-4x2.jxl")).unwrap();
         assert_eq!((jxl.format, jxl.width, jxl.height), (Format::Jxl, 4, 2));
         assert_eq!(jxl.orientation, Orientation::from_exif(6));
@@ -649,20 +666,26 @@ mod tests {
             (0x01_0002, lossless.len() as u32, at(2)),
             (0x01_0002, 100, total),
         ];
-        let mut mpf = b"MPF\0II*\0".to_vec();
-        mpf.extend(8u32.to_le_bytes());
-        mpf.extend(1u16.to_le_bytes());
-        mpf.extend(0xB002u16.to_le_bytes());
-        mpf.extend(7u16.to_le_bytes());
-        mpf.extend((16 * n as u32).to_le_bytes());
-        mpf.extend(26u32.to_le_bytes());
-        mpf.extend(0u32.to_le_bytes());
-        for (attr, size, off) in entries {
-            mpf.extend([attr, size, off, 0u32].iter().flat_map(|v| v.to_le_bytes()));
-        }
-        assert_eq!(mpf.len(), mpf_len);
-        let data = with_segment(&with_segment(&main, 0xE2, &mpf), 0xE1, &app1);
-        let data = [data, big.clone(), twelve, lossless].concat();
+        // The index in either byte order.
+        let index = |le: bool| {
+            let u16b = |v: u16| if le { v.to_le_bytes() } else { v.to_be_bytes() };
+            let u32b = |v: u32| if le { v.to_le_bytes() } else { v.to_be_bytes() };
+            let mut mpf = if le { b"MPF\0II*\0" } else { b"MPF\0MM\0*" }.to_vec();
+            mpf.extend(u32b(8));
+            mpf.extend(u16b(1));
+            mpf.extend(u16b(0xB002));
+            mpf.extend(u16b(7));
+            mpf.extend(u32b(16 * n as u32));
+            mpf.extend(u32b(26));
+            mpf.extend(u32b(0));
+            for (attr, size, off) in entries {
+                mpf.extend([attr, size, off, 0u32].iter().flat_map(|&v| u32b(v)));
+            }
+            assert_eq!(mpf.len(), mpf_len);
+            let data = with_segment(&with_segment(&main, 0xE2, &mpf), 0xE1, &app1);
+            [data, big.clone(), twelve.clone(), lossless.clone()].concat()
+        };
+        let data = index(true);
         assert_eq!(&data[tail_at..tail_at + big.len()], &big[..]);
 
         let p = probe(&data).unwrap();
@@ -680,6 +703,9 @@ mod tests {
             assert_eq!((img.width, img.height), (160, 120));
             assert_eq!((img.full_width, img.full_height), (320, 240));
         }
+        // A big-endian index lists the same.
+        let be = probe(&index(false)).unwrap();
+        assert_eq!(be.previews, p.previews);
     }
 
     #[test]

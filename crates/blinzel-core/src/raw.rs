@@ -402,27 +402,41 @@ mod tests {
         let thumb = jpeg(160, 120, 0xC0);
         let full = jpeg(600, 400, 0xC0);
         let sensor = jpeg(610, 410, 0xC3);
+        let mid = jpeg(320, 213, 0xC0);
         let mut t = TiffLe::new(4096);
-        let (at_thumb, at_full, at_sensor) = (3000, 3300, 3600);
+        let (at_thumb, at_full, at_sensor, at_mid) = (3000, 3300, 3600, 3900);
         t.put(at_thumb, &thumb);
         t.put(at_full, &full);
         t.put(at_sensor, &sensor);
+        t.put(at_mid, &mid);
         // IFD0: a reduced-resolution image with the thumbnail, two
-        // sub-IFDs and the EXIF IFD.
+        // sub-IFDs (the sensor data first) and the EXIF IFD.
         t.ifd(
             8,
             Some(4),
             &[
                 (0x00FE, 4, vec![1]),
                 (0x0112, 3, vec![8]),
-                (0x014A, 4, vec![1000, 1400]),
+                (0x014A, 4, vec![1400, 1000]),
                 (0x0201, 4, vec![at_thumb as u32]),
                 (0x0202, 4, vec![thumb.len() as u32]),
                 (0x8769, 4, vec![1800]),
             ],
         );
+        // IFD1, chained after IFD0's six entries: another preview, and an
+        // orientation that is not the image's.
+        t.ifd(
+            2200,
+            Some(8 + 2 + 12 * 6),
+            &[
+                (0x0112, 3, vec![1]),
+                (0x0201, 4, vec![at_mid as u32]),
+                (0x0202, 4, vec![mid.len() as u32]),
+            ],
+        );
         // The preview as a JPEG-compressed strip, the sensor data as
-        // lossless JPEG (no preview), the developed size in EXIF.
+        // lossless JPEG (no preview), the developed size (twice the
+        // preview's) in EXIF.
         let strip = |at: usize, len: usize| {
             vec![
                 (0x0103, 3, vec![6]),
@@ -435,15 +449,15 @@ mod tests {
         t.ifd(
             1800,
             None,
-            &[(0xA002, 4, vec![600]), (0xA003, 4, vec![400])],
+            &[(0xA002, 4, vec![1200]), (0xA003, 4, vec![800])],
         );
 
         let info = probe(&t.d).unwrap();
         assert_eq!(info.orientation, Orientation::from_exif(8));
         let sizes: Vec<_> = info.previews.iter().map(|p| (p.width, p.height)).collect();
-        assert_eq!(sizes, [(600, 400), (160, 120)]);
+        assert_eq!(sizes, [(600, 400), (320, 213), (160, 120)]);
         assert_eq!(info.previews[0].range, at_full..at_full + full.len());
-        assert_eq!(info.image_size(), Some((600, 400)));
+        assert_eq!(info.image_size(), Some((1200, 800)));
 
         // Through the decoder's probe: a raw, its size and orientation.
         let p = crate::decode::probe(&t.d).unwrap();
@@ -457,7 +471,7 @@ mod tests {
         ));
         assert_eq!(
             (p.width, p.height, p.orientation),
-            (600, 400, Orientation::from_exif(8))
+            (1200, 800, Orientation::from_exif(8))
         );
     }
 
@@ -486,26 +500,43 @@ mod tests {
 
     #[test]
     fn raf_header_and_records() {
-        let full = jpeg(600, 400, 0xC0);
-        let mut d = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
-        d.resize(200, 0);
-        let at_meta = 200 + full.len() as u32;
-        d[84..88].copy_from_slice(&200u32.to_be_bytes());
-        d[88..92].copy_from_slice(&(full.len() as u32).to_be_bytes());
-        d[92..96].copy_from_slice(&at_meta.to_be_bytes());
-        d.extend(&full);
-        d.extend(2u32.to_be_bytes());
-        for (tag, h, w) in [(0x100u16, 4182u16, 6384u16), (0x111, 4160, 6240)] {
-            d.extend(tag.to_be_bytes());
-            d.extend(4u16.to_be_bytes());
-            d.extend(h.to_be_bytes());
-            d.extend(w.to_be_bytes());
+        // The JPEG carries the orientation in its EXIF.
+        let tiff = crate::exif::tests::tiff_le(6, None);
+        let app1 = [b"Exif\0\0".as_slice(), &tiff].concat();
+        let plain = jpeg(600, 400, 0xC0);
+        let len = (app1.len() as u16 + 2).to_be_bytes();
+        let full = [
+            &plain[..2],
+            &[0xFF, 0xE1, len[0], len[1]],
+            &app1,
+            &plain[2..],
+        ]
+        .concat();
+        // The cropped size (0x111) wins over the sensor's (0x100) in
+        // either order.
+        let records = [(0x100u16, 4182u16, 6384u16), (0x111, 4160, 6240)];
+        for order in [records, [records[1], records[0]]] {
+            let mut d = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+            d.resize(200, 0);
+            let at_meta = 200 + full.len() as u32;
+            d[84..88].copy_from_slice(&200u32.to_be_bytes());
+            d[88..92].copy_from_slice(&(full.len() as u32).to_be_bytes());
+            d[92..96].copy_from_slice(&at_meta.to_be_bytes());
+            d.extend(&full);
+            d.extend(2u32.to_be_bytes());
+            for (tag, h, w) in order {
+                d.extend(tag.to_be_bytes());
+                d.extend(4u16.to_be_bytes());
+                d.extend(h.to_be_bytes());
+                d.extend(w.to_be_bytes());
+            }
+            let info = probe(&d).unwrap();
+            assert_eq!(info.size, Some((6240, 4160)), "{order:x?}");
+            assert_eq!(info.orientation, Orientation::from_exif(6));
+            assert_eq!(info.previews.len(), 1);
+            assert_eq!(info.previews[0].range.start, 200);
+            assert_eq!(info.image_size(), Some((6240, 4160)));
         }
-        let info = probe(&d).unwrap();
-        assert_eq!(info.size, Some((6240, 4160)));
-        assert_eq!(info.previews.len(), 1);
-        assert_eq!(info.previews[0].range.start, 200);
-        assert_eq!(info.image_size(), Some((6240, 4160)));
     }
 
     fn bmff(kind: &[u8; 4], uuid: Option<[u8; 16]>, payload: &[u8]) -> Vec<u8> {
