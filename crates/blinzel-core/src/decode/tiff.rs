@@ -315,6 +315,16 @@ mod tests {
             let v = (g as f64 * 255.0 / 65535.0).round() as u8;
             assert_eq!(px[i * 4..i * 4 + 4], [v, v, v, 255], "sample {g}");
         }
+        // The same samples in one strip per row, read in parallel.
+        let mut out = Cursor::new(Vec::new());
+        let mut enc = TiffEncoder::new(&mut out)
+            .unwrap()
+            .with_compression(Compression::Deflate(DeflateLevel::Fast));
+        let mut strip_rows = enc.new_image::<colortype::Gray16>(w, h).unwrap();
+        strip_rows.rows_per_strip(1).unwrap();
+        strip_rows.write_data(&gray).unwrap();
+        assert_eq!(strips(out.get_ref()), h as usize);
+        assert_eq!(rgba_of(&decode(out.get_ref(), 4).unwrap()), px);
 
         // Premultiplied 100,50,25 at alpha 128 is straight 199,100,50.
         let mut out = Cursor::new(Vec::new());
@@ -325,6 +335,17 @@ mod tests {
         let img = decode(out.get_ref(), 1).unwrap();
         assert!(img.has_alpha());
         assert_eq!(rgba_of(&img), [199, 100, 50, 128, 7, 8, 9, 255]);
+
+        // Unassociated alpha is straight already.
+        let mut out = Cursor::new(Vec::new());
+        let mut enc = TiffEncoder::new(&mut out).unwrap();
+        let mut img = enc.new_image::<colortype::RGB8>(2, 1).unwrap();
+        img.extra_samples(&[ExtraSamples::UnassociatedAlpha])
+            .unwrap();
+        img.write_data(&[100, 50, 25, 128, 7, 8, 9, 255]).unwrap();
+        let img = decode(out.get_ref(), 1).unwrap();
+        assert!(img.has_alpha());
+        assert_eq!(rgba_of(&img), [100, 50, 25, 128, 7, 8, 9, 255]);
     }
 
     #[test]

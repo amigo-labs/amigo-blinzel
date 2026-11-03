@@ -449,8 +449,11 @@ mod tests {
 
     #[test]
     fn rejects_broken_files() {
-        assert!(info(&LOSSY[..3]).is_err());
-        assert!(decode(&LOSSY[..30], 1).is_err());
-        assert!(info(b"\xff\x0a").is_err());
+        // Corrupt, not "not decoded natively": no other decoder does better.
+        let corrupt = |r: Result<_>| matches!(r, Err(DecodeError::Corrupt(_)));
+        for len in [2, 3] {
+            assert!(corrupt(info(&LOSSY[..len]).map(|_| ())), "{len} bytes");
+        }
+        assert!(corrupt(decode(&LOSSY[..30], 1).map(|_| ())));
     }
 }

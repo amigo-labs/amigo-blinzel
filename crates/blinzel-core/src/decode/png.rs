@@ -234,5 +234,23 @@ mod tests {
         let data = encode(10, 10, png::ColorType::Rgb, png::BitDepth::Eight, &rgb);
         assert!(decode(&data[..30]).is_err());
         assert!(header_size(b"\x89PNG").is_err());
+        // Cut in the middle of the image data, for every colour type that
+        // decodes row by row and for those that decode at once.
+        let (w, h) = (64, 48);
+        let rgb = testimg::rgb(w, h);
+        let ga: Vec<u8> = testimg::gray(w, h).iter().flat_map(|&g| [g, 9]).collect();
+        let rgba: Vec<u8> = rgb.chunks(3).flat_map(|p| [p[0], p[1], p[2], 9]).collect();
+        for (color, px) in [
+            (png::ColorType::Rgb, &rgb),
+            (png::ColorType::GrayscaleAlpha, &ga),
+            (png::ColorType::Rgba, &rgba),
+        ] {
+            let data = encode(w, h, color, png::BitDepth::Eight, px);
+            assert!(decode(&data).is_ok());
+            let idat = data.windows(4).position(|c| c == b"IDAT").unwrap();
+            let len = u32::from_be_bytes(data[idat - 4..idat].try_into().unwrap()) as usize;
+            let cut = &data[..idat + 4 + len / 2];
+            assert!(decode(cut).is_err(), "{color:?}");
+        }
     }
 }

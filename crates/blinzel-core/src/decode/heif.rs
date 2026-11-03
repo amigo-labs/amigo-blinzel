@@ -175,10 +175,19 @@ mod tests {
 
     #[test]
     fn broken_files_go_to_the_platform() {
-        assert!(matches!(
-            decode(&RGB[..RGB.len() / 2], 1),
-            Err(DecodeError::Unsupported(Format::Heif))
-        ));
+        // Cut anywhere, in the headers or in the image data.
+        for len in (0..RGB.len()).step_by(RGB.len() / 16 + 1) {
+            let cut = &RGB[..len];
+            assert!(
+                matches!(decode(cut, 1), Err(DecodeError::Unsupported(Format::Heif))),
+                "{len} bytes"
+            );
+            assert!(
+                matches!(info(cut), Err(DecodeError::Unsupported(Format::Heif)))
+                    || len * 2 > RGB.len(),
+                "{len} bytes"
+            );
+        }
         let mut bad = RGB.to_vec();
         for b in bad.iter_mut().skip(200) {
             *b ^= 0x5a;

@@ -344,6 +344,13 @@ mod tests {
         let img = decode(&gif(6, 4, (2, 1, 2, 2), None)).unwrap();
         assert!(img.has_alpha());
         assert_eq!(img.to_bgra()[3], 0);
+        // The frame's first pixels (red, green) land at its offset.
+        let bgra = img.to_bgra();
+        let at = |x: usize, y: usize| &bgra[(y * 6 + x) * 4..][..4];
+        assert_eq!(at(2, 1), [0, 0, 255, 255]);
+        assert_eq!(at(3, 1), [0, 255, 0, 255]);
+        assert_eq!(at(2, 0)[3], 0);
+        assert_eq!(at(1, 1)[3], 0);
         // A frame at the top left that leaves the right edge, or the
         // bottom edge, uncovered.
         for (frame, (x, y)) in [((0, 0, 2, 2), (3, 0)), ((0, 0, 4, 1), (0, 1))] {

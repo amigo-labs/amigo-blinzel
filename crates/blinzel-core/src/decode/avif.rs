@@ -1250,6 +1250,16 @@ mod tests {
         );
         assert_eq!(&probe.icc.expect("profile").bytes[..], &p3[..]);
         assert_eq!(&container_profile(P3).expect("profile").bytes[..], &p3[..]);
+        // BT.709 is sRGB; other primaries are not converted (like WIC).
+        for primaries in [1, 2, 9] {
+            let nclx = Some(Colour::Nclx {
+                primaries,
+                transfer: 13,
+                matrix: 1,
+                full_range: true,
+            });
+            assert!(matches!(profile(&nclx), Ok(None)), "{primaries}");
+        }
         assert!(container_profile(RGB420).is_none());
     }
 
@@ -1273,6 +1283,16 @@ mod tests {
         });
         assert!(matches!(
             profile(&pq),
+            Err(DecodeError::Unsupported(Format::Avif))
+        ));
+        let hlg = Some(Colour::Nclx {
+            primaries: 9,
+            transfer: 18,
+            matrix: 9,
+            full_range: false,
+        });
+        assert!(matches!(
+            profile(&hlg),
             Err(DecodeError::Unsupported(Format::Avif))
         ));
         for data in [RGB420, RGBA, GRID, CLAP] {

@@ -723,6 +723,12 @@ mod tests {
         assert_eq!((img.full_width, img.full_height), (1600, 1200));
         let img = decode(&data, Request::Fit { w: 401, h: 10 }).unwrap();
         assert_eq!((img.width, img.height), (600, 450));
+        // The height decides as well as the width.
+        let img = decode(&data, Request::Fit { w: 10, h: 301 }).unwrap();
+        assert_eq!((img.width, img.height), (600, 450));
+        // More than the image has: full resolution.
+        let img = decode(&data, Request::Fit { w: 2000, h: 10 }).unwrap();
+        assert_eq!((img.width, img.height), (1600, 1200));
         let img = decode(&data, Request::Fit { w: 1, h: 1 }).unwrap();
         assert_eq!((img.width, img.height), (200, 150));
         if let Pixels::Ycc { cb, sub, .. } = &img.pixels {
@@ -767,6 +773,7 @@ mod tests {
             );
         }
         assert!(decode(&data, Request::Region(PixelRect::new(300, 0, 30, 10))).is_err());
+        assert!(decode(&data, Request::Region(PixelRect::new(0, 195, 10, 10))).is_err());
         // The handle is reusable after a region decode.
         assert_eq!(decode(&data, Request::Full).unwrap().width, 321);
     }

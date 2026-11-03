@@ -406,6 +406,12 @@ mod tests {
         let rows = [1, 2, 3, 99, 4, 5, 6, 99];
         let img = decode(&bmp(2, -1, 32, BI_RGB, &[], &rows)).unwrap();
         assert_eq!(px(&img, 0, 0), [1, 2, 3, 255]);
+        assert!(!img.has_alpha(), "no alpha mask");
+        // A 40-byte header has no alpha mask, whatever follows it.
+        let rows = [1, 2, 3, 99, 4, 5, 6, 99, 7, 8, 9, 99, 10, 11, 12, 99];
+        let img = decode(&bmp(2, 2, 32, BI_RGB, &[], &rows)).unwrap();
+        assert!(!img.has_alpha());
+        assert_eq!(px(&img, 1, 0), [10, 11, 12, 255]);
         // RGB565 via bit fields: pure red, pure green.
         let masks: Vec<u8> = [0xF800u32, 0x07E0, 0x001F]
             .iter()
@@ -415,6 +421,7 @@ mod tests {
         let img = decode(&bmp(2, 1, 16, BI_BITFIELDS, &masks, &rows)).unwrap();
         assert_eq!(px(&img, 0, 0), [0, 0, 255, 255]);
         assert_eq!(px(&img, 1, 0), [0, 255, 0, 255]);
+        assert!(!img.has_alpha(), "no alpha mask");
         // ARGB with alpha mask.
         let masks: Vec<u8> = [0x00FF_0000u32, 0x0000_FF00, 0x0000_00FF, 0xFF00_0000]
             .iter()
@@ -466,6 +473,11 @@ mod tests {
         assert!(decode(&bmp(0, 1, 24, BI_RGB, &[], &[])).is_err());
         assert!(decode(&bmp(4, 4, 24, BI_RGB, &[], &[0; 10])).is_err());
         assert!(decode(&bmp(1, 1, 24, 4 /* JPEG */, &[], &[0; 4])).is_err());
+        assert!(decode(&bmp(1, 1, 32, 4 /* JPEG */, &[], &[0; 4])).is_err());
+        assert!(decode(&bmp(1, 1, 16, 5 /* PNG */, &[], &[0; 4])).is_err());
+        // Bit-field pixels cut short: the second row is missing.
+        assert!(decode(&bmp(2, 2, 32, BI_RGB, &[], &[0; 12])).is_err());
+        assert!(decode(&bmp(2, 2, 16, BI_RGB, &[], &[0; 6])).is_err());
         let h = Header::parse(&bmp(5, -3, 24, BI_RGB, &[], &[])).unwrap();
         assert_eq!((h.width, h.height, h.top_down), (5, 3, true));
     }
