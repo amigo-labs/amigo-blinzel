@@ -202,19 +202,85 @@ mod tests {
         assert_eq!(img.to_bgra(), bgr(255));
     }
 
+    /// An Adam7-interlaced 8-bit PNG of `color` (`bpp` bytes per pixel):
+    /// the `png` crate writes the IHDR, the seven passes go into one IDAT
+    /// as stored deflate blocks (its encoder does not interlace).
+    fn adam7(w: u32, h: u32, color: png::ColorType, bpp: usize, data: &[u8]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        for (x0, y0, dx, dy) in [
+            (0, 0, 8, 8),
+            (4, 0, 8, 8),
+            (0, 4, 4, 8),
+            (2, 0, 4, 4),
+            (0, 2, 2, 4),
+            (1, 0, 2, 2),
+            (0, 1, 1, 2),
+        ] {
+            if x0 >= w {
+                continue;
+            }
+            for y in (y0..h).step_by(dy) {
+                raw.push(0); // filter: none
+                for x in (x0..w).step_by(dx) {
+                    let at = (y * w + x) as usize * bpp;
+                    raw.extend_from_slice(&data[at..at + bpp]);
+                }
+            }
+        }
+        // zlib: header, stored blocks of up to 65535 bytes, Adler-32.
+        let mut z = vec![0x78, 0x01];
+        let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+        for (i, b) in blocks.iter().enumerate() {
+            z.push((i + 1 == blocks.len()) as u8);
+            z.extend((b.len() as u16).to_le_bytes());
+            z.extend((!(b.len() as u16)).to_le_bytes());
+            z.extend_from_slice(b);
+        }
+        let (mut a, mut b) = (1u32, 0u32);
+        for &v in &raw {
+            a = (a + v as u32) % 65521;
+            b = (b + a) % 65521;
+        }
+        z.extend(((b << 16) | a).to_be_bytes());
+        let mut out = Vec::new();
+        {
+            let mut info = png::Info::with_size(w, h);
+            info.color_type = color;
+            info.bit_depth = png::BitDepth::Eight;
+            info.interlaced = true;
+            let enc = png::Encoder::with_info(&mut out, info).unwrap();
+            let mut wr = enc.write_header().unwrap();
+            wr.write_chunk(png::chunk::IDAT, &z).unwrap();
+        }
+        assert_eq!(out[28], 1, "interlace method Adam7");
+        out
+    }
+
+    /// Interlaced RGB and gray + alpha go through a full-frame buffer and
+    /// come out with every row in its place.
     #[test]
     fn interlaced_and_palette() {
         let (w, h) = (19u32, 13u32);
         let rgb = testimg::rgb(w, h);
-        let mut out = Vec::new();
-        {
-            let mut enc = png::Encoder::new(&mut out, w, h);
-            enc.set_color(png::ColorType::Rgb);
-            enc.set_depth(png::BitDepth::Eight);
-            let mut wr = enc.write_header().unwrap();
-            wr.write_image_data(&rgb).unwrap();
-        }
-        let plain = decode(&out).unwrap().to_bgra();
+        let img = decode(&adam7(w, h, png::ColorType::Rgb, 3, &rgb)).unwrap();
+        let want: Vec<u8> = rgb
+            .chunks(3)
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        assert_eq!(img.to_bgra(), want);
+        assert!(!img.has_alpha());
+        let ga: Vec<u8> = testimg::gray(w, h)
+            .iter()
+            .enumerate()
+            .flat_map(|(i, &g)| [g, (i * 7) as u8])
+            .collect();
+        let img = decode(&adam7(w, h, png::ColorType::GrayscaleAlpha, 2, &ga)).unwrap();
+        let want: Vec<u8> = ga
+            .chunks(2)
+            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .collect();
+        assert_eq!(img.to_bgra(), want);
+        assert!(img.has_alpha());
         // Palette image: 2 colours, one transparent.
         let mut pal_png = Vec::new();
         {
@@ -229,7 +295,6 @@ mod tests {
         let img = decode(&pal_png).unwrap();
         assert!(img.has_alpha());
         assert_eq!(img.to_bgra(), [0, 0, 255, 255, 255, 0, 0, 0]);
-        assert_eq!(plain.len(), (w * h * 4) as usize);
     }
 
     #[test]
