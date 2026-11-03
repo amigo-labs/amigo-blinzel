@@ -354,31 +354,35 @@ pub(crate) mod tests {
 
     #[test]
     fn reads_mpf_index() {
-        // MP index IFD with tag B002 (UNDEFINED, 32 bytes) at offset 50.
+        // MP index IFD with tag B002 (UNDEFINED, 48 bytes) at offset 50.
         let mut d = b"II*\0".to_vec();
         d.extend_from_slice(&8u32.to_le_bytes());
         d.extend_from_slice(&1u16.to_le_bytes());
         d.extend_from_slice(&0xB002u16.to_le_bytes());
         d.extend_from_slice(&7u16.to_le_bytes());
-        d.extend_from_slice(&32u32.to_le_bytes());
+        d.extend_from_slice(&48u32.to_le_bytes());
         d.extend_from_slice(&50u32.to_le_bytes());
         d.extend_from_slice(&0u32.to_le_bytes());
         d.resize(50, 0);
-        // Primary image (offset 0), then a full-HD preview at 1000.
-        for (attr, size, off) in [(0x2003_0000u32, 5000u32, 0u32), (0x0001_0002, 400, 1000)] {
+        // Primary image (offset 0), a full-HD preview at 1000 (its flags in
+        // the top byte), an empty entry at 1500.
+        for (attr, size, off) in [
+            (0x2003_0000u32, 5000u32, 0u32),
+            (0x8001_0002, 400, 1000),
+            (0x0001_0001, 0, 1500),
+        ] {
             d.extend_from_slice(&attr.to_le_bytes());
             d.extend_from_slice(&size.to_le_bytes());
             d.extend_from_slice(&off.to_le_bytes());
             d.extend_from_slice(&[0; 4]);
         }
-        let imgs = mpf_images(&d, 2000);
-        assert_eq!(
-            imgs,
-            vec![MpImage {
-                kind: 0x010002,
-                range: 1000..1400
-            }]
-        );
-        assert!(mpf_images(&d, 1200).is_empty());
+        let preview = vec![MpImage {
+            kind: 0x010002,
+            range: 1000..1400,
+        }];
+        assert_eq!(mpf_images(&d, 2000), preview);
+        // An image that ends where the file does is inside it.
+        assert_eq!(mpf_images(&d, 1400), preview);
+        assert!(mpf_images(&d, 1399).is_empty());
     }
 }
