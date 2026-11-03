@@ -1242,8 +1242,14 @@ mod tests {
     #[test]
     fn display_p3_gets_a_profile() {
         let probe = crate::decode::probe(P3).unwrap();
-        assert!(probe.icc.is_some());
-        assert!(container_profile(P3).is_some());
+        // Display P3's colorants with the sRGB curve, nothing else.
+        let p3 = icc::matrix_profile(
+            icc::colorants::DISPLAY_P3,
+            Trc::Srgb,
+            "Display P3 (AVIF nclx)",
+        );
+        assert_eq!(&probe.icc.expect("profile").bytes[..], &p3[..]);
+        assert_eq!(&container_profile(P3).expect("profile").bytes[..], &p3[..]);
         assert!(container_profile(RGB420).is_none());
     }
 

@@ -308,11 +308,12 @@ mod tests {
             .unwrap();
         let img = decode(out.get_ref(), 4).unwrap();
         let px = rgba_of(&img);
+        // Rounded, not truncated: 1500 is 5.84 in 8 bits, 10500 is 40.86.
+        let first: Vec<u8> = px.as_chunks::<4>().0[..8].iter().map(|p| p[0]).collect();
+        assert_eq!(first, [0, 6, 12, 18, 23, 29, 35, 41]);
         for (i, &g) in gray.iter().enumerate() {
-            assert_eq!(
-                px[i * 4..i * 4 + 4],
-                [to_u8(g); 3].into_iter().chain([255]).collect::<Vec<_>>()[..]
-            );
+            let v = (g as f64 * 255.0 / 65535.0).round() as u8;
+            assert_eq!(px[i * 4..i * 4 + 4], [v, v, v, 255], "sample {g}");
         }
 
         // Premultiplied 100,50,25 at alpha 128 is straight 199,100,50.

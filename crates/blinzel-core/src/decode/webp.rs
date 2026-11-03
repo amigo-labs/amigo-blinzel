@@ -197,6 +197,17 @@ mod tests {
     /// An animation of lossless full-canvas frames `(rgba, delay ms)`
     /// playing `loops` times (0: for ever).
     fn animated(w: u32, h: u32, frames: &[(Vec<u8>, u32)], loops: u16) -> Vec<u8> {
+        let frames: Vec<(Vec<u8>, u32)> = frames
+            .iter()
+            // The encoder writes RIFF....WEBP and then the VP8L chunk.
+            .map(|(rgba, delay)| (lossless(w, h, rgba)[12..].to_vec(), *delay))
+            .collect();
+        animation(w, h, &frames, loops)
+    }
+
+    /// An animation of full-canvas frames `(image chunk, delay ms)`
+    /// playing `loops` times (0: for ever).
+    fn animation(w: u32, h: u32, frames: &[(Vec<u8>, u32)], loops: u16) -> Vec<u8> {
         let mut vp8x = vec![0x02 | 0x10, 0, 0, 0];
         vp8x.extend(u24(w - 1));
         vp8x.extend(u24(h - 1));
@@ -205,13 +216,11 @@ mod tests {
         let mut body = b"WEBP".to_vec();
         body.extend(chunk(b"VP8X", &vp8x));
         body.extend(chunk(b"ANIM", &anim));
-        for (rgba, delay) in frames {
-            // The encoder writes RIFF....WEBP and then the VP8L chunk.
-            let file = lossless(w, h, rgba);
+        for (image, delay) in frames {
             let mut anmf = [u24(0), u24(0), u24(w - 1), u24(h - 1), u24(*delay)].concat();
             // No blending: each frame replaces the canvas.
             anmf.push(0x02);
-            anmf.extend(&file[12..]);
+            anmf.extend(image);
             body.extend(chunk(b"ANMF", &anmf));
         }
         chunk(b"RIFF", &body)
@@ -276,6 +285,14 @@ mod tests {
             "{px:?}"
         );
         assert!(!is_lossy_still(b"RIFF    WEBPVP8 "));
+        // An animation of lossy (VP8) frames is lossy, but no still.
+        let vp8 = TINY_LOSSY[12..].to_vec();
+        let anim = animation(8, 6, &[(vp8.clone(), 50), (vp8, 50)], 0);
+        let mut dec = open(&anim).unwrap();
+        assert!(dec.is_animated() && dec.is_lossy());
+        assert!(!is_lossy_still(&anim));
+        let first = decode(&anim).unwrap();
+        assert_eq!((first.width, first.height), (8, 6));
     }
 
     #[test]

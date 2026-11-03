@@ -344,8 +344,20 @@ mod tests {
         let img = decode(&gif(6, 4, (2, 1, 2, 2), None)).unwrap();
         assert!(img.has_alpha());
         assert_eq!(img.to_bgra()[3], 0);
+        // A frame at the top left that leaves the right edge, or the
+        // bottom edge, uncovered.
+        for (frame, (x, y)) in [((0, 0, 2, 2), (3, 0)), ((0, 0, 4, 1), (0, 1))] {
+            let img = decode(&gif(4, 2, frame, None)).unwrap();
+            assert!(img.has_alpha(), "{frame:?}");
+            let bgra = img.to_bgra();
+            assert_eq!(bgra[3], 255, "{frame:?}: covered");
+            assert_eq!(bgra[(y * 4 + x) * 4 + 3], 0, "{frame:?}: uncovered");
+        }
         let img = decode(&gif(4, 2, (0, 0, 4, 2), Some(3))).unwrap();
         assert!(img.has_alpha());
+        // Index 3 is the fourth pixel of the first row.
+        assert_eq!(img.to_bgra()[3 * 4 + 3], 0);
+        assert_eq!(img.to_bgra()[2 * 4 + 3], 255);
         assert!(decode(b"GIF89a\x01\0\x01\0").is_err());
     }
 

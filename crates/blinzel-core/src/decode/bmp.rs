@@ -457,6 +457,12 @@ mod tests {
     #[test]
     fn rejects_bad_files() {
         assert!(decode(b"BM").is_err());
+        // A valid file whose signature is not `BM`.
+        let mut unsigned = bmp(1, 1, 24, BI_RGB, &[], &[1, 2, 3, 0]);
+        assert!(decode(&unsigned).is_ok());
+        unsigned[..2].copy_from_slice(b"BA");
+        assert!(decode(&unsigned).is_err());
+        assert!(Header::parse(&unsigned).is_err());
         assert!(decode(&bmp(0, 1, 24, BI_RGB, &[], &[])).is_err());
         assert!(decode(&bmp(4, 4, 24, BI_RGB, &[], &[0; 10])).is_err());
         assert!(decode(&bmp(1, 1, 24, 4 /* JPEG */, &[], &[0; 4])).is_err());
