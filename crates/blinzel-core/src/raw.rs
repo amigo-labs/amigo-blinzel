@@ -494,8 +494,94 @@ mod tests {
         assert_eq!(info(Some((6000, 3889))).image_size(), Some((1616, 1080))); // 3.1 % wider
         assert_eq!(info(Some((6000, 4130))).image_size(), Some((6000, 4130))); // 2.9 % narrower
         assert_eq!(info(Some((6000, 4136))).image_size(), Some((1616, 1080))); // 3.05 % narrower
+        // The EXIF width may equal the preview's (AC-18: at least its width).
+        assert_eq!(info(Some((1616, 1090))).image_size(), Some((1616, 1090))); // 0.9 % narrower
         assert_eq!(info(None).image_size(), Some((1616, 1080)));
         assert_eq!(RawInfo::default().image_size(), None);
+    }
+
+    #[test]
+    fn a_lone_sub_ifd_is_read_inline_and_ifd_typed_pointers_count() {
+        let full = jpeg(600, 400, 0xC0);
+        let at_full = 3000;
+        // The pointers as LONG (4) or IFD (13), the strip as old- or
+        // new-style JPEG (6, 7).
+        for (typ, compression) in [(4, 6), (4, 7), (13, 6), (13, 7)] {
+            let mut t = TiffLe::new(4096);
+            t.put(at_full, &full);
+            // IFD0: one sub-IFD, its offset inline (count 1), and the EXIF
+            // IFD; a size with a zero width does not count.
+            t.ifd(
+                8,
+                Some(4),
+                &[
+                    (0x014A, typ, vec![1000]),
+                    (0x8769, typ, vec![1800]),
+                    (0xA002, 4, vec![0]),
+                    (0xA003, 4, vec![800]),
+                ],
+            );
+            // The sub-IFD (read before the EXIF IFD): the preview, and a size
+            // with a zero height.
+            t.ifd(
+                1000,
+                None,
+                &[
+                    (0x0103, 3, vec![compression]),
+                    (0x0111, 4, vec![at_full as u32]),
+                    (0x0117, 4, vec![full.len() as u32]),
+                    (0xA002, 4, vec![1200]),
+                    (0xA003, 4, vec![0]),
+                ],
+            );
+            t.ifd(
+                1800,
+                None,
+                &[(0xA002, 4, vec![1200]), (0xA003, 4, vec![800])],
+            );
+            let info = probe(&t.d).unwrap();
+            let case = (typ, compression);
+            let previews: Vec<_> = info
+                .previews
+                .iter()
+                .map(|p| (p.range.start, p.range.end))
+                .collect();
+            assert_eq!(previews, [(at_full, at_full + full.len())], "{case:?}");
+            assert_eq!(info.size, Some((1200, 800)), "{case:?}");
+        }
+    }
+
+    #[test]
+    fn rw2_sensor_borders_and_inline_jpeg() {
+        let full = jpeg(600, 400, 0xC0);
+        let at_full = 2000;
+        for (magic, size) in [(b"IIU\0", Some((6000, 4000))), (b"II*\0", None)] {
+            let mut t = TiffLe::new(4096);
+            t.put(0, magic);
+            t.put(at_full, &full);
+            // Borders top, left, bottom, right; the JPEG in tag 0x2E
+            // (UNDEFINED, its length as the count).
+            t.ifd(
+                8,
+                Some(4),
+                &[
+                    (0x0004, 3, vec![8]),
+                    (0x0005, 3, vec![16]),
+                    (0x0006, 3, vec![4008]),
+                    (0x0007, 3, vec![6016]),
+                    (0x002E, 7, vec![at_full as u32]),
+                ],
+            );
+            t.put(8 + 2 + 12 * 4 + 4, &(full.len() as u32).to_le_bytes());
+            let info = probe(&t.d).unwrap();
+            assert_eq!(info.size, size, "{magic:?}");
+            let previews: Vec<_> = info
+                .previews
+                .iter()
+                .map(|p| (p.range.start, p.range.end))
+                .collect();
+            assert_eq!(previews, [(at_full, at_full + full.len())], "{magic:?}");
+        }
     }
 
     #[test]
@@ -523,7 +609,9 @@ mod tests {
             d[88..92].copy_from_slice(&(full.len() as u32).to_be_bytes());
             d[92..96].copy_from_slice(&at_meta.to_be_bytes());
             d.extend(&full);
-            d.extend(2u32.to_be_bytes());
+            d.extend(3u32.to_be_bytes());
+            // A record of another size first: the next starts after it.
+            d.extend([0x01, 0x30, 0, 6, 0x01, 0x11, 0, 4, 0, 1]);
             for (tag, h, w) in order {
                 d.extend(tag.to_be_bytes());
                 d.extend(4u16.to_be_bytes());
@@ -575,21 +663,23 @@ mod tests {
         let preview_uuid = [vec![0u8; 8], bmff(b"PRVW", None, &prvw_box)].concat();
 
         // Track 1's one sample lies in mdat, whose position depends on the
-        // boxes in front: build twice.
-        let build = |offset: u64| {
-            let stsz = [
-                vec![0u8; 4],
-                (full.len() as u32).to_be_bytes().to_vec(),
-                vec![0, 0, 0, 1],
-            ]
-            .concat();
-            let co64 = [
-                vec![0u8; 4],
-                vec![0, 0, 0, 1],
-                offset.to_be_bytes().to_vec(),
-            ]
-            .concat();
-            let stbl = [bmff(b"stsz", None, &stsz), bmff(b"co64", None, &co64)].concat();
+        // boxes in front: build twice. Its size is the common one or listed
+        // per sample (common size 0), its offset 64-bit (`co64`) or 32-bit
+        // (`stco`).
+        let build = |offset: u64, common: bool, wide: bool| {
+            let len = (full.len() as u32).to_be_bytes().to_vec();
+            let stsz = if common {
+                [vec![0u8; 4], len, vec![0, 0, 0, 1]].concat()
+            } else {
+                [vec![0u8; 8], vec![0, 0, 0, 1], len].concat()
+            };
+            let (kind, at) = if wide {
+                (b"co64", offset.to_be_bytes().to_vec())
+            } else {
+                (b"stco", (offset as u32).to_be_bytes().to_vec())
+            };
+            let chunks = [vec![0u8; 4], vec![0, 0, 0, 1], at].concat();
+            let stbl = [bmff(b"stsz", None, &stsz), bmff(kind, None, &chunks)].concat();
             let minf = bmff(b"minf", None, &bmff(b"stbl", None, &stbl));
             let trak = bmff(b"trak", None, &bmff(b"mdia", None, &minf));
             let moov = [bmff(b"uuid", Some(CR3_META), &meta), trak].concat();
@@ -600,15 +690,18 @@ mod tests {
             f.extend(bmff(b"mdat", None, &full));
             (f, mdat_at)
         };
-        let (_, mdat_at) = build(0);
-        let (d, _) = build(mdat_at as u64);
+        for (common, wide) in [(true, true), (false, true), (true, false), (false, false)] {
+            let (_, mdat_at) = build(0, common, wide);
+            let (d, _) = build(mdat_at as u64, common, wide);
 
-        let info = probe(&d).unwrap();
-        assert_eq!(info.orientation, Orientation::from_exif(6));
-        assert_eq!(info.size, Some((600, 400)));
-        let sizes: Vec<_> = info.previews.iter().map(|p| (p.width, p.height)).collect();
-        assert_eq!(sizes, [(600, 400), (320, 213), (160, 120)]);
-        assert_eq!(info.previews[0].range.start, mdat_at);
+            let info = probe(&d).unwrap();
+            let case = (common, wide);
+            assert_eq!(info.orientation, Orientation::from_exif(6), "{case:?}");
+            assert_eq!(info.size, Some((600, 400)));
+            let sizes: Vec<_> = info.previews.iter().map(|p| (p.width, p.height)).collect();
+            assert_eq!(sizes, [(600, 400), (320, 213), (160, 120)], "{case:?}");
+            assert_eq!(info.previews[0].range, mdat_at..mdat_at + full.len());
+        }
     }
 
     #[test]
