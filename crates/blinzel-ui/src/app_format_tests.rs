@@ -163,6 +163,97 @@ fn a_jpeg_preview_shows_first_only_with_under_a_third_of_the_pixels() {
     }
 }
 
+/// `jpeg` with a marker segment inserted after SOI.
+fn with_segment(jpeg: &[u8], marker: u8, payload: &[u8]) -> Vec<u8> {
+    let len = (payload.len() + 2) as u16;
+    [
+        &jpeg[..2],
+        &[0xFF, marker],
+        &len.to_be_bytes(),
+        payload,
+        &jpeg[2..],
+    ]
+    .concat()
+}
+
+/// A 3600 × 2400 JPEG whose EXIF thumbnail (IFD1) is a JPEG of `thumb` and
+/// whose MPF index lists a JPEG of `large` after the image.
+fn jpeg_with_exif_and_mpf(thumb: (u32, u32), large: (u32, u32)) -> Vec<u8> {
+    let (main, thumb, large) = (
+        jpeg(3600, 2400),
+        jpeg(thumb.0, thumb.1),
+        jpeg(large.0, large.1),
+    );
+    // TIFF: an empty IFD0 at 8, IFD1 at 14 with the thumbnail right after
+    // it (at 44).
+    let mut app1 = b"Exif\0\0II*\0".to_vec();
+    app1.extend(8u32.to_le_bytes());
+    app1.extend(0u16.to_le_bytes());
+    app1.extend(14u32.to_le_bytes());
+    app1.extend(2u16.to_le_bytes());
+    for (tag, v) in [(0x0201u16, 44u32), (0x0202, thumb.len() as u32)] {
+        app1.extend(tag.to_le_bytes());
+        app1.extend(4u16.to_le_bytes());
+        app1.extend(1u32.to_le_bytes());
+        app1.extend(v.to_le_bytes());
+    }
+    app1.extend(0u32.to_le_bytes());
+    app1.extend(&thumb);
+    // MPF: the index IFD at 8, its two entries at 26 (primary, preview);
+    // offsets count from the MPF TIFF header.
+    let mpf_len = 4 + 26 + 32;
+    let mpf_at = 2 + 4 + app1.len() + 4 + 4;
+    let large_at = 2 + 4 + app1.len() + 4 + mpf_len + main.len() - 2;
+    let mut mpf = b"MPF\0II*\0".to_vec();
+    mpf.extend(8u32.to_le_bytes());
+    mpf.extend(1u16.to_le_bytes());
+    mpf.extend(0xB002u16.to_le_bytes());
+    mpf.extend(7u16.to_le_bytes());
+    mpf.extend(32u32.to_le_bytes());
+    mpf.extend(26u32.to_le_bytes());
+    mpf.extend(0u32.to_le_bytes());
+    for (attr, size, off) in [
+        (0x03_0000u32, main.len() as u32, 0u32),
+        (0x01_0002, large.len() as u32, (large_at - mpf_at) as u32),
+    ] {
+        mpf.extend([attr, size, off, 0].iter().flat_map(|v| v.to_le_bytes()));
+    }
+    let data = with_segment(&with_segment(&main, 0xE2, &mpf), 0xE1, &app1);
+    [data, large].concat()
+}
+
+/// AC-20: of a JPEG's previews the largest shows first, an MPF preview
+/// over a small EXIF thumbnail.
+#[test]
+fn a_jpegs_largest_preview_shows_first() {
+    let mut h = Harness::new();
+    h.write_file("a.jpg", &jpeg_with_exif_and_mpf((160, 120), (1000, 667)));
+    h.open("a.jpg");
+    let id = current_id(&h);
+    let sizes: Vec<_> = h.app.probes[&id]
+        .previews
+        .iter()
+        .map(|p| (p.width, p.height))
+        .collect();
+    assert_eq!(sizes, [(1000, 667), (160, 120)]);
+    let shown = h.app.textures.peek(&loader::key(id, Stage::Preview));
+    assert_eq!(shown.map(|t| t.size), Some((1000, 667)));
+    assert!(h.app.has_stage(id, Stage::Screen));
+}
+
+/// AC-20: a raw preview larger than the screen box is the Screen stage at
+/// the reduced size that still covers it, not at its own size.
+#[test]
+fn a_raw_preview_larger_than_the_screen_box_decodes_reduced() {
+    // 4000 × 2667 at 1/2 still covers the 1620 × 1080 the screen box needs.
+    let mut h = with_raw("a.raf", (4000, 2667));
+    h.open("a.raf");
+    let id = current_id(&h);
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert_eq!(h.decodes(), [], "the system decoder is not asked");
+    assert_eq!(h.frame().images[0].size, (2000, 1334));
+}
+
 /// AC-20: the image after the current one in browsing direction gets its
 /// preview first too, the ones further ahead only the Screen stage.
 #[test]
