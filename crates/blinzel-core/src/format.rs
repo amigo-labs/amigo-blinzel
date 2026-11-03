@@ -160,7 +160,15 @@ mod tests {
         assert_eq!(detect(b"\0\0\0\x18ftypavi"), Format::Unknown);
         assert_eq!(detect(b"GIF87a.."), Format::Gif);
         assert_eq!(detect(b"\0\0\0\x0cJXL \r\n\x87\n\0\0\0\0"), Format::Jxl);
-        assert_eq!(detect(b"II*\0\x08\0\0\0"), Format::Tiff);
+        // TIFF in either byte order, and BigTIFF.
+        for tiff in [
+            b"II*\0\x08\0\0\0",
+            b"MM\0*\0\0\0\x08",
+            b"II+\0\x08\0\0\0",
+            b"MM\0+\0\x08\0\0",
+        ] {
+            assert_eq!(detect(tiff), Format::Tiff, "{tiff:?}");
+        }
         assert_eq!(detect(&[0xFF, 0x0A, 0, 0]), Format::Jxl);
         assert_eq!(detect(b"hello"), Format::Unknown);
         assert_eq!(detect(b""), Format::Unknown);
@@ -173,6 +181,7 @@ mod tests {
             b"RIFF\0\0\0\0WAVEfmt ",
             b"\0\0\0\x18ftyqheic\0\0\0\0",
             b"II*\x01\x08\0\0\0\0\0\0\0\0\0\0\0",
+            b"MM\x01*\0\0\0\x08\0\0\0\0\0\0\0\0",
             b"\xFF\x0B\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
         ] {
             assert_eq!(detect(near), Format::Unknown, "{near:?}");
