@@ -1322,6 +1322,16 @@ mod tests {
             }
             let _ = info(&bad);
             assert!(decode(&bad, 1).is_err(), "{name} corrupted");
+            // The container intact, every tile's AV1 data damaged: the
+            // probe reads it, decode fails instead of skipping the tiles.
+            // The grid's descriptor (8 bytes) comes first in its `mdat`.
+            let av1 = mdat + 8 + if name == "GRID" { 8 } else { 0 };
+            let mut bad = data.to_vec();
+            for b in &mut bad[av1..] {
+                *b ^= 0xa5;
+            }
+            assert!(info(&bad).is_ok(), "{name} image data damaged");
+            assert!(decode(&bad, 1).is_err(), "{name} image data damaged");
         }
     }
 }
