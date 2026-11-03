@@ -157,7 +157,18 @@ pub fn decode(data: &[u8], threads: usize) -> Result<Image> {
     let (mut dec, (w, h)) = open(data)?;
     let (channels, bits) = match dec.colortype().map_err(err)? {
         ColorType::Gray(b) => (1, b),
-        ColorType::GrayA(b) => (2, b),
+        // The crate reports gray with an extra sample (the alpha) as
+        // `Multiband`, never as `GrayA`.
+        ColorType::Multiband {
+            bit_depth: b,
+            num_samples: 2,
+        } if dec
+            .find_tag_unsigned::<u16>(Tag::PhotometricInterpretation)
+            .map_err(err)?
+            == Some(1) =>
+        {
+            (2, b)
+        }
         ColorType::RGB(b) => (3, b),
         ColorType::RGBA(b) => (4, b),
         _ => return Err(UNSUPPORTED),
@@ -346,6 +357,33 @@ mod tests {
         let img = decode(out.get_ref(), 1).unwrap();
         assert!(img.has_alpha());
         assert_eq!(rgba_of(&img), [100, 50, 25, 128, 7, 8, 9, 255]);
+    }
+
+    /// Gray + alpha keeps its alpha, straight as stored or un-premultiplied.
+    #[test]
+    fn gray_alpha_keeps_partial_alpha() {
+        for (extra, want) in [
+            (
+                ExtraSamples::UnassociatedAlpha,
+                [90, 90, 90, 128, 7, 7, 7, 255, 30, 30, 30, 0],
+            ),
+            (
+                ExtraSamples::AssociatedAlpha,
+                [179, 179, 179, 128, 7, 7, 7, 255, 30, 30, 30, 0],
+            ),
+        ] {
+            let mut out = Cursor::new(Vec::new());
+            let mut enc = TiffEncoder::new(&mut out).unwrap();
+            let mut img = enc.new_image::<colortype::Gray8>(3, 1).unwrap();
+            img.extra_samples(&[extra]).unwrap();
+            img.write_data(&[90, 128, 7, 255, 30, 0]).unwrap();
+            let data = out.into_inner();
+            for threads in [1, 4] {
+                let img = decode(&data, threads).unwrap();
+                assert!(img.has_alpha(), "{extra:?}");
+                assert_eq!(rgba_of(&img), want, "{extra:?}");
+            }
+        }
     }
 
     #[test]
