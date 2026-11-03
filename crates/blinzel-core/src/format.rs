@@ -144,6 +144,22 @@ mod tests {
         assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1heic"), Format::Heif);
         // Brands after the end of the `ftyp` box do not count.
         assert_eq!(detect(b"\0\0\0\x14ftypmif1\0\0\0\0mif1avif"), Format::Heif);
+        // A file naming both AVIF and HEVC stays HEIF (Decisions), whichever
+        // HEVC brand it is.
+        for hevc in [b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis"] {
+            let d = [b"\0\0\0\x1cftypmif1\0\0\0\0mif1avif".as_slice(), hevc].concat();
+            assert_eq!(detect(&d), Format::Heif, "{hevc:?}");
+        }
+        // `avis` counts like `avif`, `msf1` like `mif1`.
+        assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1avis"), Format::Avif);
+        assert_eq!(detect(b"\0\0\0\x18ftypmsf1\0\0\0\0msf1avis"), Format::Avif);
+        assert_eq!(detect(b"\0\0\0\x14ftypmsf1\0\0\0\0msf1"), Format::Heif);
+        // The minor version is no compatible brand.
+        assert_eq!(detect(b"\0\0\0\x14ftypmif1avifmif1"), Format::Heif);
+        // An `ftyp` box too short for its major brand is unknown.
+        assert_eq!(detect(b"\0\0\0\x18ftypavi"), Format::Unknown);
+        assert_eq!(detect(b"GIF87a.."), Format::Gif);
+        assert_eq!(detect(b"\0\0\0\x0cJXL \r\n\x87\n\0\0\0\0"), Format::Jxl);
         assert_eq!(detect(b"II*\0\x08\0\0\0"), Format::Tiff);
         assert_eq!(detect(&[0xFF, 0x0A, 0, 0]), Format::Jxl);
         assert_eq!(detect(b"hello"), Format::Unknown);
