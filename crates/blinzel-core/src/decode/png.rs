@@ -139,8 +139,12 @@ mod tests {
             .unwrap(),
             (w, h)
         );
-        let bgra = img.to_bgra();
-        assert_eq!(&bgra[..4], &[rgb[2], rgb[1], rgb[0], 255]);
+        // Every pixel, so a row the expansion skips shows (P3).
+        let bgr =
+            |a: u8| -> Vec<u8> { rgb.chunks(3).flat_map(|p| [p[2], p[1], p[0], a]).collect() };
+        let gray = testimg::gray(w, h);
+        let grey = |a: u8| -> Vec<u8> { gray.iter().flat_map(|&g| [g, g, g, a]).collect() };
+        assert_eq!(img.to_bgra(), bgr(255));
         assert!(!img.has_alpha());
 
         let rgba: Vec<u8> = rgb
@@ -156,9 +160,8 @@ mod tests {
         ))
         .unwrap();
         assert!(img.has_alpha());
-        assert_eq!(&img.to_bgra()[..4], &[rgb[2], rgb[1], rgb[0], 128]);
+        assert_eq!(img.to_bgra(), bgr(128));
 
-        let gray = testimg::gray(w, h);
         let img = decode(&encode(
             w,
             h,
@@ -174,6 +177,7 @@ mod tests {
                 ..
             }
         ));
+        assert_eq!(img.to_bgra(), grey(255));
 
         let ga: Vec<u8> = gray.iter().flat_map(|&g| [g, 200]).collect();
         let img = decode(&encode(
@@ -184,7 +188,7 @@ mod tests {
             &ga,
         ))
         .unwrap();
-        assert_eq!(&img.to_bgra()[..4], &[gray[0], gray[0], gray[0], 200]);
+        assert_eq!(img.to_bgra(), grey(200));
 
         let rgb16: Vec<u8> = rgb.iter().flat_map(|&v| [v, 0x77]).collect();
         let img = decode(&encode(
@@ -195,7 +199,7 @@ mod tests {
             &rgb16,
         ))
         .unwrap();
-        assert_eq!(&img.to_bgra()[..3], &[rgb[2], rgb[1], rgb[0]]);
+        assert_eq!(img.to_bgra(), bgr(255));
     }
 
     #[test]
