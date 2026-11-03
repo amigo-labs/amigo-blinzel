@@ -1208,6 +1208,35 @@ mod tests {
         assert_close(pixel(&img, 10, 5), source(10, 5));
     }
 
+    /// AC-13 (note): the alpha plane is full range, as AVIF requires and
+    /// rav1e writes it, so partial alpha keeps its values: read as limited
+    /// range, 20 would come out as 5 and 236 as 255. The fixture's alpha
+    /// is only 0 and 255, so this file is encoded here (`batch` encoder).
+    #[cfg(feature = "batch")]
+    #[test]
+    fn partial_alpha_is_read_at_full_range() {
+        use crate::batch::encode::{Codec, Quality, encode};
+        let levels = [20u8, 40, 80, 128, 176, 216, 236, 255];
+        let (w, h) = (8 * levels.len() as u32, 16);
+        let mut bgra = Vec::new();
+        for _ in 0..h {
+            for x in 0..w {
+                bgra.extend([200, 60, 100, levels[x as usize / 8]]);
+            }
+        }
+        let q = Quality {
+            avif: 90,
+            ..Default::default()
+        };
+        let file = encode(&bgra, w, h, Codec::Avif, &q, None, None).unwrap();
+        let img = decode(&file, 1).unwrap();
+        assert!(img.has_alpha());
+        for (i, &a) in levels.iter().enumerate() {
+            let x = 8 * i as u32 + 4;
+            assert_close(pixel(&img, x, 8), [100, 60, 200, a]);
+        }
+    }
+
     #[test]
     fn irot_and_imir_become_the_orientation() {
         // Rotated 90° anticlockwise, then mirrored left-right: the same as
