@@ -416,3 +416,50 @@ fn without_a_system_decoder_a_raw_shows_its_preview_and_other_files_fail() {
             .any(|t| t.starts_with("Could not open “b.ico”"))
     );
 }
+
+/// A 2 × 2 uncompressed CMYK TIFF, as a print workflow writes it: the
+/// probe reads its size, the native decoder refuses its pixels.
+fn cmyk_tiff() -> Vec<u8> {
+    const SHORT: u16 = 3;
+    const LONG: u16 = 4;
+    let entries: [(u16, u16, u32, u32); 9] = [
+        (256, SHORT, 1, 2),   // width
+        (257, SHORT, 1, 2),   // height
+        (258, SHORT, 4, 122), // bits per sample: 8, 8, 8, 8 at offset 122
+        (259, SHORT, 1, 1),   // no compression
+        (262, SHORT, 1, 5),   // separated (CMYK)
+        (273, LONG, 1, 130),  // strip offset
+        (277, SHORT, 1, 4),   // samples per pixel
+        (278, SHORT, 1, 2),   // rows per strip
+        (279, LONG, 1, 16),   // strip byte count
+    ];
+    let mut t = b"II*\0".to_vec();
+    t.extend_from_slice(&8u32.to_le_bytes());
+    t.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    for (tag, kind, count, value) in entries {
+        t.extend_from_slice(&tag.to_le_bytes());
+        t.extend_from_slice(&kind.to_le_bytes());
+        t.extend_from_slice(&count.to_le_bytes());
+        t.extend_from_slice(&value.to_le_bytes());
+    }
+    t.extend_from_slice(&0u32.to_le_bytes());
+    assert_eq!(t.len(), 122);
+    for _ in 0..4 {
+        t.extend_from_slice(&8u16.to_le_bytes());
+    }
+    t.extend_from_slice(&[0, 0, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 0, 0, 255, 0]);
+    t
+}
+
+/// AC-24: a file whose probe succeeds but whose pixels the native decoder
+/// refuses fails with the same reason as one refused at the probe.
+#[test]
+fn a_file_refused_at_decode_says_it_is_not_decoded_natively() {
+    let mut h = Harness::new();
+    h.write_file("c.tif", &cmyk_tiff());
+    h.open("c.tif");
+    let id = current_id(&h);
+    assert_eq!(probed_size(&h), (2, 2), "the probe read it");
+    assert_eq!(h.app.error_of(id), Some("Tiff is not decoded natively"));
+    assert!(h.frame().images.is_empty());
+}
