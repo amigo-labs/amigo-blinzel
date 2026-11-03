@@ -148,6 +148,19 @@ mod tests {
         assert_eq!(detect(&[0xFF, 0x0A, 0, 0]), Format::Jxl);
         assert_eq!(detect(b"hello"), Format::Unknown);
         assert_eq!(detect(b""), Format::Unknown);
+        // Near misses: each signature with one byte off, 16 bytes long.
+        for near in [
+            &b"\xFF\xD8\x00\xE0\0\0\0\0\0\0\0\0\0\0\0\0"[..],
+            b"\x89PNG\r\n\x1a\0\0\0\0\x0dIHDR",
+            b"GIF89b\0\0\0\0\0\0\0\0\0\0",
+            b"BN\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0\0",
+            b"RIFF\0\0\0\0WAVEfmt ",
+            b"\0\0\0\x18ftyqheic\0\0\0\0",
+            b"II*\x01\x08\0\0\0\0\0\0\0\0\0\0\0",
+            b"\xFF\x0B\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+        ] {
+            assert_eq!(detect(near), Format::Unknown, "{near:?}");
+        }
     }
 
     /// `is_native` names exactly the formats `decode` has a decoder for.

@@ -686,6 +686,7 @@ mod tests {
     fn size_limits() {
         assert!(check_size(100, 100).is_ok());
         assert!(matches!(check_size(0, 5), Err(DecodeError::Corrupt(_))));
+        assert!(matches!(check_size(5, 0), Err(DecodeError::Corrupt(_))));
         assert!(matches!(
             check_size(1 << 20, 1 << 20),
             Err(DecodeError::TooLarge { .. })
@@ -695,6 +696,48 @@ mod tests {
         assert!(
             check_size((1 << 30) + 1, 1).is_err_and(|e| matches!(e, DecodeError::TooLarge { .. }))
         );
+        // The probe checks every format's header size, here a PNG's, whose
+        // own header reader does not.
+        let png = |w: u32, h: u32| {
+            let mut d = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+            d.extend(w.to_be_bytes());
+            d.extend(h.to_be_bytes());
+            d.extend([8, 2, 0, 0, 0, 0, 0, 0, 0]);
+            d
+        };
+        assert!(probe(&png(1 << 15, 1 << 15)).is_ok());
+        assert!(matches!(probe(&png(0, 4)), Err(DecodeError::Corrupt(_))));
+        assert!(matches!(probe(&png(4, 0)), Err(DecodeError::Corrupt(_))));
+        assert!(matches!(
+            probe(&png((1 << 15) + 1, 1 << 15)),
+            Err(DecodeError::TooLarge { .. })
+        ));
+    }
+
+    /// The four errors read as AC-02 names them.
+    #[test]
+    fn errors_say_what_happened() {
+        let (width, height) = (7, 9);
+        for (e, says) in [
+            (
+                DecodeError::Unsupported(Format::Psd),
+                "Psd is not decoded natively",
+            ),
+            (
+                DecodeError::Corrupt("bad IHDR".into()),
+                "corrupt image: bad IHDR",
+            ),
+            (
+                DecodeError::TooLarge { width, height },
+                "image too large (7×9)",
+            ),
+            (
+                DecodeError::Panicked("boom".into()),
+                "decoder crashed: boom",
+            ),
+        ] {
+            assert_eq!(e.to_string(), says);
+        }
     }
 
     /// A 1600 × 1200 4:2:0 baseline JPEG of the test pattern.
