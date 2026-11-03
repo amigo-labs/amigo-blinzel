@@ -848,6 +848,35 @@ mod tests {
         let data = jpeg(300, 200, EncodeOptions::default());
         // Truncated entropy data: a warning, the visible part is decoded.
         assert!(decode(&data[..data.len() / 2], Request::Full).is_ok());
+        // The same on the packed paths: gray, and a 4:2:0 region reaching
+        // into the missing half.
+        let gray = jpeg(
+            300,
+            200,
+            EncodeOptions {
+                gray: true,
+                ..Default::default()
+            },
+        );
+        let g = decode(&gray[..gray.len() / 2], Request::Full).unwrap();
+        assert!(matches!(
+            g.pixels,
+            Pixels::Packed {
+                format: PackedFormat::Gray8,
+                ..
+            }
+        ));
+        let c = jpeg(
+            300,
+            200,
+            EncodeOptions {
+                subsampling: 420,
+                ..Default::default()
+            },
+        );
+        let region = PixelRect::new(37, 11, 200, 189);
+        let r = decode(&c[..c.len() / 2], Request::Region(region)).unwrap();
+        assert_eq!((r.width, r.height, r.region), (200, 189, Some(region)));
         // Truncated header: an error, no crash.
         assert!(decode(&data[..20], Request::Full).is_err());
     }
