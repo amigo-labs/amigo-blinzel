@@ -375,6 +375,8 @@ pub(crate) mod tests {
         be.extend_from_slice(&0u32.to_be_bytes());
         assert_eq!(orientation(&be), Some(Orientation::from_exif(8)));
         assert_eq!(orientation(&tiff_le(9, None)), None);
+        // 1 is an orientation too, not a missing one.
+        assert_eq!(orientation(&tiff_le(1, None)), Some(Orientation::NORMAL));
     }
 
     #[test]
@@ -384,6 +386,9 @@ pub(crate) mod tests {
         assert_eq!(exif_thumbnail(&t), Some(60..70));
         let short = tiff_le(1, Some((60, 100)));
         assert_eq!(exif_thumbnail(&short), None);
+        // A thumbnail of no bytes is none, even at an offset inside the
+        // TIFF.
+        assert_eq!(exif_thumbnail(&tiff_le(1, Some((50, 0)))), None);
     }
 
     #[test]
@@ -412,10 +417,11 @@ pub(crate) mod tests {
         d.extend_from_slice(&50u32.to_le_bytes());
         d.extend_from_slice(&0u32.to_le_bytes());
         d.resize(50, 0);
-        // Primary image (offset 0), a full-HD preview at 1000 (its flags in
-        // the top byte), an empty entry at 1500.
+        // Primary image (offset 0, inside the file but never a preview), a
+        // full-HD preview at 1000 (its flags in the top byte), an empty
+        // entry at 1500.
         for (attr, size, off) in [
-            (0x2003_0000u32, 5000u32, 0u32),
+            (0x2003_0000u32, 900u32, 0u32),
             (0x8001_0002, 400, 1000),
             (0x0001_0001, 0, 1500),
         ] {
@@ -432,5 +438,9 @@ pub(crate) mod tests {
         // An image that ends where the file does is inside it.
         assert_eq!(mpf_images(&d, 1400), preview);
         assert!(mpf_images(&d, 1399).is_empty());
+        // The index is UNDEFINED; a LONG tag B002 is none.
+        d[12..14].copy_from_slice(&4u16.to_le_bytes());
+        d[14..18].copy_from_slice(&12u32.to_le_bytes());
+        assert!(mpf_images(&d, 2000).is_empty());
     }
 }
