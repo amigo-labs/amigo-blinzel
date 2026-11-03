@@ -585,6 +585,8 @@ pub(crate) enum Unusual {
     Rgb,
     /// YCbCr with 4:1:1 subsampling.
     S411,
+    /// Lossless (SOF3), YCbCr 4:4:4.
+    Lossless,
 }
 
 /// Encodes the test pattern of `width × height` as an [`Unusual`] JPEG.
@@ -605,11 +607,15 @@ pub(crate) fn encode_unusual(kind: Unusual, width: u32, height: u32) -> Vec<u8> 
         ),
         Unusual::Rgb => (rgb, ffi::PF_RGB, 3, CS_RGB, ffi::SAMP_444),
         Unusual::S411 => (rgb, ffi::PF_RGB, 3, ffi::CS_YCBCR, SAMP_411),
+        Unusual::Lossless => (rgb, ffi::PF_RGB, 3, ffi::CS_YCBCR, ffi::SAMP_444),
     };
     let tj = Tj::new(ffi::INIT_COMPRESS).unwrap();
     tj.set(ffi::P_QUALITY, 90).unwrap();
     tj.set(ffi::P_SUBSAMP, samp).unwrap();
     tj.set(ffi::P_COLORSPACE, colorspace).unwrap();
+    if let Unusual::Lossless = kind {
+        tj.set(ffi::P_LOSSLESS, 1).unwrap();
+    }
     let mut out: *mut c_uchar = std::ptr::null_mut();
     let mut size: usize = 0;
     // SAFETY: `pixels` holds `height` rows of `width * bpp` bytes in the
@@ -795,6 +801,81 @@ mod tests {
         assert!(decode(&data, Request::Region(PixelRect::new(0, 195, 10, 10))).is_err());
         // The handle is reusable after a region decode.
         assert_eq!(decode(&data, Request::Full).unwrap().width, 321);
+    }
+
+    /// `r` of a `w`-wide image, cut from its BGRA.
+    fn crop(full: &[u8], w: u32, r: PixelRect) -> Vec<u8> {
+        let mut out = Vec::new();
+        for y in r.y..r.bottom() {
+            let s = ((y * w + r.x) * 4) as usize;
+            out.extend_from_slice(&full[s..s + r.w as usize * 4]);
+        }
+        out
+    }
+
+    /// AC-04: the strip's left edge is on the iMCU of the file's
+    /// subsampling: 16 pixels for 4:2:2, 8 for 4:4:0, 32 for 4:1:1. The
+    /// regions start where those alignments differ (x = 8, 40, 48).
+    #[test]
+    fn region_left_edge_is_on_each_subsamplings_imcu() {
+        let files = [
+            (
+                "4:2:2",
+                jpeg(
+                    96,
+                    64,
+                    EncodeOptions {
+                        subsampling: 422,
+                        ..Default::default()
+                    },
+                ),
+            ),
+            (
+                "4:4:0",
+                jpeg(
+                    96,
+                    64,
+                    EncodeOptions {
+                        subsampling: 440,
+                        ..Default::default()
+                    },
+                ),
+            ),
+            ("4:1:1", encode_unusual(Unusual::S411, 96, 64)),
+        ];
+        for (name, data) in files {
+            let full = decode(&data, Request::Region(PixelRect::new(0, 0, 96, 64)))
+                .unwrap()
+                .to_bgra();
+            for r in [
+                PixelRect::new(8, 5, 40, 30),
+                PixelRect::new(40, 9, 50, 40),
+                PixelRect::new(48, 3, 30, 20),
+            ] {
+                let img = decode(&data, Request::Region(r))
+                    .unwrap_or_else(|e| panic!("{name} {r:?}: {e}"));
+                assert_eq!((img.width, img.height, img.region), (r.w, r.h, Some(r)));
+                let p = psnr(&img.to_bgra(), &crop(&full, 96, r));
+                assert!(p > 40.0, "{name} {r:?}: psnr {p}");
+            }
+        }
+    }
+
+    /// AC-04: a lossless JPEG cannot be cropped, so the whole image is
+    /// decoded and the region copied from its rows and columns.
+    #[test]
+    fn lossless_region_is_cut_from_the_whole_image() {
+        let data = encode_unusual(Unusual::Lossless, 96, 64);
+        let full = decode(&data, Request::Full).unwrap().to_bgra();
+        for r in [
+            PixelRect::new(0, 0, 96, 64),
+            PixelRect::new(37, 11, 40, 30),
+            PixelRect::new(5, 50, 91, 14),
+        ] {
+            let img = decode(&data, Request::Region(r)).unwrap();
+            assert_eq!((img.width, img.height, img.region), (r.w, r.h, Some(r)));
+            assert_eq!(img.to_bgra(), crop(&full, 96, r), "{r:?}");
+        }
     }
 
     #[test]
