@@ -597,6 +597,19 @@ mod tests {
             }
         }
 
+        // With an EXIF thumbnail in IFD1, which may carry an orientation of
+        // its own (here 3), the orientation is still IFD0's.
+        let thumb = jpeg_header(16, 8, 8, 0xC0);
+        for ifd1 in [Some(3), None] {
+            let tiff = crate::exif::tests::tiff_le_with_ifd1(6, ifd1, &thumb);
+            let exif = [b"Exif\0\0".as_slice(), &tiff].concat();
+            let jpeg = with_segment(&jpeg_header(64, 32, 8, 0xC0), 0xE1, &exif);
+            let p = probe(&jpeg).unwrap();
+            assert_eq!(p.orientation, Orientation::from_exif(6), "IFD1 {ifd1:?}");
+            let sizes: Vec<_> = p.previews.iter().map(|v| (v.width, v.height)).collect();
+            assert_eq!(sizes, [(16, 8)], "the thumbnail in IFD1 is read");
+        }
+
         let jxl = probe(include_bytes!("../../testdata/orient6-4x2.jxl")).unwrap();
         assert_eq!((jxl.format, jxl.width, jxl.height), (Format::Jxl, 4, 2));
         assert_eq!(jxl.orientation, Orientation::from_exif(6));

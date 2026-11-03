@@ -310,6 +310,54 @@ pub(crate) mod tests {
         d
     }
 
+    /// Writes a little-endian TIFF whose IFD0 holds an image width (3)
+    /// ahead of `orientation`, and whose IFD1 holds `ifd1_orientation`
+    /// (if any) and points at `thumb`, which follows it.
+    pub(crate) fn tiff_le_with_ifd1(
+        orientation: u16,
+        ifd1_orientation: Option<u16>,
+        thumb: &[u8],
+    ) -> Vec<u8> {
+        let ifd = |d: &mut Vec<u8>, entries: &[(u16, u16, u32)], next: u32| {
+            d.extend((entries.len() as u16).to_le_bytes());
+            for &(tag, typ, v) in entries {
+                d.extend(tag.to_le_bytes());
+                d.extend(typ.to_le_bytes());
+                d.extend(1u32.to_le_bytes());
+                d.extend(v.to_le_bytes());
+            }
+            d.extend(next.to_le_bytes());
+        };
+        let ifd0 = [(0x0100, 4, 3), (0x0112, 3, orientation as u32)];
+        let mut ifd1 = Vec::new();
+        ifd1.extend(ifd1_orientation.map(|o| (0x0112, 3, o as u32)));
+        let ifd1_at = 8 + 2 + 12 * ifd0.len() + 4;
+        let thumb_at = ifd1_at + 2 + 12 * (ifd1.len() + 2) + 4;
+        ifd1.extend([
+            (0x0201, 4, thumb_at as u32),
+            (0x0202, 4, thumb.len() as u32),
+        ]);
+        let mut d = b"II*\0".to_vec();
+        d.extend(8u32.to_le_bytes());
+        ifd(&mut d, &ifd0, ifd1_at as u32);
+        ifd(&mut d, &ifd1, 0);
+        assert_eq!(d.len(), thumb_at);
+        d.extend_from_slice(thumb);
+        d
+    }
+
+    /// The orientation is IFD0's: not the thumbnail's in IFD1, nor the
+    /// first entry's value (AC-17).
+    #[test]
+    fn orientation_is_ifd0s_even_with_a_thumbnail_ifd() {
+        let thumb = [0xAB; 10];
+        for ifd1 in [Some(3), None] {
+            let t = tiff_le_with_ifd1(6, ifd1, &thumb);
+            assert_eq!(orientation(&t), Some(Orientation::from_exif(6)), "{ifd1:?}");
+            assert_eq!(exif_thumbnail(&t), Some(t.len() - 10..t.len()));
+        }
+    }
+
     #[test]
     fn reads_orientation_le_and_be() {
         assert_eq!(
