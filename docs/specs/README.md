@@ -22,12 +22,12 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 11 | [platform-shells](platform-shells.md) | 19 / 24 | 11 | 5 | the manual checks AC-05, AC-06, AC-13, AC-20, AC-22; then `/spec-check` |
 | 12 | [resident-mode](resident-mode.md) | 21 / 23 | 15 | 1 | the Windows CI run of AC-13's tests of the default item "Show" and the re-add after `TaskbarCreated`; the manual check AC-23 (measurement); then `/spec-check` |
 | 13 | [screenshots](screenshots.md) | 21 / 23 | 8 | 1 | the Windows CI run of AC-03's notice test (`route_hint`); the manual check AC-21; then `/spec-check` |
-| 14 | [installation](installation.md) | 17 / 21 | 12 | 3 | the first release run of AC-18; the manual checks AC-10 (setup window), AC-11 (no Direct3D), AC-21 (SmartScreen, Gatekeeper); then `/spec-check` |
+| 14 | [installation](installation.md) | 18 / 21 | 12 | 3 | the manual checks AC-10 (setup window), AC-11 (no Direct3D), AC-21 (SmartScreen, Gatekeeper); then `/spec-check` |
 | 15 | [updates](updates.md) | 22 / 23 | 3 | 1 | the manual check AC-23 (a published release on a clean VM); then `/spec-check` |
-| 16 | [release](release.md) | 10 / 18 | 9 | 3 | the first release run of AC-03 … AC-09, AC-13, AC-15 (`release.yml`); the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`); then `/spec-check` |
+| 16 | [release](release.md) | 15 / 18 | 9 | 3 | the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`, shown in the v1.4.0 release run 41591512319); then `/spec-check` |
 | 17 | [competitive-benchmark](competitive-benchmark.md) | 12 / 17 | 3 | 5 | the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
 | 18 | [website](website.md) | 18 / 21 | 0 | 3 | the manual checks AC-19 (a Cloudflare Workers Builds deploy), AC-20 (the website workflow with and without the Cloudflare secrets), AC-21 (visual design on a phone and a desktop); then `/spec-check` |
-| | **Total** | **302 / 350** | | | |
+| | **Total** | **308 / 350** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 

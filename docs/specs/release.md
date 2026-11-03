@@ -95,18 +95,18 @@ Releases are cut without manual steps: release-please turns the Conventional Com
 | AC-01 |      | open   |        |
 | AC-02 |      | open   |        |
 | AC-03 | `release.yml` job "Windows" step "Tag matches the crate version" | built |        |
-| AC-04 | `release_files_are_the_thirteen_of_the_spec`, `a_missing_or_extra_file_fails_the_check` (`crates/blinzel-release/src/assets.rs`); `release.yml` step "Check the release files" (`check-release dist`) before "Attach the files and publish" uploads `dist/*`; CI: release — written, not run yet | open   |        |
-| AC-05 | `an_executable_for_the_wrong_architecture_fails_the_check` (`crates/blinzel-release/src/assets.rs`, PE and ELF machine type); `release.yml` Linux step "Package" checks the archive's listing; CI: release — written, not run yet | open   |        |
-| AC-06 | `release.yml` macOS step "App bundle and disk image" mounts the disk image, unpacks the zip, `diff -r` of both apps, `codesign --verify` of the zip's; CI: release — written, not run yet | open   |        |
-| AC-07 | `sha256sums_must_list_every_release_file_with_its_hash` (`crates/blinzel-release/src/assets.rs`, parsed with the updater's `sum_for`); `release.yml` step "Check the release files"; CI: release — written, not run yet | open   |        |
+| AC-04 | `release_files_are_the_thirteen_of_the_spec`, `a_missing_or_extra_file_fails_the_check` (`crates/blinzel-release/src/assets.rs`); `release.yml` step "Check the release files" (`check-release dist`) before "Attach the files and publish" uploads `dist/*`; CI: release, release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok | built |        |
+| AC-05 | `an_executable_for_the_wrong_architecture_fails_the_check` (`crates/blinzel-release/src/assets.rs`, PE and ELF machine type); `release.yml` Linux step "Package" checks the archive's listing; CI: release, release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok | built |        |
+| AC-06 | `release.yml` macOS step "App bundle and disk image" mounts the disk image, unpacks the zip, `diff -r` of both apps, `codesign --verify` of the zip's; CI: release, release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok | built |        |
+| AC-07 | `sha256sums_must_list_every_release_file_with_its_hash` (`crates/blinzel-release/src/assets.rs`, parsed with the updater's `sum_for`); `release.yml` step "Check the release files"; CI: release, release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok | built |        |
 | AC-08 | `release.yml` job "Checksums and release" step "Sign SHA256SUMS" (`test -n "$RELEASE_SIGNING_KEY"`) | built |        |
 | AC-09 | `sign_writes_a_verified_hex_signature_and_prints_the_public_key` (`crates/blinzel-release/tests/cli.rs`), `signature_file_is_hex_and_checked_before_it_is_returned` (`crates/blinzel-release/src/main.rs`); `release.yml` step "Sign SHA256SUMS" runs that command | built |        |
 | AC-10 | `sign_without_a_valid_seed_fails_and_writes_nothing` (`crates/blinzel-release/tests/cli.rs`), `parse_hex_takes_hex_digits_only` (`crates/blinzel-core/src/update.rs`) | built |        |
 | AC-11 | `verify_accepts_the_matching_signature_only` (`crates/blinzel-release/tests/cli.rs`) | built |        |
 | AC-12 | `keygen_writes_a_seed_prints_its_key_and_never_overwrites` (`crates/blinzel-release/tests/cli.rs`) | built |        |
 | AC-13 | `release.yml` macOS step "App bundle and disk image" (`codesign --verify`); `signs_ad_hoc_without_an_identity` (`crates/blinzel-release/src/macos.rs`) for the identity choice | built |        |
-| AC-14 |      | open   |        |
-| AC-15 | `release.yml` step "Attach the files and publish" (`gh release create --draft` if missing, `upload --clobber`, then `edit --draft=false --latest`); CI: release — written, not run yet | open   |        |
+| AC-14 | release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok: the macOS job's signature check printed `Authority=amigo-labs`; manual sign-off pending | open   |        |
+| AC-15 | `release.yml` step "Attach the files and publish" (`gh release create --draft` if missing, `upload --clobber`, then `edit --draft=false --latest`); CI: release, release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok | built |        |
 | AC-16 | `up_to_date_ignores_line_endings_only` (`crates/blinzel-release/src/notices.rs`); `ci.yml` Linux job step "Third-party notices up to date" (`notices --check`) | built |        |
 | AC-17 | `alternatives_prefer_mit_and_reject_unknown` (`crates/blinzel-release/src/notices.rs`), Linux CI | built |        |
 | AC-18 | `third_party_notices_menu_entry_asks_the_shell_to_show_them` (`crates/blinzel-ui/src/app_settings_tests.rs`), `the_notices_are_this_platforms_file` (`crates/blinzel-app/src/notices_text.rs`, per platform in each CI job), `the_notices_file_holds_the_built_in_linux_notices` (`crates/blinzel-app/src/linux/shell.rs`) | built |        |
