@@ -1302,17 +1302,26 @@ mod tests {
         for r in [info(&pq_file).map(|_| ()), decode(&pq_file, 1).map(|_| ())] {
             assert!(matches!(r, Err(DecodeError::Unsupported(Format::Avif))));
         }
-        for data in [RGB420, RGBA, GRID, CLAP] {
+        // Cut or corrupted anywhere: decode fails. The probe reads only the
+        // container, so it fails where the cut lands in front of `mdat`.
+        for (name, data) in [
+            ("RGB420", RGB420),
+            ("RGBA", RGBA),
+            ("GRID", GRID),
+            ("CLAP", CLAP),
+        ] {
+            let mdat = data.windows(4).position(|w| w == b"mdat").unwrap() - 4;
             for len in (0..data.len()).step_by(37) {
-                let _ = info(&data[..len]);
-                let _ = decode(&data[..len], 1);
+                let cut = &data[..len];
+                assert!(decode(cut, 1).is_err(), "{name} cut at {len}");
+                assert!(info(cut).is_err() || len >= mdat, "{name} cut at {len}");
             }
             let mut bad = data.to_vec();
             for i in (0..bad.len()).step_by(13) {
                 bad[i] ^= 0xa5;
             }
             let _ = info(&bad);
-            let _ = decode(&bad, 1);
+            assert!(decode(&bad, 1).is_err(), "{name} corrupted");
         }
     }
 }
