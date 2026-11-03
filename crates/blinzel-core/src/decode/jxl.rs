@@ -360,6 +360,31 @@ mod tests {
         }
     }
 
+    /// 16-bit samples round to the nearest 8-bit value, like jxl-oxide's
+    /// stream: k × 257 + 128 is just below k + ½ and stays k, one more is
+    /// just above and becomes k + 1.
+    #[test]
+    fn sixteen_bit_samples_round_to_nearest() {
+        let below: Vec<u16> = (0..255u16).map(|k| k * 257 + 128).collect();
+        let above: Vec<u16> = below.iter().map(|v| v + 1).collect();
+        let samples: Vec<u8> = below
+            .iter()
+            .chain(&above)
+            .flat_map(|v| v.to_ne_bytes())
+            .collect();
+        let opts = EncoderOptions::new(255, 2, ColorSpace::Luma, ZBitDepth::Sixteen);
+        let mut data = Vec::new();
+        JxlSimpleEncoder::new(&samples, opts)
+            .encode(&mut data)
+            .unwrap();
+        let want: Vec<u8> = (0..255u8)
+            .chain(1..=255)
+            .flat_map(|g| [g, g, g, 255])
+            .collect();
+        assert_eq!(rgba_of(&decode(&data, 1).unwrap()), want);
+        assert_eq!(via_stream(&data), want, "stream");
+    }
+
     /// AC-03: the probe yields the profile of the colour space the image is
     /// rendered into (cjxl -d 0 from a PNG tagged Display P3), none for sRGB.
     #[test]
