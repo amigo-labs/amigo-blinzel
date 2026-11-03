@@ -113,6 +113,52 @@ fn a_raw_preview_with_every_pixel_is_the_full_stage_at_its_full_size() {
     assert_eq!((drawn.size, drawn.full_size), ((4000, 2667), (4000, 2667)));
 }
 
+/// AC-20: a preview exactly 1 % short in both sides still covers: 3960 ×
+/// 1980 of 4000 × 2000 is the Full stage, and the system decoder is not
+/// asked. (Of an image the screen box holds, the App asks no Full stage
+/// for 1 %.)
+#[test]
+fn a_raw_preview_exactly_one_percent_short_still_covers() {
+    let mut h = Harness::new();
+    h.set_system_decoder(Some(DEVELOPED));
+    h.write_file("a.raf", &raf(&jpeg(3960, 1980), (4000, 2000)));
+    h.open_settled("a.raf");
+    let id = current_id(&h);
+    actual_size(&mut h);
+    assert!(h.app.has_stage(id, Stage::Full));
+    assert_eq!(h.decodes(), [], "the system decoder is not asked");
+    assert_eq!(h.frame().images[0].size, (3960, 1980));
+}
+
+/// A JPEG of `w` × `h` the probe reads but no decoder decodes: a frame
+/// header and an empty scan, without quantization tables.
+fn undecodable_jpeg(w: u16, h: u16) -> Vec<u8> {
+    let mut d = vec![0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8];
+    d.extend(h.to_be_bytes());
+    d.extend(w.to_be_bytes());
+    d.extend([3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+    d.extend([0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0x11, 3, 0x11, 0, 63, 0]);
+    d.extend([0xFF, 0xD9]);
+    d
+}
+
+/// AC-20: a covering raw preview that does not decode is no stage; the
+/// system decoder develops the image instead, without an error.
+#[test]
+fn a_covering_raw_preview_that_does_not_decode_leaves_the_image_to_the_system_decoder() {
+    let mut h = Harness::new();
+    h.set_system_decoder(Some(DEVELOPED));
+    h.write_file("a.raf", &raf(&undecodable_jpeg(1616, 1080), (6240, 4160)));
+    h.open("a.raf");
+    let id = current_id(&h);
+    assert_eq!(h.app.probes[&id].previews[0].width, 1616, "listed");
+    assert!(h.app.has_stage(id, Stage::Screen));
+    assert!(!h.app.has_stage(id, Stage::Preview));
+    assert_eq!(h.decodes(), [((6240, 4160), 2)]);
+    assert_eq!(h.frame().images[0].full_size, DEVELOPED);
+    assert!(h.frame().texts.is_empty(), "no error");
+}
+
 /// AC-20: a preview just over 1 % short of the screen box is not the stage.
 #[test]
 fn a_raw_preview_just_over_one_percent_short_shows_first_and_the_system_decoder_is_asked() {
