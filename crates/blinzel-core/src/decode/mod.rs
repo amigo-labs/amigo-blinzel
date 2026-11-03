@@ -566,6 +566,19 @@ mod tests {
             assert_eq!(unsupported(probe(data)), Some(Format::Raw));
             assert_eq!(unsupported(decode(data, Request::Full)), Some(Format::Raw));
         }
+        // A RAF that knows its size (record 0x111) but has no preview: the
+        // size alone is no image, the system decoder gets it.
+        let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+        raf.resize(100, 0);
+        raf[92..96].copy_from_slice(&100u32.to_be_bytes());
+        raf.extend(1u32.to_be_bytes());
+        raf.extend([0x01, 0x11, 0, 4]);
+        raf.extend(4160u16.to_be_bytes());
+        raf.extend(6240u16.to_be_bytes());
+        let info = crate::raw::probe(&raf).unwrap();
+        assert_eq!((info.size, info.previews.len()), (Some((6240, 4160)), 0));
+        assert_eq!(unsupported(probe(&raf)), Some(Format::Raw));
+        assert_eq!(unsupported(decode(&raf, Request::Full)), Some(Format::Raw));
     }
 
     /// JPEG (EXIF), WebP (`webp.rs`) and JPEG XL (header) carry an
