@@ -739,6 +739,25 @@ mod tests {
         }
     }
 
+    /// AC-04: a side that does not divide by 8 rounds up at every scale, as
+    /// libjpeg-turbo does, so 1/8 of 801 × 601 already gives 101 × 76.
+    #[test]
+    fn dct_scaling_rounds_odd_sides_up() {
+        // The buffer is sized from `scaled`; a size below libjpeg-turbo's
+        // would overrun it, so the sizes are checked before any decode.
+        assert_eq!((scaled(801, 1), scaled(601, 1)), (101, 76));
+        assert_eq!((scaled(801, 2), scaled(601, 2)), (201, 151));
+        let data = jpeg(801, 601, EncodeOptions::default());
+        for (w, h) in [(101, 1), (1, 76), (101, 76)] {
+            let img = decode(&data, Request::Fit { w, h }).unwrap();
+            assert_eq!((img.width, img.height), (101, 76), "1/8 for {w} × {h}");
+            assert_eq!((img.full_width, img.full_height), (801, 601));
+        }
+        // One pixel more than 1/8 gives: 2/8, 801 × 2 / 8 = 200.25 up to 201.
+        let img = decode(&data, Request::Fit { w: 102, h: 1 }).unwrap();
+        assert_eq!((img.width, img.height), (201, 151));
+    }
+
     #[test]
     fn region_equals_crop_of_full_decode() {
         let data = jpeg(
