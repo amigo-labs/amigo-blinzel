@@ -913,6 +913,31 @@ impl Harness {
         self.actions[start..].iter().map(Action::clone).collect()
     }
 
+    /// Lets every queued and running loader job run to its end before the
+    /// App takes any of their results, then pumps. The App cancels a job
+    /// once the stage it was for arrives, so after a plain [`Harness::pump`]
+    /// a job that wrongly goes on (decoding again, asking the system
+    /// decoder) has usually been cut short; a test that asserts what a job
+    /// did not do settles instead.
+    pub fn settle(&mut self) -> Vec<Action> {
+        let t = Instant::now();
+        while self.app.loader.pending() > 0 {
+            assert!(t.elapsed() < PUMP_LIMIT, "the loader did not get idle");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        self.pump()
+    }
+
+    /// Opens `name` from the images' folder and settles
+    /// ([`Harness::settle`]).
+    pub fn open_settled(&mut self, name: &str) -> Vec<Action> {
+        let a = self.app.open(self.images.join(name));
+        self.actions.extend(a.iter().map(Action::clone));
+        let mut out = a;
+        out.extend(self.settle());
+        out
+    }
+
     /// Pumps, then keeps delivering wakes (thumbnails, the colour-target
     /// check) and rendering until `done` holds; fails after a while.
     pub fn wait_for(&mut self, done: impl Fn(&Harness) -> bool) {

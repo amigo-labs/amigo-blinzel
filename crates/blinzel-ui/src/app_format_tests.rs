@@ -28,11 +28,12 @@ fn probed_size(h: &Harness) -> (u32, u32) {
     (p.width, p.height)
 }
 
-/// Zooms the current image to 100 % and loads what that needs.
+/// Zooms the current image to 100 % and loads what that needs, every job
+/// to its end ([`Harness::settle`]).
 fn actual_size(h: &mut Harness) {
     h.app.view.zoom = Some(1.0);
     h.app.after_zoom();
-    h.pump();
+    h.settle();
 }
 
 /// AC-20: a raw preview that covers the screen box is the Screen stage, one
@@ -42,7 +43,9 @@ fn a_raw_preview_that_covers_the_stage_is_the_stage_and_the_system_decoder_is_no
     // The screen box (1920 × 1080) needs 1620 × 1080 of 6240 × 4160; a
     // 1616 × 1080 preview is within 1 %.
     let mut h = with_raw("a.raf", (1616, 1080));
-    h.open("a.raf");
+    // Settled: with a plain pump the App cancels the job once the stage
+    // arrives, before it could wrongly go on to the system decoder.
+    h.open_settled("a.raf");
     let id = current_id(&h);
     assert!(h.app.has_stage(id, Stage::Screen));
     assert!(!h.app.has_stage(id, Stage::Preview));
@@ -60,7 +63,7 @@ fn a_raw_preview_that_covers_the_stage_is_the_stage_and_the_system_decoder_is_no
     let mut h = Harness::new();
     h.set_system_decoder(Some(DEVELOPED));
     h.write_file("b.raf", &raf(&jpeg(1500, 1000), (1500, 1000)));
-    h.open("b.raf");
+    h.open_settled("b.raf");
     let id = current_id(&h);
     actual_size(&mut h);
     assert!(h.app.has_stage(id, Stage::Screen));
@@ -247,7 +250,7 @@ fn a_jpegs_largest_preview_shows_first() {
 fn a_raw_preview_larger_than_the_screen_box_decodes_reduced() {
     // 4000 × 2667 at 1/2 still covers the 1620 × 1080 the screen box needs.
     let mut h = with_raw("a.raf", (4000, 2667));
-    h.open("a.raf");
+    h.open_settled("a.raf");
     let id = current_id(&h);
     assert!(h.app.has_stage(id, Stage::Screen));
     assert_eq!(h.decodes(), [], "the system decoder is not asked");
