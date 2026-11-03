@@ -66,7 +66,6 @@ Things only a person can do.
 
 | Item | How |
 | ---- | --- |
-| Mac signing certificate | `bash packaging/macos/create-signing-cert.sh` once ([docs/SECRETS.md](../SECRETS.md)). Until then releases are signed ad hoc. After the next release the macOS job's "Signing identity" step must not say `MACOS_SIGNING_CERT is not set`. |
 | Comparison measurement on a Mac (Apple silicon) | `blinzel-race corpus testbilder`, then `blinzel-race run testbilder --cold --json website/data/race-macos.json` (asks once for the `sudo` password). Install the viewers first and give the terminal "Screen Recording" and "Accessibility". |
 | Gate of HEIC and AVIF against WIC on Windows | `set BLINZEL_DECODER=native` or `=wic`, then `blinzel.exe --bench <folder>` with 12/24 MP files, alternately. |
 | Legal notice (Impressum) | Name, address and contact of the website operator, if the site is operated commercially. |
