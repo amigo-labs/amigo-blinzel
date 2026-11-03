@@ -192,4 +192,35 @@ mod tests {
         m.set_enabled(false);
         assert!(m.lut(None).is_none());
     }
+
+    static FAILED: AtomicUsize = AtomicUsize::new(0);
+
+    /// A colour engine that cannot build any transform.
+    fn failing(_: Option<&Profile>, _: Option<&Profile>) -> Option<Lut3d> {
+        FAILED.fetch_add(1, Ordering::Relaxed);
+        None
+    }
+
+    /// AC-18: a failed build means unconverted, and is not retried for the
+    /// profile until the target changes.
+    #[test]
+    fn a_failed_build_is_not_retried_until_the_target_changes() {
+        let cmyk = Profile::new(b"not an RGB profile".to_vec());
+        let m = ColorManager::new(true, failing);
+        m.set_target(None);
+        assert!(m.lut(Some(&cmyk)).is_none(), "drawn unconverted");
+        assert!(m.lut(Some(&cmyk)).is_none());
+        assert_eq!(FAILED.load(Ordering::Relaxed), 1);
+        assert!(!m.set_target(None), "the same target");
+        assert!(m.lut(Some(&cmyk)).is_none());
+        assert_eq!(FAILED.load(Ordering::Relaxed), 1);
+        let p3 = Profile::new(matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3 test"));
+        assert!(m.set_target(Some(p3)));
+        assert!(m.lut(Some(&cmyk)).is_none());
+        assert_eq!(
+            FAILED.load(Ordering::Relaxed),
+            2,
+            "tried again for the new target"
+        );
+    }
 }

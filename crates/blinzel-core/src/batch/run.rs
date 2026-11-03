@@ -483,6 +483,87 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Runs `job` over `source` alone (written to `dir/{name}`) and
+    /// returns the output file.
+    fn run_one(dir: &Path, name: &str, source: &[u8], job: &Job) -> Vec<u8> {
+        let src = dir.join(name);
+        std::fs::write(&src, source).unwrap();
+        let out = Mutex::new(None);
+        run(
+            job,
+            &[src.into()],
+            &Native,
+            &Options::default(),
+            &|p| match p {
+                Progress::Done { output, .. } => *out.lock().unwrap() = Some(output),
+                Progress::Failed { error, .. } => panic!("{error}"),
+            },
+            &AtomicBool::new(false),
+        );
+        std::fs::read(out.into_inner().unwrap().expect("one output")).unwrap()
+    }
+
+    /// `docs/specs/batch-resize.md` AC-06: "sharpen" reaches the run, as
+    /// the unsharp mask over the scaled pixels.
+    #[test]
+    fn sharpen_is_applied_after_scaling() {
+        let dir = tmp("sharpen");
+        let job = |sharpen| Job {
+            size: Size::Width(100),
+            sharpen,
+            pattern: "{name}-{n}".into(),
+            ..Job::default()
+        };
+        let plain = run_one(&dir, "a.png", &source_png(), &job(None));
+        let sharp = run_one(&dir, "b.png", &source_png(), &job(Some(Default::default())));
+        let pixels = |f: &[u8]| decode::decode(f, Request::Full).unwrap().to_bgra();
+        let mut want = pixels(&plain);
+        assert_ne!(pixels(&sharp), want, "sharpening changes the edge");
+        sharpen::apply(&mut want, 100, 67, Default::default());
+        assert_eq!(pixels(&sharp), want);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `docs/specs/batch-resize.md` AC-10: the source's ICC profile is
+    /// embedded with "keep colour profile" and left out without it.
+    #[test]
+    fn the_colour_profile_is_kept_on_request() {
+        let dir = tmp("icc");
+        let icc = crate::icc::matrix_profile(
+            crate::icc::colorants::DISPLAY_P3,
+            crate::icc::Trc::Gamma(2.2),
+            "Test",
+        );
+        let px = vec![90u8; 64 * 32 * 4];
+        let src = encode::encode(
+            &px,
+            64,
+            32,
+            Codec::Png,
+            &Default::default(),
+            None,
+            Some(&icc),
+        );
+        let src = src.unwrap();
+        for codec in [Codec::Jpeg, Codec::Png, Codec::Webp, Codec::Avif] {
+            for keep_icc in [true, false] {
+                let job = Job {
+                    size: Size::Width(32),
+                    output: Output::Codec(codec),
+                    keep_icc,
+                    pattern: "{name}-{n}".into(),
+                    ..Job::default()
+                };
+                let out = run_one(&dir, "p.png", &src, &job);
+                let probe = decode::probe(&out).unwrap();
+                let got = probe.icc.map(|p| p.bytes.to_vec());
+                let want = keep_icc.then(|| icc.clone());
+                assert_eq!(got, want, "{codec:?} keep_icc {keep_icc}");
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn jpeg_sources_are_decoded_at_a_reduced_scale_and_rotated() {
         // 640×480 JPEG with EXIF orientation 6: shown 480×640.
@@ -548,5 +629,279 @@ mod tests {
         let (ifd0, _) = t.ifd(t.first_ifd().unwrap()).unwrap();
         assert!(!ifd0.iter().any(|e| e.tag == 0x8825), "GPS removed");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Native decoders that note each decoded size, and that run
+    /// `during` while a decode is in progress.
+    struct Watched<F: Fn() + Sync> {
+        decoded: Mutex<Vec<(u32, u32)>>,
+        requests: Mutex<Vec<Request>>,
+        during: F,
+    }
+
+    impl<F: Fn() + Sync> Watched<F> {
+        fn new(during: F) -> Self {
+            Watched {
+                decoded: Mutex::new(Vec::new()),
+                requests: Mutex::new(Vec::new()),
+                during,
+            }
+        }
+    }
+
+    impl<F: Fn() + Sync> Source for Watched<F> {
+        fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
+            decode::probe(data)
+        }
+        fn decode(&self, data: &[u8], req: Request) -> Result<Image, DecodeError> {
+            (self.during)();
+            self.requests.lock().unwrap().push(req);
+            let img = decode::decode(data, req)?;
+            self.decoded.lock().unwrap().push((img.width, img.height));
+            Ok(img)
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-17.
+    #[test]
+    fn taken_or_mismatched_names_get_the_next_free_one() {
+        let dir = tmp("taken");
+        let a = dir.join("a.png");
+        std::fs::write(&a, source_png()).unwrap();
+        let job = Job {
+            size: Size::Width(30),
+            ..Job::default()
+        };
+        let info = plan::inspect(&a, &Native).unwrap();
+        let planned = plan::targets(&job, &[(&a, &info)]).remove(0).unwrap();
+        assert_eq!(planned, dir.join("resized/a.png"));
+        // Taken between planning and writing.
+        std::fs::create_dir_all(dir.join("resized")).unwrap();
+        std::fs::write(&planned, b"someone else's").unwrap();
+        // Planned as WebP, written as PNG.
+        let webp = dir.join("resized/b.webp");
+        let items = [
+            Item {
+                source: a.clone(),
+                target: Some(planned.clone()),
+            },
+            Item {
+                source: a.clone(),
+                target: Some(webp.clone()),
+            },
+        ];
+        let written = Mutex::new(vec![None; 2]);
+        let sum = run(
+            &job,
+            &items,
+            &Native,
+            &Options {
+                threads: 1,
+                ..Options::default()
+            },
+            &|p| {
+                if let Progress::Done { index, output, .. } = p {
+                    written.lock().unwrap()[index] = Some(output);
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        assert_eq!(sum.done, 2);
+        let written = written.into_inner().unwrap();
+        assert_eq!(written[0], Some(dir.join("resized/a (2).png")));
+        assert_eq!(written[1], Some(dir.join("resized/a (3).png")));
+        assert_eq!(std::fs::read(&planned).unwrap(), b"someone else's");
+        assert!(!webp.exists(), "no file under the wrong extension");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Decodes like [`Native`], except that it panics on `bomb.png`'s
+    /// pixels.
+    struct Bomb;
+
+    impl Source for Bomb {
+        fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
+            decode::probe(data)
+        }
+        fn decode(&self, data: &[u8], req: Request) -> Result<Image, DecodeError> {
+            let img = decode::decode(data, req)?;
+            assert!(img.width != 299, "decoder bug");
+            Ok(img)
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-18.
+    #[test]
+    fn unreadable_broken_and_panicking_files_fail_and_the_batch_goes_on() {
+        let dir = tmp("fail");
+        let a = dir.join("a.png");
+        std::fs::write(&a, source_png()).unwrap();
+        // 299 wide: the source panics on it.
+        let px = vec![200u8; 299 * 10 * 4];
+        let bomb = dir.join("bomb.png");
+        let bomb_data = encode::encode(&px, 299, 10, Codec::Png, &Default::default(), None, None);
+        std::fs::write(&bomb, bomb_data.unwrap()).unwrap();
+        let broken = dir.join("broken.png");
+        std::fs::write(&broken, b"\x89PNG\r\n\x1a\n nothing else").unwrap();
+        let missing = dir.join("missing.png");
+        let files: Vec<Item> = [&bomb, &missing, &broken, &a]
+            .map(|p| p.clone().into())
+            .into();
+        let errors = Mutex::new(vec![None; files.len()]);
+        let sum = run(
+            &Job::default(),
+            &files,
+            &Bomb,
+            &Options {
+                threads: 1,
+                ..Options::default()
+            },
+            &|p| {
+                if let Progress::Failed { index, error, .. } = p {
+                    errors.lock().unwrap()[index] = Some(error);
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        assert_eq!(
+            sum,
+            Summary {
+                done: 1,
+                failed: 3,
+                skipped: 0
+            }
+        );
+        let errors = errors.into_inner().unwrap();
+        assert!(
+            errors[0].as_deref().unwrap().contains("decoder bug"),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1].as_deref().is_some_and(|e| !e.is_empty()),
+            "{errors:?}"
+        );
+        assert!(
+            errors[2].as_deref().is_some_and(|e| !e.is_empty()),
+            "{errors:?}"
+        );
+        assert_eq!(errors[3], None);
+        assert!(dir.join("resized/a.png").exists(), "the batch went on");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The most decodes in progress at once while `files` copies of
+    /// `source_png` run with `opts`; each decode waits until `fill` run
+    /// at once (or a moment passes), then lingers so more could join.
+    fn most_at_once(files: usize, opts: &Options, fill: usize) -> usize {
+        let dir = tmp(&format!("parallel-{}-{}", opts.threads, opts.memory_budget));
+        let a = dir.join("a.png");
+        std::fs::write(&a, source_png()).unwrap();
+        let (now, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        let source = Watched::new(|| {
+            let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+            most.fetch_max(n, Ordering::SeqCst);
+            let t = std::time::Instant::now();
+            while now.load(Ordering::SeqCst) < fill && t.elapsed().as_millis() < 500 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            most.fetch_max(now.load(Ordering::SeqCst), Ordering::SeqCst);
+            now.fetch_sub(1, Ordering::SeqCst);
+        });
+        let items: Vec<Item> = (0..files).map(|_| a.clone().into()).collect();
+        let sum = run(
+            &Job::default(),
+            &items,
+            &source,
+            opts,
+            &|_| {},
+            &AtomicBool::new(false),
+        );
+        assert_eq!(sum.done, files);
+        std::fs::remove_dir_all(&dir).unwrap();
+        most.into_inner()
+    }
+
+    /// `docs/specs/batch-resize.md` AC-05.
+    #[test]
+    fn jpeg_sources_decode_at_the_smallest_scale_that_keeps_twice_the_target() {
+        let dir = tmp("scale");
+        let jpg = dir.join("p.jpg");
+        let grey = vec![128u8; 640 * 480 * 4];
+        let jpeg = encode::encode(
+            &grey,
+            640,
+            480,
+            Codec::Jpeg,
+            &Default::default(),
+            None,
+            None,
+        );
+        std::fs::write(&jpg, jpeg.unwrap()).unwrap();
+        let png = dir.join("p.png");
+        let png_data = encode::encode(&grey, 640, 480, Codec::Png, &Default::default(), None, None);
+        std::fs::write(&png, png_data.unwrap()).unwrap();
+        // Target width → the size decoded (twice the target is 2 × width).
+        for (width, file, want) in [
+            (40, &jpg, (80, 60)),    // 1/8 leaves 80 ≥ 80
+            (60, &jpg, (160, 120)),  // 1/8 is 80 < 120: 2/8
+            (100, &jpg, (240, 180)), // 2/8 is 160 < 200: 3/8
+            (200, &jpg, (400, 300)), // 4/8 is 320 < 400: 5/8
+            (400, &jpg, (640, 480)), // 7/8 is 560 < 800: full size
+            (40, &png, (640, 480)),  // only JPEG decodes smaller
+        ] {
+            let source = Watched::new(|| {});
+            let job = Job {
+                size: Size::Width(width),
+                out_dir: format!("out-{width}").into(),
+                ..Job::default()
+            };
+            let sum = run(
+                &job,
+                &[file.clone().into()],
+                &source,
+                &Options::default(),
+                &|_| {},
+                &AtomicBool::new(false),
+            );
+            assert_eq!(sum.done, 1);
+            if *file == png {
+                let requests = source.requests.lock().unwrap();
+                assert_eq!(*requests, [Request::Full], "other formats at full size");
+            }
+            let file = file.display();
+            assert_eq!(
+                source.decoded.into_inner().unwrap(),
+                [want],
+                "{width} {file}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `docs/specs/batch-resize.md` AC-19.
+    #[test]
+    fn files_run_in_parallel_within_the_memory_budget() {
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let opts = Options::default();
+        assert_eq!(opts.threads, cores, "one file per hardware thread");
+        assert_eq!(opts.memory_budget, 2 << 30, "2 GiB");
+        // 300 × 200 × 4 bytes per file.
+        let one = 300 * 200 * 4;
+        let ample = |threads| Options {
+            threads,
+            memory_budget: 100 * one,
+        };
+        assert_eq!(most_at_once(6, &ample(3), 3), 3, "as many as threads");
+        let two = Options {
+            threads: 4,
+            memory_budget: 2 * one,
+        };
+        assert_eq!(most_at_once(6, &two, 4), 2, "as many as fit the budget");
+        let tiny = Options {
+            threads: 4,
+            memory_budget: one / 2,
+        };
+        assert_eq!(most_at_once(3, &tiny, 4), 1, "too large: alone");
     }
 }

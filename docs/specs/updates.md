@@ -101,29 +101,39 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | `picks_the_assets_for_the_architecture` (`crates/blinzel-core/src/update.rs`), Linux CI, covers pre-release and missing asset; a draft, a missing `SHA256SUMS(.sig)` and a bad tag inside a release are untested | open |        |
+| AC-01 | `parse_release_offers_only_complete_published_releases`, `picks_the_assets_for_the_architecture` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-02 | `versions_parse_and_order` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-03 | `picks_the_assets_for_the_architecture` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
-| AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
+| AC-04 | `picks_the_linux_and_macos_assets` (`crates/blinzel-core/src/update.rs`), `fetches_the_bare_executable` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `fetches_the_zipped_bundle` (`crates/blinzel-app/src/macos/update.rs`), macOS CI | built |        |
+| AC-05 | `check_downloads_nothing_when_not_newer` (`crates/blinzel-core/src/update.rs`), `a_manual_check_reports_its_result` (`crates/blinzel-app/src/selfupdate.rs`), Linux CI | built |        |
 | AC-06 | `verifies_ed25519_signatures` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-07 | `reads_checksum_files`, `sha256_matches_known_digests` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
-| AC-08 |      | open   |        |
+| AC-08 | `check_hands_over_only_a_verified_download` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-09 | `hashes_with_cng` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-10 | `checks_at_most_daily` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
-| AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
-| AC-13 |      | open   |        |
-| AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
+| AC-11 | `the_automatic_check_waits_and_saves_its_time_first`, `a_running_instance_looks_every_hour_and_checks_daily` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
+| AC-12 | `a_running_instance_looks_every_hour_and_checks_daily` (`crates/blinzel-core/src/update.rs`), `a_process_looks_once_ten_seconds_after_start` (`crates/blinzel-app/src/selfupdate.rs`), Linux CI; `a_running_instance_looks_every_hour` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
+| AC-13 | `auto_update_off_checks_nothing` (`crates/blinzel-core/src/update.rs`), `a_missing_file_means_the_documented_defaults` (`crates/blinzel-core/src/settings.rs`), `install_updates_automatically_is_on_by_default_and_saved_when_toggled` (`crates/blinzel-ui/src/app_settings_tests.rs`), Linux CI | built |        |
+| AC-14 | `a_copy_that_is_not_installed_never_checks` (`crates/blinzel-app/src/selfupdate.rs`), `a_copy_outside_the_installation_does_not_update` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `a_copy_outside_a_bundle_does_not_update` (`crates/blinzel-app/src/macos/update.rs`), macOS CI; `a_copy_outside_the_installation_does_not_update` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
+| AC-15 | `check_for_updates_asks_the_shell_to_check` (`crates/blinzel-ui/src/app_settings_tests.rs`), `a_manual_check_ignores_the_schedule`, `a_manual_check_reports_its_result` (`crates/blinzel-app/src/selfupdate.rs`), Linux CI; `check_for_updates_is_in_the_application_menu` (`crates/blinzel-app/src/macos/shell.rs`), macOS CI | built |        |
 | AC-16 | `swaps_and_restores` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-17 | `swap_keeps_the_previous_executable` (`crates/blinzel-app/src/linux/update.rs`), Linux CI | built |        |
-| AC-18 |      | open   |        |
-| AC-19 |      | open   |        |
-| AC-20 | `rolls_back_after_three_failed_starts` (`crates/blinzel-core/src/update.rs`), Linux CI, covers the decision only; the file moves and the restart are untested | open |        |
-| AC-21 |      | open   |        |
+| AC-18 | `the_unpacked_bundle_takes_the_running_bundles_name`, `a_downloaded_zip_is_unpacked_next_to_the_bundle` (`crates/blinzel-app/src/macos/update.rs`), macOS CI | built |        |
+| AC-19 | `the_next_start_runs_the_installed_update` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `a_downloaded_zip_is_unpacked_next_to_the_bundle` (`crates/blinzel-app/src/macos/update.rs`), macOS CI; `installed_apps_shows_the_new_version_after_its_first_frame`, `swaps_and_restores` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
+| AC-20 | `rolls_back_after_three_failed_starts` (`crates/blinzel-core/src/update.rs`), `a_failing_update_is_rolled_back_on_the_fourth_start`, `without_a_previous_executable_the_update_keeps_running` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `a_rollback_restores_the_previous_bundle` (`crates/blinzel-app/src/macos/update.rs`), macOS CI; `a_failing_update_is_rolled_back_on_the_fourth_start` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
+| AC-21 | `a_start_without_a_trial_deletes_the_previous_copies` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `forgetting_deletes_the_previous_and_bad_bundles` (`crates/blinzel-app/src/macos/update.rs`), macOS CI; `a_start_without_a_trial_deletes_the_previous_copies` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-22 | `state_round_trips` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-23 |      | open   |        |
 
 ## Decisions
 
+- **The check flow moved into `blinzel-core::update::check`** (new public API: `check`, `Found`, `latest_release_url`). Windows and the Linux/macOS flow had the same sequence twice (release JSON, version, signature, checksum line, hash), untestable behind their downloaders; `check` takes the shell's HTTPS GET and SHA-256 as closures, so AC-05 and AC-08 are tested once on Linux and Windows keeps hashing with CNG (AC-09). `blinzel.md` §10 already puts these decisions in `blinzel-core::update`.
+- **Block 1 tests were green at once** (AC-01, AC-04, AC-05, AC-08): the spec was reverse engineered from working code. Each test was checked by breaking the code on purpose (`<=` to `<`, the draft check, the signature check, the hash comparison, the `.sig` lookup, the macOS asset name, the notice text, the Linux asset) and went red each time.
+- **AC-04 on macOS:** `fetches_the_zipped_bundle` runs only in the macOS CI job (`cargo test -p blinzel-app`); the name itself is tested on Linux in `picks_the_linux_and_macos_assets`.
+- **The schedule moved into `blinzel-core::update::auto_checks`** (new public API: `auto_checks`, the trait `AutoCheck`, `FIRST_CHECK_DELAY_S`, `RECHECK_S`). The shells had the same thread body twice (wait, read the setting, test `check_due`, save the time, check); the shell now only supplies sleep, clock, setting, state file and the check, and says whether it repeats (Windows hourly, Linux and macOS once). `AutoCheck::sleep` returns whether to go on, so a test can end the hourly loop; the shells always go on.
+- **`Installation::fetch`** (default: `curl::get`) lets a test serve the downloads of a manual check (AC-15) without the network; `selfupdate::schedule` returns whether it started the check, so AC-14 tests that a copy that is not installed starts none.
+- **AC-11's background thread is read from the code, not tested:** starting the real `schedule` in a test would read the real settings file after 10 s and contact GitHub. The test proves the order (10 s wait, setting, saved time, check); `schedule` runs it on the thread `blinzel-update`.
+- **Block 2 tests were green at once** (AC-11..AC-15), like block 1; each went red with the code broken on purpose (save after check, no first wait, repeating on Linux, setting not read, `check_due` skipped, schedule started without an installation, a manual check gated by the schedule, the toggle not saved, `CheckUpdates` without its action, the Linux installation check). The Windows tests (`a_running_instance_looks_every_hour`, `a_copy_outside_the_installation_does_not_update`) and the macOS tests (`a_copy_outside_a_bundle_does_not_update`, `check_for_updates_is_in_the_application_menu`) were type-checked and clippy-checked locally for their targets; their first CI run is the proof.
+- **The start-up half of the rollback became testable** (AC-19..AC-21): `selfupdate::start` (Linux and macOS) and `update::start` (Windows) take the running version, the arguments and a `spawn` for the restart, so a test runs the counted starts, the rollback and the clean-up on a real installation in a temporary folder and reads the restart command (program and arguments) without starting it; `on_start` passes `std::env::args_os()` and spawns. Windows' `on_first_frame` hands its work to `first_frame(&Layout)`, tested against a private HKCU branch like `tests/setup.rs`. macOS's swap is `put_in_place` (the unpacking with `ditto` stays in `install`).
+- **macOS tests call `rollback` and `forget_previous` directly**, not `selfupdate::start`: its `state_file` is the real `~/Library/Caches` folder, and the shared `start` is already tested on Linux with the same code.
+- **Block 3 tests were green at once** (AC-18..AC-21), like blocks 1 and 2; the Linux tests each went red with the code broken on purpose (the arguments not passed on, no restart, no exit after the rollback, no clean-up, clean-up during the trial, the counted start not saved, the rollback's state not saved, no `.bad` copy, a rollback without a previous executable, `.bad` not deleted, the swap copying over the installed file). The Windows tests (`update.rs`) and the macOS tests (`macos/update.rs`, including a zip packed by the real `/usr/bin/ditto`) were type-checked and clippy-checked locally for their targets; their first CI run is the proof.

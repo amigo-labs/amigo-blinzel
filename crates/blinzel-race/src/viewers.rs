@@ -26,6 +26,14 @@ pub struct Viewer {
 }
 
 impl Viewer {
+    /// A viewer given on the command line (`--viewer name=path.exe`).
+    pub fn custom(name: String, exe: PathBuf) -> Viewer {
+        Viewer {
+            name,
+            launch: Launch::Exe(exe),
+        }
+    }
+
     /// The executable's file name, used to close every instance.
     pub fn process_name(&self) -> String {
         match &self.launch {
@@ -60,6 +68,12 @@ fn program_files() -> Vec<PathBuf> {
 
 /// Installed candidates at their default locations, amigo-blinzel first.
 pub fn detect() -> Vec<Viewer> {
+    detect_in(&program_files())
+}
+
+/// The known viewers found under `roots` (the first root holding one
+/// wins), then Windows Photos.
+fn detect_in(roots: &[PathBuf]) -> Vec<Viewer> {
     let known: &[(&str, &[&str])] = &[
         ("amigo-blinzel", &[r"amigo-blinzel\blinzel.exe"]),
         ("IrfanView 64", &[r"IrfanView\i_view64.exe"]),
@@ -75,7 +89,6 @@ pub fn detect() -> Vec<Viewer> {
         ),
         ("qimgv", &[r"qimgv\qimgv.exe"]),
     ];
-    let roots = program_files();
     let mut out: Vec<Viewer> = known
         .iter()
         .filter_map(|(name, rels)| {
@@ -111,15 +124,6 @@ pub fn launch(v: &Viewer, file: &Path) -> Result<(), String> {
             open_uri(&template.replace("{file}", &file.display().to_string()))
         }
     }
-}
-
-/// `name=path` from the command line.
-pub fn parse_override(s: &str) -> Option<Viewer> {
-    let (name, path) = s.split_once('=')?;
-    Some(Viewer {
-        name: name.trim().into(),
-        launch: Launch::Exe(PathBuf::from(path.trim())),
-    })
 }
 
 /// ProductVersion from the version resource.
@@ -159,5 +163,61 @@ fn file_version(path: &Path) -> Option<String> {
         }
         let s = std::slice::from_raw_parts(ptr.cast::<u16>(), len as usize);
         Some(crate::sys::from_wide(s).trim().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_known_viewers_at_their_default_locations() {
+        let tmp = std::env::temp_dir().join(format!("blinzel-race-viewers-{}", std::process::id()));
+        let (a, b) = (tmp.join("a"), tmp.join("b"));
+        for (root, rel) in [
+            (&b, r"qimgv\qimgv.exe"),
+            (&a, r"JPEGView\JPEGView.exe"),
+            (&b, r"JPEGView64\JPEGView.exe"),
+            (&b, r"IrfanView\i_view64.exe"),
+            (&a, r"amigo-blinzel\blinzel.exe"),
+            (&b, r"amigo-blinzel\blinzel.exe"),
+        ] {
+            let exe = root.join(rel);
+            std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+            std::fs::write(&exe, b"MZ").unwrap();
+        }
+        let found = detect_in(&[a.clone(), b.clone()]);
+        let names: Vec<&str> = found.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "amigo-blinzel",
+                "IrfanView 64",
+                "JPEGView",
+                "qimgv",
+                "Windows Photos"
+            ]
+        );
+        let exe = |v: &Viewer| match &v.launch {
+            Launch::Exe(p) => p.clone(),
+            Launch::Uri { .. } => PathBuf::new(),
+        };
+        assert_eq!(exe(&found[0]), a.join(r"amigo-blinzel\blinzel.exe"));
+        // Roots are searched in order, then the names within a root.
+        assert_eq!(exe(&found[2]), a.join(r"JPEGView\JPEGView.exe"));
+        assert_eq!(found[0].process_name(), "blinzel.exe");
+        // No version resource in a stand-in file.
+        assert_eq!(found[0].version(), "?");
+        assert_eq!(found[4].version(), "store app");
+        assert_eq!(found[4].process_name(), "Photos.exe");
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn version_is_the_product_version_of_the_resource() {
+        let root = std::env::var_os("SystemRoot").expect("SystemRoot");
+        let dll = PathBuf::from(root).join(r"System32\kernel32.dll");
+        let v = Viewer::custom("kernel32".into(), dll).version();
+        assert!(v.starts_with("10.0."), "{v}");
     }
 }

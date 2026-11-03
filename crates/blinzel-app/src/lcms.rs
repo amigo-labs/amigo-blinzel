@@ -68,4 +68,22 @@ mod tests {
             }
         }
     }
+
+    /// AC-18: profiles the RGB transform cannot be built for.
+    #[test]
+    fn no_transform_for_grey_cmyk_or_broken_profiles() {
+        let curve = lcms2::ToneCurve::new(2.2);
+        let grey = lcms2::Profile::new_gray(lcms2::CIExyY::d50(), &curve).unwrap();
+        let grey = Profile::new(grey.icc().unwrap());
+        assert!(build_lut(Some(&grey), None).is_none(), "grey");
+        let mut cmyk = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "CMYK test");
+        cmyk[16..20].copy_from_slice(b"CMYK");
+        assert!(build_lut(Some(&Profile::new(cmyk)), None).is_none(), "CMYK");
+        let broken = Profile::new(b"not an ICC profile".to_vec());
+        assert!(build_lut(Some(&broken), None).is_none(), "unparsable");
+        assert!(
+            build_lut(None, Some(&broken)).is_none(),
+            "unparsable target"
+        );
+    }
 }

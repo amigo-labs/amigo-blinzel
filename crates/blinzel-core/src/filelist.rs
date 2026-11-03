@@ -32,10 +32,15 @@ impl Entry {
         self.attributes & (attr::OFFLINE | attr::RECALL_ON_OPEN | attr::RECALL_ON_DATA_ACCESS) != 0
     }
 
-    /// Stable 64-bit identity for caches: name + size + mtime.
+    /// Stable 64-bit identity for caches: name + size + mtime. The name is
+    /// case-folded only on Windows, whose file names are case-insensitive.
     pub fn cache_id(&self) -> u64 {
         let mut h = Fnv::new();
-        h.write(self.name.to_lowercase().as_bytes());
+        if cfg!(windows) {
+            h.write(self.name.to_lowercase().as_bytes());
+        } else {
+            h.write(self.name.as_bytes());
+        }
         h.write(&self.size.to_le_bytes());
         h.write(&self.mtime.to_le_bytes());
         h.finish()
@@ -216,8 +221,10 @@ mod tests {
         assert_eq!(a.cache_id(), b.cache_id());
         b.mtime = 2;
         assert_ne!(a.cache_id(), b.cache_id());
+        // Windows names are case-insensitive; on Linux and macOS `A.JPG` and
+        // `a.jpg` are two files, which must not share atlas and loader ids.
         let mut c = a.clone();
         c.name = "A.JPG".into();
-        assert_eq!(a.cache_id(), c.cache_id());
+        assert_eq!(a.cache_id() == c.cache_id(), cfg!(windows));
     }
 }

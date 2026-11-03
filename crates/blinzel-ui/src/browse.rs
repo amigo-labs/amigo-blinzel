@@ -292,6 +292,12 @@ impl<S: Services> Browse<S> {
         self.request(services, list, background, order.into_iter().chain(extra));
     }
 
+    /// The thumbnail of list entry `id` is in the atlas (tests).
+    #[cfg(test)]
+    pub(crate) fn has_thumb(&self, id: u64) -> bool {
+        self.atlas.contains(id)
+    }
+
     /// The grid cell under `p`.
     pub fn hit_grid(
         &self,

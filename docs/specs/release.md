@@ -95,21 +95,29 @@ Releases are cut without manual steps: release-please turns the Conventional Com
 | AC-01 |      | open   |        |
 | AC-02 |      | open   |        |
 | AC-03 | `release.yml` job "Windows" step "Tag matches the crate version" | built |        |
-| AC-04 | `release.yml` "Attach the files and publish" uploads them; no step asserts the list (a missing `amigo-blinzel-*` file goes unnoticed) | open   |        |
-| AC-05 |      | open   |        |
-| AC-06 |      | open   |        |
-| AC-07 |      | open   |        |
+| AC-04 | `release_files_are_the_thirteen_of_the_spec`, `a_missing_or_extra_file_fails_the_check` (`crates/blinzel-release/src/assets.rs`); `release.yml` step "Check the release files" (`check-release dist`) before "Attach the files and publish" uploads `dist/*`; CI: release — written, not run yet | open   |        |
+| AC-05 | `an_executable_for_the_wrong_architecture_fails_the_check` (`crates/blinzel-release/src/assets.rs`, PE and ELF machine type); `release.yml` Linux step "Package" checks the archive's listing; CI: release — written, not run yet | open   |        |
+| AC-06 | `release.yml` macOS step "App bundle and disk image" mounts the disk image, unpacks the zip, `diff -r` of both apps, `codesign --verify` of the zip's; CI: release — written, not run yet | open   |        |
+| AC-07 | `sha256sums_must_list_every_release_file_with_its_hash` (`crates/blinzel-release/src/assets.rs`, parsed with the updater's `sum_for`); `release.yml` step "Check the release files"; CI: release — written, not run yet | open   |        |
 | AC-08 | `release.yml` job "Checksums and release" step "Sign SHA256SUMS" (`test -n "$RELEASE_SIGNING_KEY"`) | built |        |
-| AC-09 | `release.yml` step "Sign SHA256SUMS" (`sign` fails when its signature does not verify); the output format is not asserted | open   |        |
-| AC-10 |      | open   |        |
-| AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
+| AC-09 | `sign_writes_a_verified_hex_signature_and_prints_the_public_key` (`crates/blinzel-release/tests/cli.rs`), `signature_file_is_hex_and_checked_before_it_is_returned` (`crates/blinzel-release/src/main.rs`); `release.yml` step "Sign SHA256SUMS" runs that command | built |        |
+| AC-10 | `sign_without_a_valid_seed_fails_and_writes_nothing` (`crates/blinzel-release/tests/cli.rs`), `parse_hex_takes_hex_digits_only` (`crates/blinzel-core/src/update.rs`) | built |        |
+| AC-11 | `verify_accepts_the_matching_signature_only` (`crates/blinzel-release/tests/cli.rs`) | built |        |
+| AC-12 | `keygen_writes_a_seed_prints_its_key_and_never_overwrites` (`crates/blinzel-release/tests/cli.rs`) | built |        |
 | AC-13 | `release.yml` macOS step "App bundle and disk image" (`codesign --verify`); `signs_ad_hoc_without_an_identity` (`crates/blinzel-release/src/macos.rs`) for the identity choice | built |        |
 | AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
-| AC-16 | `ci.yml` Linux job step "Third-party notices up to date" (`notices --check`); a stale file is not provoked by a test | built |        |
+| AC-15 | `release.yml` step "Attach the files and publish" (`gh release create --draft` if missing, `upload --clobber`, then `edit --draft=false --latest`); CI: release — written, not run yet | open   |        |
+| AC-16 | `up_to_date_ignores_line_endings_only` (`crates/blinzel-release/src/notices.rs`); `ci.yml` Linux job step "Third-party notices up to date" (`notices --check`) | built |        |
 | AC-17 | `alternatives_prefer_mit_and_reject_unknown` (`crates/blinzel-release/src/notices.rs`), Linux CI | built |        |
-| AC-18 |      | open   |        |
+| AC-18 | `third_party_notices_menu_entry_asks_the_shell_to_show_them` (`crates/blinzel-ui/src/app_settings_tests.rs`), `the_notices_are_this_platforms_file` (`crates/blinzel-app/src/notices_text.rs`, per platform in each CI job), `the_notices_file_holds_the_built_in_linux_notices` (`crates/blinzel-app/src/linux/shell.rs`) | built |        |
 
 ## Decisions
 
+- The CLI tests (AC-09 to AC-12) run the built `blinzel-release` binary (`CARGO_BIN_EXE_blinzel-release`) with a made-up seed, because exit codes, stdout and the files written are what the workflow and the operator see. AC-09 counts as built on them: `release.yml` runs exactly that command, and a real release run adds nothing the test does not check.
+- Two defects found by AC-10's test, fixed with it: `parse_hex` took a sign (`+1+1…` passed as a 64-digit seed, and a checksum or public key with `+` passed too), and an all-zero seed panicked in `KeyPair::from_seed` (exit 101) instead of exiting with 1; `sign` now uses `try_from_seed`.
+- The check that a fresh signature verifies cannot fail with a correct Ed25519 library, so `signature_file` takes the check as a function: the unit test passes one that refuses and expects no signature.
+- AC-18 is proven in three links: the menu entry gives `Action::Notices` (`blinzel-ui`), each platform embeds its own file (`notices_text.rs`, cfg-gated, so the Windows and macOS halves run in those CI jobs), and the Linux shell writes exactly that text to the file it opens (`write_notices`, split out of `show_notices`). The Windows and macOS `show_notices` do the same in three lines each and stay without a test of their own: opening the file needs the desktop.
+- The menu test and the notices-file test were green at once: the behavior existed; breaking `Cmd::Notices`, the label, the embedded file or the written text turns them red.
+- The release files are checked by `blinzel-release check-release dist` in the publish job, after signing and before the upload, instead of by more shell: the expected names come from the updater's own `asset_name` / `linux_asset_name` / `macos_asset_name`, `SHA256SUMS` is read with the updater's `sum_for`, and the logic is testable on Linux. The notices files are copied into `dist/` first and the upload takes `dist/*`, so exactly the checked set goes up.
+- "Built for that architecture" (AC-05) is checked by the executable's header: the PE `Machine` (0x8664, 0xAA64) and the ELF `e_machine` (62, 183). That the setup executable is `blinzel.exe` renamed stays the build step's `cp`.
+- AC-04 to AC-07 and AC-15 stay open until a real release run: only it builds and uploads the files. Their tests and workflow checks are written; the first release run is the proof.

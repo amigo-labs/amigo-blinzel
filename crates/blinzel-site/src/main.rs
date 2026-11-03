@@ -195,6 +195,9 @@ fn placeholder(key: &str, lang: Lang, races: &[Race]) -> Result<String, String> 
     if let Some((prefix, kind)) = key.split_once(':')
         && let Some(race) = races.iter().find(|r| r.prefix == prefix)
     {
+        if !charts::KINDS.contains(&kind) {
+            return Err(format!("unknown race chart {kind:?}"));
+        }
         return match &race.data {
             None => Ok(format!("<p class=\"pending\">{}</p>", lang.t("pending"))),
             Some(r) => charts::race(kind, r, &format!("/{}", race.file), |k| lang.t(k)),
@@ -373,14 +376,200 @@ mod tests {
         assert!(expand("{{version", Lang::De, &races).is_err());
     }
 
-    /// The real website sources build, with and without measurements.
+    /// Without a report every one of its placeholders shows the "still to
+    /// come" notice and the report is not published.
     #[test]
-    fn builds_the_site() {
+    fn missing_reports_show_the_pending_notice() {
+        let tmp = fresh_site("pending");
+        let count = |lang: Lang, prefix: &str| {
+            let src = fs::read_to_string(tmp.join("src").join(lang.code()).join("index.html"));
+            src.unwrap().matches(&format!("{{{{{prefix}:")).count()
+        };
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let html = fs::read_to_string(dist.join(lang.code()).join("index.html")).unwrap();
+            let want = count(lang, "race") + count(lang, "race-macos");
+            assert!(want >= 12, "{}: {want} race placeholders", lang.code());
+            assert_eq!(
+                html.matches(lang.t("pending")).count(),
+                want,
+                "{}",
+                lang.code()
+            );
+        }
+        assert!(!dist.join("race.json").exists() && !dist.join("race-macos.json").exists());
+        fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let html = fs::read_to_string(dist.join(lang.code()).join("index.html")).unwrap();
+            let want = count(lang, "race-macos");
+            assert_eq!(
+                html.matches(lang.t("pending")).count(),
+                want,
+                "{}",
+                lang.code()
+            );
+        }
+        assert!(dist.join("race.json").is_file() && !dist.join("race-macos.json").exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A page with an unknown placeholder, an unknown race chart kind (with
+    /// or without the report) or an unclosed `{{` stops the build.
+    #[test]
+    fn bad_placeholders_fail_the_build() {
+        let tmp = fresh_site("placeholders");
+        let page = tmp.join("src/en/privacy.html");
+        let good = fs::read_to_string(&page).unwrap();
+        for bad in [
+            "{{nope}}",
+            "{{race:bogus}}",
+            "{{race-macos:tabel}}",
+            "{{version",
+        ] {
+            fs::write(&page, format!("{good}{bad}\n")).unwrap();
+            let e = build(&tmp).expect_err(bad);
+            assert!(e.starts_with("en/privacy: "), "{bad}: {e}");
+        }
+        fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
+        fs::write(&page, format!("{good}{{{{race:bogus}}}}\n")).unwrap();
+        assert!(build(&tmp).is_err());
+        fs::write(&page, good).unwrap();
+        assert!(build(&tmp).is_ok());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// The download placeholders resolve to the stable URLs of the latest
+    /// release, and the start page of each language offers every file.
+    #[test]
+    fn download_placeholders_resolve_to_latest_release() {
+        let base = "https://github.com/amigo-labs/amigo-blinzel/releases/latest/download/";
+        let files = [
+            ("x64", "amigo-blinzel-setup-x64.exe"),
+            ("arm64", "amigo-blinzel-setup-arm64.exe"),
+            ("macos", "amigo-blinzel-macos.dmg"),
+            ("linux-x64", "amigo-blinzel-linux-x64.tar.gz"),
+            ("linux-arm64", "amigo-blinzel-linux-arm64.tar.gz"),
+            ("sums", "SHA256SUMS"),
+        ];
+        for (key, file) in files {
+            let s = expand(&format!("{{{{download:{key}}}}}"), Lang::En, &[]).unwrap();
+            assert_eq!(s, format!("{base}{file}"), "{key}");
+        }
+        let tmp = fresh_site("download");
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let html = fs::read_to_string(dist.join(lang.code()).join("index.html")).unwrap();
+            for (_, file) in files {
+                assert!(html.contains(&format!("href=\"{base}{file}\"")), "{file}");
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A report that exists but is broken stops the build, naming the file.
+    #[test]
+    fn invalid_race_report_fails_naming_the_file() {
+        let tmp = fresh_site("invalid");
+        fs::write(tmp.join("data/race.json"), "{\"machine\": ").unwrap();
+        let e = build(&tmp).expect_err("broken race.json builds");
+        assert!(e.contains("race.json") && e.contains("invalid JSON"), "{e}");
+        fs::write(tmp.join("data/race.json"), charts::tests::SAMPLE).unwrap();
+        fs::write(tmp.join("data/race-macos.json"), "not json").unwrap();
+        let e = build(&tmp).expect_err("broken race-macos.json builds");
+        assert!(e.contains("race-macos.json"), "{e}");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Every page links the releases page as its changelog and the same
+    /// page in the other language.
+    #[test]
+    fn pages_link_the_changelog_and_the_other_language() {
+        let tmp = fresh_site("links");
+        let dist = build(&tmp).unwrap();
+        for lang in Lang::ALL {
+            let other = lang.other();
+            for p in PAGES {
+                let html =
+                    fs::read_to_string(dist.join(lang.code()).join(format!("{p}.html"))).unwrap();
+                let changes = format!("<a href=\"{RELEASES_PAGE}\">{}</a>", lang.t("changes"));
+                assert!(html.contains(&changes), "{}/{p}: {changes}", lang.code());
+                let switch = format!(
+                    "<a class=\"lang\" href=\"{}\" hreflang=\"{}\" lang=\"{1}\">{}</a>",
+                    url(other, p),
+                    other.code(),
+                    other.t("lang_name")
+                );
+                assert!(html.contains(&switch), "{}/{p}: {switch}", lang.code());
+            }
+        }
+        assert_eq!(
+            (Lang::De.t("changes"), Lang::En.t("changes")),
+            ("Änderungen", "Changes")
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// One sitemap entry per page and language, each naming both language
+    /// versions, and a robots.txt that points to the sitemap.
+    #[test]
+    fn sitemap_lists_every_page_and_robots_names_it() {
+        let tmp = fresh_site("sitemap");
+        let dist = build(&tmp).unwrap();
+        let sitemap = fs::read_to_string(dist.join("sitemap.xml")).unwrap();
+        let entries: Vec<&str> = sitemap.split("<url>").skip(1).collect();
+        let mut locs: Vec<String> = Vec::new();
+        for entry in &entries {
+            let entry = entry.split("</url>").next().unwrap();
+            let loc = entry
+                .strip_prefix("<loc>")
+                .and_then(|e| e.split("</loc>").next())
+                .unwrap_or_else(|| panic!("no <loc>: {entry}"));
+            let (lang, slug) = Lang::ALL
+                .iter()
+                .flat_map(|&l| PAGES.iter().map(move |&s| (l, s)))
+                .find(|&(l, s)| loc == format!("{SITE}{}", url(l, s)))
+                .unwrap_or_else(|| panic!("unknown page {loc}"));
+            assert_eq!(entry.matches("<xhtml:link").count(), 2, "{loc}");
+            for alt in Lang::ALL {
+                let link = format!(
+                    "<xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\"/>",
+                    alt.code(),
+                    url(alt, slug)
+                );
+                assert!(entry.contains(&link), "{loc}: {link}");
+            }
+            locs.push(url(lang, slug));
+        }
+        locs.sort();
+        locs.dedup();
+        assert_eq!(locs.len(), entries.len(), "a page is listed twice");
+        assert_eq!(locs.len(), Lang::ALL.len() * PAGES.len());
+        let robots = fs::read_to_string(dist.join("robots.txt")).unwrap();
+        assert!(
+            robots
+                .lines()
+                .any(|l| l == format!("Sitemap: {SITE}/sitemap.xml")),
+            "{robots}"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A copy of the real website sources in its own temp folder, without
+    /// measurements.
+    fn fresh_site(tag: &str) -> PathBuf {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let tmp = std::env::temp_dir().join(format!("blinzel-site-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("blinzel-site-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("data")).unwrap();
         copy_dir(&root.join("website/src"), &tmp.join("src"));
+        tmp
+    }
+
+    /// The real website sources build, with and without measurements.
+    #[test]
+    fn builds_the_site() {
+        let tmp = fresh_site("build");
         let dist = build(&tmp).unwrap();
         let html = fs::read_to_string(dist.join("de/index.html")).unwrap();
         assert!(html.contains("Referenzmessung"));
@@ -486,7 +675,190 @@ mod tests {
         )
         .unwrap();
         assert!(read_page(&tmp, Lang::En, "index").is_err());
+        // Without the title, or with the headers not on the first two lines.
+        for text in [
+            "<!-- description: A viewer -->\n<p>x</p>\n",
+            "<!-- titel: Home -->\n<!-- description: A viewer -->\n<p>x</p>\n",
+            "\n<!-- title: Home -->\n<!-- description: A viewer -->\n<p>x</p>\n",
+            "<!-- title: Home -->\n\n<!-- description: A viewer -->\n<p>x</p>\n",
+            "<p>x</p>\n",
+        ] {
+            fs::write(tmp.join("en/index.html"), text).unwrap();
+            let Err(e) = read_page(&tmp, Lang::En, "index") else {
+                panic!("read: {text}");
+            };
+            assert!(
+                e.contains("index.html") && e.contains("missing <!--"),
+                "{e}"
+            );
+        }
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Four viewers: one with a name to escape and an unmeasured cold
+    /// start, one fastest everywhere, one with no key presses, one with no
+    /// next image and no burst at all; plus a machine key the site does not
+    /// know.
+    const REPORT: &str = r#"{
+      "machine": {"cpu": "Test CPU", "logical_cpus": "16", "ram_gb": "32", "gpu": "Test GPU",
+        "monitor": "1920x1080", "monitors": "2", "os_build": "26100", "os": "Windows 11", "disk": "NVMe"},
+      "viewers": [
+        {"name": "A<&\"b>", "version": "1.0", "open_warm": {"median_ms": 1800.0, "p95_ms": 1900.0},
+         "open_cold": null, "next": {"median_ms": 40.0, "p95_ms": 55.0},
+         "burst": {"presses": 20, "shown": {"median_ms": 10.0, "p95_ms": 10.0}}},
+        {"name": "Fast", "version": "2.0", "open_warm": {"median_ms": 80.0, "p95_ms": 95.0},
+         "open_cold": {"median_ms": 300.0, "p95_ms": 320.0}, "next": {"median_ms": 9.4, "p95_ms": 12.0},
+         "burst": {"presses": 20, "shown": {"median_ms": 20.0, "p95_ms": 20.0}}},
+        {"name": "Mid", "version": "3.0", "open_warm": {"median_ms": 500.0, "p95_ms": 600.0},
+         "open_cold": null, "next": {"median_ms": 20.0, "p95_ms": 30.0},
+         "burst": {"presses": 0, "shown": {"median_ms": 0.0, "p95_ms": 0.0}}},
+        {"name": "NoBurst", "version": "4.0", "open_warm": {"median_ms": 2500.0, "p95_ms": 2600.0},
+         "open_cold": null, "next": null}
+      ]}"#;
+
+    fn report_chart(kind: &str, lang: Lang) -> String {
+        let race = Json::parse(REPORT).unwrap();
+        charts::race(kind, &race, "/race.json", |k| lang.t(k)).unwrap()
+    }
+
+    /// The viewer names in the order a chart lists them.
+    fn order(svg: &str) -> Vec<&str> {
+        svg.split("class=\"label\">")
+            .skip(1)
+            .map(|s| s.split('<').next().unwrap())
+            .collect()
+    }
+
+    /// Time charts list the fastest first, without the viewers that have no
+    /// value; 1000 ms and more read as seconds in the page's language.
+    #[test]
+    fn time_charts_list_the_fastest_first() {
+        let warm = report_chart("open_warm", Lang::De);
+        assert_eq!(
+            order(&warm),
+            ["Fast", "Mid", "A&lt;&amp;&quot;b&gt;", "NoBurst"]
+        );
+        assert!(!warm.contains("A<&"), "unescaped name");
+        for text in ["80 ms", "500 ms", "1,80 s", "2,50 s"] {
+            assert!(warm.contains(&format!(">{text}</text>")), "{text}: {warm}");
+        }
+        let warm = report_chart("open_warm", Lang::En);
+        assert!(warm.contains(">1.80 s</text>") && warm.contains(">2.50 s</text>"));
+        assert_eq!(order(&report_chart("open_cold", Lang::En)), ["Fast"]);
+        let next = report_chart("next", Lang::En);
+        assert_eq!(order(&next), ["Fast", "Mid", "A&lt;&amp;&quot;b&gt;"]);
+        assert!(next.contains(">9 ms</text>"), "{next}");
+    }
+
+    /// The key-repeat chart lists the highest share of images shown first,
+    /// without viewers that have no key presses.
+    #[test]
+    fn burst_chart_lists_the_highest_share_first() {
+        let burst = report_chart("burst", Lang::En);
+        assert_eq!(order(&burst), ["Fast", "A&lt;&amp;&quot;b&gt;"]);
+        assert!(burst.contains(">20 / 20</text>") && burst.contains(">10 / 20</text>"));
+    }
+
+    /// Every bar looks the same: no viewer gets a class, colour or style of
+    /// its own.
+    #[test]
+    fn charts_highlight_no_viewer() {
+        for kind in ["open_warm", "open_cold", "next", "burst"] {
+            let svg = report_chart(kind, Lang::En);
+            let rows = svg.matches("<g class=\"row\">").count();
+            assert_eq!(svg.matches("<g ").count(), rows, "{kind}");
+            assert_eq!(svg.matches("class=\"bar\"").count(), rows, "{kind}");
+            assert_eq!(svg.matches("class=\"track\"").count(), rows, "{kind}");
+            assert!(!svg.contains("style=") && !svg.contains("fill="), "{kind}");
+            for class in svg.split("class=\"").skip(1) {
+                let class = class.split('"').next().unwrap();
+                assert!(
+                    [
+                        "chart-card",
+                        "chart",
+                        "row",
+                        "label",
+                        "value",
+                        "track",
+                        "bar"
+                    ]
+                    .contains(&class),
+                    "{kind}: class {class}"
+                );
+            }
+        }
+    }
+
+    /// A metric no viewer has reads "Nicht gemessen." / "Not measured.".
+    #[test]
+    fn charts_without_values_read_not_measured() {
+        let race = Json::parse(
+            r#"{"machine": {}, "viewers": [{"name": "X", "version": "1", "open_warm": null,
+                "open_cold": null, "next": null, "burst": {"presses": 0}}]}"#,
+        )
+        .unwrap();
+        for (lang, text) in [(Lang::De, "Nicht gemessen."), (Lang::En, "Not measured.")] {
+            for kind in ["open_warm", "open_cold", "next", "burst"] {
+                let html = charts::race(kind, &race, "/race.json", |k| lang.t(k)).unwrap();
+                assert_eq!(html, format!("<p class=\"pending\">{text}</p>"), "{kind}");
+            }
+        }
+        assert!(report_chart("open_warm", Lang::En).contains("<svg"));
+    }
+
+    /// The table lists every viewer in the report with its version and
+    /// median (p95) for open warm, open cold and next image, and links the
+    /// raw report.
+    #[test]
+    fn table_lists_every_viewer_with_median_and_p95() {
+        let table = report_chart("table", Lang::De);
+        let head = "<tr><th>Viewer</th><th>Version</th><th>Öffnen (warm)</th><th>Öffnen (kalt)</th><th>Nächstes Bild</th></tr>";
+        assert!(table.contains(head), "{table}");
+        for row in [
+            "<tr><td>A&lt;&amp;&quot;b&gt;</td><td>1.0</td><td>1,80 s (1,90 s)</td><td>–</td><td>40 ms (55 ms)</td></tr>",
+            "<tr><td>Fast</td><td>2.0</td><td>80 ms (95 ms)</td><td>300 ms (320 ms)</td><td>9 ms (12 ms)</td></tr>",
+            "<tr><td>Mid</td><td>3.0</td><td>500 ms (600 ms)</td><td>–</td><td>20 ms (30 ms)</td></tr>",
+            "<tr><td>NoBurst</td><td>4.0</td><td>2,50 s (2,60 s)</td><td>–</td><td>–</td></tr>",
+        ] {
+            assert!(table.contains(row), "{row}");
+        }
+        assert_eq!(table.matches("<tr><td>").count(), 4);
+        assert!(table.contains("Median (p95) · <a href=\"/race.json\">Rohdaten (JSON)</a>"));
+        let en = report_chart("table", Lang::En);
+        assert!(en.contains("<a href=\"/race.json\">Raw data (JSON)</a>"));
+        assert!(en.contains("<td>1.80 s (1.90 s)</td>"));
+    }
+
+    /// Every machine entry, labelled in the page language where the key is
+    /// known and with the raw key otherwise.
+    #[test]
+    fn machine_block_labels_every_entry() {
+        let labels = [
+            ("cpu", "Prozessor", "Processor"),
+            ("logical_cpus", "Logische Kerne", "Logical cores"),
+            ("ram_gb", "Arbeitsspeicher (GB)", "Memory (GB)"),
+            ("gpu", "Grafik", "Graphics"),
+            ("monitor", "Hauptmonitor", "Main monitor"),
+            ("monitors", "Monitore", "Monitors"),
+            ("os_build", "Windows-Build", "Windows build"),
+            ("os", "Betriebssystem", "Operating system"),
+            ("disk", "disk", "disk"),
+        ];
+        let race = Json::parse(REPORT).unwrap();
+        let Some(Json::Obj(machine)) = race.get("machine") else {
+            panic!("no machine");
+        };
+        for lang in Lang::ALL {
+            let html = report_chart("machine", lang);
+            assert_eq!(html.matches("<dt>").count(), machine.len());
+            for (key, value) in machine {
+                let value = value.as_str().unwrap();
+                let (_, de, en) = labels.iter().find(|l| l.0 == key).unwrap();
+                let label = if lang == Lang::De { de } else { en };
+                let item = format!("<div><dt>{label}</dt><dd>{value}</dd></div>");
+                assert!(html.contains(&item), "{}: {item}", lang.code());
+            }
+        }
     }
 
     fn copy_dir(from: &Path, to: &Path) {

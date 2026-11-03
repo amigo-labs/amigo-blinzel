@@ -44,7 +44,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 
 ### Cache
 
-- [ ] AC-06 (event): When a thumbnail has been stored for a file, then a lookup with the same path (case-insensitive), size and modification time returns it with its orientation and full image size, also after the cache is reopened (next session); an opaque thumbnail comes back within 30 dB PSNR, one with transparency pixel-identical; a lookup with another size or modification time misses; a newer entry for the same path replaces the older one, also after reopening.
+- [ ] AC-06 (event): When a thumbnail has been stored for a file, then a lookup with the same path (case-insensitive on Windows, case-sensitive on Linux and macOS), size and modification time returns it with its orientation and full image size, also after the cache is reopened (next session); an opaque thumbnail comes back within 30 dB PSNR, one with transparency pixel-identical; a lookup with another size or modification time misses; a newer entry for the same path replaces the older one, also after reopening.
 - [ ] AC-07 (event): When a requested thumbnail is missing from the cache or stale, then the viewer makes it from the file, shows it and stores it, so that the next session takes it from the cache.
 - [ ] AC-08 (always): The cache's pack file never grows beyond the cache limit (1 GiB in the viewer): an append that would pass it empties the cache first (new generation), so the latest entries are present, the earliest are gone, and a reopened cache holds the same number of entries.
 - [ ] AC-09 (error): If an index record is torn or corrupt (wrong checksum, short), then it is ignored on load and the other records are used.
@@ -76,11 +76,12 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 
 - [ ] AC-21 (always, manual: measurement): 200 thumbnails from the cache are on screen (open the cache, read and decode 200, load them into the atlas, draw the grid, GPU done) in at most 30 ms median, measured with `blinzel --bench <dir> --json out.json`, field `thumb_grid_200` (Windows only; the CI step "App benchmark (offscreen, WARP)" runs it on WARP and fails only on a cache miss, not on the time).
 - [ ] AC-22 (always, manual: measurement): Over 200 different 12-MP JPEGs with sensor noise, cold thumbnails (read, probe, decode, reduce; no cache) reach at least 150 per second and warm reading of all 200 from a reopened cache takes at most 30 ms, measured with `blinzel-bench thumbs <dir> [--count N] [--threads T]` on the machine named with the result (not run in CI).
+- [ ] AC-23 (event): When the user opens "Resize images…" (Ctrl+B or the menu) while tiles are marked in the grid, then the batch dialog starts with exactly the marked files, in the folder's order; marked files that no longer exist are left out. Without marks it starts empty.
 
 ## Technical notes
 
 - **Generation** (`blinzel_core::thumb`): `EDGE = 256`; `fit(full, edge)`; `make(data, probe, edge, decode)` asks the decoder for `Request::Fit { w, h }` (JPEG uses DCT scaling down to 1/8). `preview_for` filters `probe.previews` by `width >= target.0 && height >= target.1` and `|(pw/ph)/aspect − 1| < 0.02`, picks the smallest area. `to_bgra` reduces YCbCr per plane (`reduce_plane`) and converts once at target size; packed images go through `reduce` (premultiplied, separable box filter with fractional weights from `weights`). Output `Thumb { width, height, bgra, orientation, full }`, BGRA in stored (not oriented) layout; orientation is only a tag. The app's decode function falls back to the system codecs (WIC, ImageIO); the pool decodes with one thread per image.
-- **Cache** (`blinzel_core::thumbcache`): directory `<cache>/thumbs` with `<cache>` = `%LOCALAPPDATA%\amigo-blinzel`, `~/Library/Caches/amigo-blinzel` or `$XDG_CACHE_HOME/amigo-blinzel` (`blinzel_ui::dirs::cache`). `thumbs.pack`: blobs with a 16-byte header (`BLZT`, length, path hash) followed by JPEG quality 85 4:2:0 (opaque, with feature `turbojpeg`) or PNG (alpha, or without turbojpeg). `thumbs.idx`: 64-byte records (path hash, size, mtime, offset, length, width, height, full size, EXIF orientation, format, FNV checksum), loaded into a `HashMap` by path hash on `open`. `Key::new` hashes the lowercased path (FNV-1a). Appends take an in-process mutex plus an exclusive OS file lock on `thumbs.idx`. Limit `CACHE_LIMIT = 1 << 30` (`blinzel-ui/src/thumbs.rs`). Opened lazily by the first worker that needs it; an open error is logged and thumbnails are then made without a cache.
+- **Cache** (`blinzel_core::thumbcache`): directory `<cache>/thumbs` with `<cache>` = `%LOCALAPPDATA%\amigo-blinzel`, `~/Library/Caches/amigo-blinzel` or `$XDG_CACHE_HOME/amigo-blinzel` (`blinzel_ui::dirs::cache`). `thumbs.pack`: blobs with a 16-byte header (`BLZT`, length, path hash) followed by JPEG quality 85 4:2:0 (opaque, with feature `turbojpeg`) or PNG (alpha, or without turbojpeg). `thumbs.idx`: 64-byte records (path hash, size, mtime, offset, length, width, height, full size, EXIF orientation, format, FNV checksum), loaded into a `HashMap` by path hash on `open`. `Key::new` hashes the path (FNV-1a), lowercased on Windows only. Appends take an in-process mutex plus an exclusive OS file lock on `thumbs.idx`. Limit `CACHE_LIMIT = 1 << 30` (`blinzel-ui/src/thumbs.rs`). Opened lazily by the first worker that needs it; an open error is logged and thumbnails are then made without a cache.
 - **Pool** (`blinzel-ui/src/thumbs.rs`): `Thumbs::set_wanted` replaces the queue in priority order, skipping ids in `taken`; `forget(id)` after eviction, `reset()` when resident mode hides the window. Worker count from `Services::thumb_threads()` (Windows: number of performance cores, at least 2; Linux/macOS: half the logical CPUs, at least 2), normal priority. Results go back as `Wake::Thumbs` → `App::on_thumbs`.
 - **Atlas** (`blinzel_ui::gfx::Atlas`, `AtlasPages`): `PAGE = 2048`, 8 × 8 slots of 256² per page; Y in a 2048² R8 texture, Cb/Cr in a 1024² R8G8 texture (6 MiB per page); `ATLAS_PAGES = 8`. LRU by `last_drawn` frame (`begin_frame`, `get`). Cache JPEGs (4:2:0) become `Planes` without an RGB round trip (`Planes::from_image`); everything else via `Planes::from_thumb` (alpha over the background). One draw per tile (`draws::thumb`). Shells: `blinzel-app/src/gfx/atlas.rs` (D3D11), `src/linux/gpu.rs` (wgpu), `src/macos/gpu.rs` (Metal).
 - **Layout** (`blinzel_core::grid`, `blinzel-ui/src/browse.rs`): grid cell 176, gap 12; strip cell 72, gap 6, strip height `(72 + 2·6) × scale`; all logical px × DPI scale. `Grid::{visible, reveal, page_rows, step, hit}`, `strip(count, current, width, cell, gap)`, `fit_in` (centred, never enlarged).
@@ -95,18 +96,18 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | Image smaller than 256 px | Thumbnail at its own size, not enlarged; drawn centred in the tile without enlarging |
 | Extreme panorama 100 000 × 10 | Thumbnail 256 × 1 |
 | File edited after its thumbnail was cached | Size or mtime differs → miss → new thumbnail made and appended; the newer entry wins |
-| Linux/macOS: `A.jpg` and `a.jpg` in one folder with equal size and mtime | Same cache key (the path is lowercased on every platform): both show the same cached thumbnail |
+| Linux/macOS: `A.jpg` and `a.jpg` in one folder with equal size and mtime | Two cache keys (the path is case-folded on Windows only): each gets its own thumbnail |
 | Two copies of a file in different folders with equal name, size and mtime | Same atlas id (name + size + mtime): the atlas thumbnail of one is reused for the other |
 | Torn last record after a crash during an append | Ignored on load; the thumbnail is made again |
 | Cache directory not writable | Error logged once; thumbnails are made without cache |
 | Cloud placeholder (OneDrive "online only") | Not read (no download started); tile stays a placeholder |
 | Broken file in the folder | Tile stays a placeholder; the viewer keeps running |
 | Grid on an empty folder | No tiles; Enter or Space closes the grid without opening anything, a double-click does nothing |
-| Delete, Ctrl+C, + or R while the grid is open | Not handled by the grid: they act on the image that was open before the grid (e.g. Delete recycles that image, not the selected tile) |
+| Delete, Ctrl+C, + or R while the grid is open | Delete (and "Open with", E) acts on the selected tile, not on the image that was open before the grid; Ctrl+C, Ctrl+X, Ctrl+S, zoom (+, −, 0) and rotation (R, L) do nothing while the grid covers the image |
 | T while the grid is open | Toggles and saves the setting; the strip appears once the grid closes |
 | Filmstrip with no current image (empty start) | Strip background only, no tiles |
 | Resident mode hides the window | Queue, handed-out requests and atlas are dropped; the cache on disk stays |
-| Batch dialog opened while tiles are marked | The dialog starts with its own (empty) list; the marks are not passed to it |
+| Batch dialog opened while tiles are marked | The dialog starts with the marked files (AC-23); files dropped onto it are added to them |
 
 ## Assumptions
 
@@ -116,7 +117,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 
 ## Open questions
 
-- Should the marks of the grid feed the batch dialog's file list? The design spec (`blinzel.md` §7, "Multi-selection in the grid") presents them as part of batch processing and `GridState::marked` is documented "e.g. for the batch dialog", but nothing reads them today (AC-19 only covers marking).
+<!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
 ## Evidence
 
@@ -125,27 +126,34 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | AC-01 | `fits_the_tile` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
 | AC-02 | `thumbnails_a_jpeg_with_dct_scaling` (`crates/blinzel-core/src/thumb.rs`, feature `turbojpeg`, on by default; Linux, macOS, Windows) | built | |
 | AC-03 | `area_average_is_exact`, `transparent_pixels_do_not_bleed` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
-| AC-04 | | open | |
-| AC-05 | | open | |
-| AC-06 | `stores_and_reloads`, `alpha_survives_and_newer_entries_win` (`crates/blinzel-core/src/thumbcache.rs`; Linux, macOS, Windows) | built | |
-| AC-07 | | open | |
-| AC-08 | `starts_a_new_generation_at_the_limit` (`crates/blinzel-core/src/thumbcache.rs`, with a 40 000-byte limit; the 1 GiB constant is untested) | built | |
+| AC-04 | `takes_the_smallest_preview_that_covers_the_thumbnail`, `without_a_fitting_preview_the_image_itself_is_decoded` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
+| AC-05 | `a_broken_preview_falls_back_to_the_image` (`crates/blinzel-core/src/thumb.rs`; Linux, macOS, Windows) | built | |
+| AC-06 | `stores_and_reloads`, `alpha_survives_and_newer_entries_win`, `the_key_folds_case_only_on_windows` (`crates/blinzel-core/src/thumbcache.rs`; Linux, macOS, Windows) | built | |
+| AC-07 | `thumbnails_are_made_stored_and_taken_from_the_cache_next_session` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
+| AC-08 | `starts_a_new_generation_at_the_limit` (`crates/blinzel-core/src/thumbcache.rs`, with a 40 000-byte limit); `the_viewer_opens_its_thumbnail_cache_with_a_one_gib_limit` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`, sparse pack files 1 MiB and 16 bytes below 1 GiB: appended, then a new generation; red with `CACHE_LIMIT` at `1 << 20` or `1 << 31`); Linux, macOS, Windows | built | |
 | AC-09 | `ignores_torn_records` (`crates/blinzel-core/src/thumbcache.rs`) | built | |
-| AC-10 | | open | |
-| AC-11 | `planes_round_trip` (`crates/blinzel-core/src/thumb.rs`, last block: transparent over white → Y 255, Cb/Cr 128) | built | |
-| AC-12 | `slots_fill_pages_then_reuse_the_least_recently_drawn` (`crates/blinzel-ui/src/gfx.rs`; slot reuse only, the re-request after eviction is untested) | built | |
+| AC-10 | `instances_share_the_cache_without_interleaving`, `an_entry_from_an_old_generation_reads_as_a_miss` (`crates/blinzel-core/src/thumbcache.rs`, two cache instances in one process, each with its own file handles; Linux, macOS, Windows) | built | |
+| AC-11 | `planes_round_trip` (`crates/blinzel-core/src/thumb.rs`, last block: transparent over white → Y 255, Cb/Cr 128); `transparent_thumbnails_are_composited_over_the_background_colour` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`, a transparent PNG with a white background: the planes uploaded to the atlas, made and from the cache; red with `[0, 0, 0]` in place of the background in `thumbs.rs`); Linux, macOS, Windows | built | |
+| AC-12 | `slots_fill_pages_then_reuse_the_least_recently_drawn` (`crates/blinzel-ui/src/gfx.rs`), `an_evicted_thumbnail_is_asked_for_again_when_it_is_needed` (600 tiles), `the_viewers_atlas_holds_512_thumbnails_and_reuses_a_slot_for_the_513th` (red with `ATLAS_PAGES` = 9) (`crates/blinzel-ui/src/app_thumbnail_tests.rs`); Linux, macOS, Windows | built | |
 | AC-13 | `draws_oriented_and_scaled_without_bleeding` (`crates/blinzel-app/tests/atlas.rs`, `#![cfg(windows)]`, Windows CI `cargo test --workspace --release`) | built | |
-| AC-14 | | open | |
-| AC-15 | | open | |
-| AC-16 | | open | |
+| AC-14 | `the_grid_asks_for_the_visible_tiles_then_the_next_then_the_previous_screenful`, `the_filmstrip_asks_nearest_first_then_alternating_further_out` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows), one pool thread so requests are served in their order | built | |
+| AC-15 | `a_broken_file_keeps_its_placeholder_and_is_not_asked_for_again`, `cloud_placeholders_are_never_read_for_a_thumbnail` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
+| AC-16 | `filmstrip_toggles_saves_and_lays_out_the_image_above_it`, `filmstrip_centres_the_current_tile_and_opens_clicked_ones` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 | AC-17 | `columns_rows_and_cells`, `hit_testing` (`crates/blinzel-core/src/grid.rs`) | built | |
-| AC-18 | | open | |
-| AC-19 | | open | |
+| AC-18 | `grid_keys_move_the_selection_clamped_and_scrolled_just_enough`, `grid_wheel_scrolls_a_row_per_notch_and_clicks_select`, `grid_opens_with_enter_space_or_a_double_click_and_closes_with_g_or_escape`, `an_empty_grid_opens_nothing` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
+| AC-19 | `grid_marks_with_ctrl_shift_and_ctrl_a_and_escape_clears_them` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 | AC-20 | | open | |
 | AC-21 | | open | |
 | AC-22 | | open | |
+| AC-23 | `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 
-Partial coverage without an exact test: AC-16 persistence of the setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); AC-18 the layout functions behind the keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`) — the key and mouse handling in `App` has no test.
+Supporting tests: the persistence of the filmstrip setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); the layout functions behind the grid keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`).
 
 ## Decisions
 
+- 2026-11-02: in the grid, file commands (Delete, "Open with", "Edit with") take the selected tile and commands on the shown image (copy, cut, save cutout, select all from the menu, zoom, rotation, show original) do nothing. Because the grid covers that image, and Delete recycling a file other than the one the user sees selected was the defect found in the extraction; a copy of a tile would need its probe on the UI thread.
+- 2026-11-02: the tests of AC-04, AC-05 and AC-10 were green at once: preview choice, fallback and the shared cache already behaved as specified. AC-10's "instances" are two `ThumbCache`s in one test process: each opens its own handles, so the OS file lock excludes them as it does two processes.
+- 2026-11-02: the App-level tests of AC-07, AC-12 (re-request after eviction), AC-14, AC-15, AC-16, AC-18 and AC-19 were green at once: thumbnail requests, failures, the cache, the filmstrip, the grid keys and mouse and the marks already behaved as specified; the tests guard that behaviour, none of it changed. Three of them were checked to go red with the behaviour broken on purpose (the previous screenful not reversed, placeholders read, an evicted id never forgotten).
+- 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.
+- 2026-11-02: AC-23 checks "no longer exists" with a file check per marked file when the dialog opens (on the UI thread). Because opening the dialog is not on the startup or browsing path, and the dialog's header inspection would otherwise list the missing file as unreadable instead of leaving it out.
+- 2026-11-02: the thumbnail cache key folds case on Windows only. Because the extraction found `A.jpg` and `a.jpg` sharing one entry on Linux and macOS, where they are two files; `the_key_folds_case_only_on_windows` was red with the old key. On a case-insensitive APFS volume a file opened under another spelling costs a second entry, not a wrong thumbnail. Entries written by an older Linux or macOS build miss once and are made again.

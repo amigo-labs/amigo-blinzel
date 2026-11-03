@@ -43,7 +43,13 @@ impl Layout {
     pub fn user() -> Option<Layout> {
         let local = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
         let roaming = PathBuf::from(std::env::var_os("APPDATA")?);
-        Some(Layout {
+        Some(Layout::in_profile(&local, &roaming))
+    }
+
+    /// The real installation of the user whose `%LOCALAPPDATA%` is `local`
+    /// and `%APPDATA%` is `roaming`; every registry path is below HKCU.
+    pub fn in_profile(local: &Path, roaming: &Path) -> Layout {
+        Layout {
             dir: local.join("Programs").join(PRODUCT),
             start_menu: roaming.join(r"Microsoft\Windows\Start Menu\Programs"),
             cache: local.join(PRODUCT),
@@ -54,7 +60,7 @@ impl Layout {
             app_paths: format!(r"Software\Microsoft\Windows\CurrentVersion\App Paths\{EXE_NAME}"),
             run: r"Software\Microsoft\Windows\CurrentVersion\Run".into(),
             notify_shell: true,
-        })
+        }
     }
 
     /// Everything below `root` (files) and `HKCU\<reg_root>` (registry).
@@ -111,13 +117,7 @@ pub fn install(
     std::fs::create_dir_all(&layout.dir).map_err(io("create", &layout.dir))?;
     let exe = layout.exe();
     if !layout.is_installed_exe(source) {
-        // A running older version cannot be overwritten, but renamed.
-        if exe.exists() {
-            let old = exe.with_extension("exe.old");
-            let _ = std::fs::remove_file(&old);
-            std::fs::rename(&exe, &old).map_err(io("rename", &exe))?;
-        }
-        std::fs::copy(source, &exe).map_err(io("copy to", &exe))?;
+        place_exe(source, &exe)?;
     }
     std::fs::create_dir_all(&layout.start_menu).map_err(io("create", &layout.start_menu))?;
     shortcut::create(&layout.shortcut(), &exe, description)?;
@@ -126,6 +126,20 @@ pub fn install(
         notify_associations_changed();
     }
     Ok(())
+}
+
+/// Copies `source` to `exe`. An installed older version may be running:
+/// Windows does not let it be overwritten, but renamed, so it moves to
+/// `blinzel.exe.old` first (replacing an earlier one).
+fn place_exe(source: &Path, exe: &Path) -> Result<(), String> {
+    if exe.exists() {
+        let old = exe.with_extension("exe.old");
+        let _ = std::fs::remove_file(&old);
+        std::fs::rename(exe, &old).map_err(|e| format!("rename {}: {e}", exe.display()))?;
+    }
+    std::fs::copy(source, exe)
+        .map(drop)
+        .map_err(|e| format!("copy to {}: {e}", exe.display()))
 }
 
 fn register(layout: &Layout, exe: &Path, version: &str, description: &str) -> Result<(), String> {
@@ -239,7 +253,98 @@ pub fn autostart(layout: &Layout) -> Option<String> {
     registry::get_str(&layout.run, PRODUCT)
 }
 
+/// Points the sign-in value at `exe` when it names another executable
+/// (moved or reinstalled); `true` if it was rewritten.
+pub fn refresh_autostart(layout: &Layout, exe: &Path) -> Result<bool, String> {
+    if autostart(layout).as_deref() == Some(&autostart_command(exe)) {
+        return Ok(false);
+    }
+    set_autostart(layout, Some(exe)).map(|()| true)
+}
+
 fn notify_associations_changed() {
     use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
     unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-04: the real installation is per user: the program below
+    /// `%LOCALAPPDATA%\Programs`, the shortcut in the user's Start menu, the
+    /// cache in `%LOCALAPPDATA%\amigo-blinzel`, every registry path relative
+    /// to HKCU (`registry` opens nothing else).
+    #[test]
+    fn the_real_installation_is_per_user_below_hkcu() {
+        let local = Path::new(r"C:\Users\a\AppData\Local");
+        let roaming = Path::new(r"C:\Users\a\AppData\Roaming");
+        let l = Layout::in_profile(local, roaming);
+        assert_eq!(
+            l.exe(),
+            Path::new(r"C:\Users\a\AppData\Local\Programs\amigo-blinzel\blinzel.exe")
+        );
+        assert_eq!(
+            l.shortcut(),
+            Path::new(
+                r"C:\Users\a\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\amigo-blinzel.lnk"
+            )
+        );
+        assert_eq!(
+            l.cache,
+            Path::new(r"C:\Users\a\AppData\Local\amigo-blinzel")
+        );
+        assert_eq!(l.classes, r"Software\Classes");
+        assert_eq!(l.app_key, r"Software\amigo-blinzel");
+        assert_eq!(l.registered_apps, r"Software\RegisteredApplications");
+        assert_eq!(
+            l.uninstall,
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\amigo-blinzel"
+        );
+        assert_eq!(
+            l.app_paths,
+            r"Software\Microsoft\Windows\CurrentVersion\App Paths\blinzel.exe"
+        );
+        assert_eq!(l.run, r"Software\Microsoft\Windows\CurrentVersion\Run");
+        assert!(l.notify_shell);
+
+        let real = Layout::user().expect("LOCALAPPDATA and APPDATA");
+        let local = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+        assert_eq!(real.dir, local.join("Programs").join(PRODUCT));
+    }
+
+    /// AC-05: an installed older version that is running cannot be
+    /// overwritten; it is renamed to `blinzel.exe.old` and the new
+    /// executable is copied in its place.
+    #[test]
+    fn a_running_old_version_is_renamed_to_old() {
+        let dir = std::env::temp_dir().join(format!("blinzel-place-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join(EXE_NAME);
+        let windir = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        let ping = windir.join("System32").join("PING.EXE");
+        std::fs::copy(&ping, &exe).unwrap();
+        let mut running = std::process::Command::new(&exe)
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(
+            std::fs::OpenOptions::new().write(true).open(&exe).is_err(),
+            "a running executable cannot be overwritten"
+        );
+        let source = std::env::current_exe().unwrap();
+        let placed = place_exe(&source, &exe);
+        let _ = running.kill();
+        let _ = running.wait();
+        placed.unwrap();
+        assert_eq!(
+            std::fs::read(&exe).unwrap(),
+            std::fs::read(&source).unwrap()
+        );
+        let old = dir.join("blinzel.exe.old");
+        assert_eq!(std::fs::read(&old).unwrap(), std::fs::read(&ping).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -53,7 +53,7 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 
 ## Technical notes
 
-- Files: `crates/blinzel-race/src/main.rs` (commands), `corpus.rs`, `signature.rs` (`COLORS`, `TOLERANCE = 56`, `MIN_MATCHES = 12`, `classify`, `image`), `frames.rs` (`Frames::wait_for`, `since`, `clear`), `race.rs` (`measure`, `navigate`, `transitions`, `last_change`, `median_p95`, `to_json`), Windows `capture.rs` / `sys.rs` / `viewers.rs`, macOS `capture_macos.rs` / `sys_macos.rs` / `viewers_macos.rs`. `race.rs` and the platform modules compile only on Windows and macOS.
+- Files: `crates/blinzel-race/src/main.rs` (commands), `corpus.rs`, `signature.rs` (`COLORS`, `TOLERANCE = 56`, `MIN_MATCHES = 12`, `classify`, `image`), `frames.rs` (`Frames::wait_for`, `since`, `clear`), `race.rs` (`measure`, `navigate`), `plan.rs` (`RunArgs`, `select`, the `Steps` of one viewer and their order in `measure`), `report.rs` (`transitions`, `last_change`, `burst`, `median_p95`, `to_json`, the machine fields), Windows `capture.rs` / `sys.rs` / `viewers.rs`, macOS `capture_macos.rs` / `sys_macos.rs` / `viewers_macos.rs`. `race.rs` and the platform modules compile only on Windows and macOS; `plan.rs` and `report.rs` also in the Linux tests.
 - Sample grid 40 × 24 over each monitor. Windows: one Desktop Duplication thread per output of every adapter; frames with `LastPresentTime == 0` (pointer only) are skipped; a monitor that fails (mode switch, secure desktop) stops reporting while the others go on. macOS: ScreenCaptureKit per display, scaled to 160 × 96 on the GPU.
 - Launch: Windows starts the exe with the path as argument, Windows Photos via `ms-photos:viewer?fileName=…`; macOS `open -a <bundle> <file>`. Quit: `WM_CLOSE` / `NSRunningApplication.terminate`, after 3 s `TerminateProcess` / `SIGKILL`. Focus: Windows a synthetic Alt press plus `SetForegroundWindow`; macOS `open -a` again; foreground check via `GetForegroundWindow` / `CGWindowListCopyWindowInfo` (layer 0). Input: `SendInput` / `CGEvent` Right arrow. The mouse is parked in the middle of the primary monitor before each start.
 - Windows cold start: `NtSetSystemInformation(SystemMemoryListInformation, MemoryPurgeStandbyList)` after enabling `SeProfileSingleProcessPrivilege`; fails with "run as administrator" without elevation.
@@ -79,24 +79,30 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 | — (no test of `corpus::write`) | open | |
+| AC-01 | `writes_signature_jpegs_and_keeps_existing_files` (`crates/blinzel-race/src/corpus.rs`, Linux CI) | built | |
 | AC-02 | `colours_are_unambiguous` (`crates/blinzel-race/src/signature.rs`, Linux CI) | built | |
-| AC-03 | `classifies_images_and_ignores_the_rest` (`crates/blinzel-race/src/signature.rs`, Linux CI) | built | |
+| AC-03 | `classifies_images_and_ignores_the_rest` (`crates/blinzel-race/src/signature.rs`, Linux CI; 12 matching samples classify and 11 do not, as literals: red with `>` and with `MIN_MATCHES` = 13) | built | |
 | AC-04 | `waits_for_a_signature` (`crates/blinzel-race/src/frames.rs`, Linux CI) | built | |
-| AC-05 | `counts_shown_images` (`crates/blinzel-race/src/race.rs`; Windows and macOS CI only) | built | |
-| AC-06 | `median_and_p95` (`crates/blinzel-race/src/race.rs`; Windows and macOS CI only) | built | |
+| AC-05 | `counts_shown_images`, `burst_settles_on_the_expected_image_or_records_dropped_presses` (`crates/blinzel-race/src/report.rs`; Linux, Windows and macOS CI) | built | |
+| AC-06 | `median_and_p95` (`crates/blinzel-race/src/report.rs`; Linux, Windows and macOS CI) | built | |
 | AC-07 | manual | open | |
 | AC-08 | manual | open | |
 | AC-09 | manual | open | |
-| AC-10 | — | open | |
-| AC-11 | — | open | |
+| AC-10 | `a_failed_repetition_is_recorded_and_the_next_one_goes_on`, `a_failed_first_start_skips_the_viewer` (`crates/blinzel-race/src/plan.rs`), `burst_settles_on_the_expected_image_or_records_dropped_presses` (`crates/blinzel-race/src/report.rs`), Linux CI | built | |
+| AC-11 | `check_names_the_first_missing_file` (`crates/blinzel-race/src/corpus.rs`, Linux CI); `run_without_a_corpus_says_how_to_write_one` (`crates/blinzel-race/tests/cli.rs`, Windows and macOS CI) | built | |
 | AC-12 | manual | open | |
-| AC-13 | macOS CI step `cargo run -q -p blinzel-race -- list` only checks the exit status, not the list | open | |
-| AC-14 | — | open | |
-| AC-15 | — (`to_json` untested; the website test uses a hand-written sample) | open | |
-| AC-16 | — | open | |
+| AC-13 | `detects_app_bundles_with_their_versions`, `detects_preview_on_this_mac` (`crates/blinzel-race/src/viewers_macos.rs`, macOS CI); `detects_known_viewers_at_their_default_locations`, `version_is_the_product_version_of_the_resource` (`crates/blinzel-race/src/viewers.rs`, Windows CI); the macOS CI step `cargo run -q -p blinzel-race -- list` checks the exit status; Windows and macOS jobs ok (CI run 41532658575, `51202b8`) | built | |
+| AC-14 | `run_options_have_defaults_and_the_burst_fits_the_corpus`, `overrides_replace_or_add_viewers_and_only_picks_by_name` (`crates/blinzel-race/src/plan.rs`, Linux CI) | built | |
+| AC-15 | `report_holds_the_machine_and_every_measurement`, `published_report_has_the_reported_fields` (`crates/blinzel-race/src/report.rs`, Linux CI) | built | |
+| AC-16 | `unknown_commands_print_the_usage_and_exit_2`, `list_and_run_print_the_usage_on_linux` (`crates/blinzel-race/tests/cli.rs`, Linux CI) | built | |
 | AC-17 | manual | open | |
 
 ## Decisions
 
 - 2026-11-02: Extracted from the code. `--burst N` exists (default 20) although the design spec does not list it; the first trial runs in the design spec used 6 presses.
+- 2026-11-02: The code existed before its tests (the spec was extracted), so the new tests were green at once; each was proven by breaking the code on purpose (no skip of existing files, another quality, default count or file name, base colour, flat pixels, missing-file message, exit status, unknown command accepted) and seeing it go red.
+- 2026-11-02: `run` checks the corpus with `corpus::check`, compiled on Windows, macOS and in tests only, so Linux tests it without the platform code; the end-to-end `run <empty dir>` test runs only where `run` exists (Windows and macOS CI), its first CI run is its proof.
+- 2026-11-02: The platform-independent part of the measurement (burst counting, statistics, JSON report, machine field names) moved from `race.rs` to `report.rs`, compiled on Windows, macOS and in tests, so the Linux job tests it too; `sys::machine` on both platforms takes its keys from `report::MACHINE_WINDOWS` / `MACHINE_MACOS`, so the tested names are the reported ones.
+- 2026-11-02: The order of a viewer's timed steps and the recording of failures moved from `race.rs` to `plan::measure` over a `Steps` trait (the platform's screen in `race.rs`, a script in the tests), and the `run` options to `plan::RunArgs`; `measure` returns a result rather than an error, so a failing viewer cannot stop the run. `cold_starts_follow_the_warm_ones_until_the_first_failure` checks the order AC-07 and AC-08 name, but those stay manual: only a real desktop shows that the steps reach the viewer.
+- 2026-11-02: A `--viewer` override now takes the place of the detected viewer of the same name instead of moving it to the end, so a development build of amigo-blinzel is still measured first.
+- 2026-11-02: Viewer discovery takes its search roots as an argument (`detect_in`), so the Windows and macOS tests place stand-in executables and bundles in a temporary folder; the macOS test also finds the real Preview with a version, which is what `list` prints on every Mac. These tests compile only for Windows and macOS (type-checked and clippy-clean from Linux, not run): their first CI run is their proof, so AC-13 stays open until then.

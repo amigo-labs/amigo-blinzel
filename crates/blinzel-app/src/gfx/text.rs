@@ -26,7 +26,8 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_READING_DIRECTION_RIGHT_TO_LEFT, DWRITE_TEXT_METRICS, IDWriteFactory, IDWriteTextFormat,
+    DWRITE_READING_DIRECTION, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT, DWRITE_TEXT_METRICS,
+    IDWriteFactory, IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
@@ -98,10 +99,16 @@ fn text_format(
             w!(""),
         )?
     };
-    if blinzel_i18n::is_rtl() {
-        unsafe { format.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)? };
+    if let Some(direction) = reading_direction(blinzel_i18n::is_rtl()) {
+        unsafe { format.SetReadingDirection(direction)? };
     }
     Ok(format)
+}
+
+/// The reading direction a text format needs set: right to left for a
+/// right-to-left language, none (DirectWrite's left to right) otherwise.
+fn reading_direction(rtl: bool) -> Option<DWRITE_READING_DIRECTION> {
+    rtl.then_some(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)
 }
 
 /// Loads the text DLLs and warms the font cache off the UI thread.
@@ -273,5 +280,21 @@ impl Text {
             srv: srv.unwrap(),
             size,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `docs/specs/localization.md` AC-16: text is laid out right to left
+    /// while the language is.
+    #[test]
+    fn right_to_left_text_reads_right_to_left() {
+        assert_eq!(
+            reading_direction(true),
+            Some(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)
+        );
+        assert_eq!(reading_direction(false), None);
     }
 }

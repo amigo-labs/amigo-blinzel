@@ -14,11 +14,12 @@
 //! loaded only when needed, never on the startup path. Only an installed
 //! copy updates itself; a portable or development build never does.
 
-use std::ffi::c_void;
+use std::ffi::{OsString, c_void};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use blinzel_core::update::{self as core, Release, StartAction, State, Version};
+use blinzel_core::update::{self as core, Found, StartAction, State, Version};
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
@@ -74,39 +75,60 @@ fn old_exe(layout: &Layout) -> PathBuf {
     layout.exe().with_extension("exe.old")
 }
 
+fn bad_exe(layout: &Layout) -> PathBuf {
+    layout.exe().with_extension("exe.bad")
+}
+
 /// Called early at every start. Returns `true` when this process should
 /// exit because it rolled back and started the previous version instead.
 pub fn on_start() -> bool {
     let Some(layout) = installed_layout() else {
         return false;
     };
-    let mut state = load_state(&layout);
+    start(
+        &layout,
+        running_version(),
+        std::env::args_os().skip(1),
+        |mut c| {
+            let _ = c.spawn();
+        },
+    )
+}
+
+/// The start of `running` from `layout`: counts a start of an update on
+/// trial, rolls a failed update back (updates AC-20) and drops the
+/// previous executable once no update is on trial (updates AC-21). After a
+/// rollback the restored executable goes to `spawn` with `args`, and
+/// `true` says this process should exit.
+fn start(
+    layout: &Layout,
+    running: Version,
+    args: impl IntoIterator<Item = OsString>,
+    spawn: impl FnOnce(Command),
+) -> bool {
+    let mut state = load_state(layout);
     let before = state.clone();
-    let action = core::on_start(&mut state, running_version());
-    if action == StartAction::Rollback {
-        let (exe, old) = (layout.exe(), old_exe(&layout));
-        let bad = exe.with_extension("exe.bad");
+    let (exe, old, bad) = (layout.exe(), old_exe(layout), bad_exe(layout));
+    if core::on_start(&mut state, running) == StartAction::Rollback {
+        state.pending = None;
+        state.failed_starts = 0;
         let _ = std::fs::remove_file(&bad);
         if std::fs::rename(&exe, &bad).is_ok() && std::fs::rename(&old, &exe).is_ok() {
-            state.pending = None;
-            state.failed_starts = 0;
-            save_state(&layout, &state);
-            let _ = std::process::Command::new(&exe)
-                .args(std::env::args_os().skip(1))
-                .spawn();
+            save_state(layout, &state);
+            let mut restart = Command::new(&exe);
+            restart.args(args);
+            spawn(restart);
             return true;
         }
         // Nothing to roll back to: keep going with this version.
-        state.pending = None;
-        state.failed_starts = 0;
     }
     if state.pending.is_none() {
         // The previous executable is no longer needed.
-        let _ = std::fs::remove_file(old_exe(&layout));
-        let _ = std::fs::remove_file(layout.exe().with_extension("exe.bad"));
+        let _ = std::fs::remove_file(&old);
+        let _ = std::fs::remove_file(&bad);
     }
     if state != before {
-        save_state(&layout, &state);
+        save_state(layout, &state);
     }
     false
 }
@@ -116,62 +138,76 @@ pub fn on_first_frame() {
     let _ = std::thread::Builder::new()
         .name("blinzel-update-ok".into())
         .spawn(|| {
-            let Some(layout) = installed_layout() else {
-                return;
-            };
-            let mut state = load_state(&layout);
-            if state.pending.is_some() {
-                core::on_first_frame(&mut state);
-                save_state(&layout, &state);
-                if let Ok(k) = registry::Key::create(&layout.uninstall) {
-                    let _ = k.set_str("DisplayVersion", setup::version());
-                }
+            if let Some(layout) = installed_layout() {
+                first_frame(&layout);
             }
         });
+}
+
+/// The first frame of the version installed in `layout`: an update on
+/// trial works, and "Installed apps" shows its version (updates AC-19).
+fn first_frame(layout: &Layout) {
+    let mut state = load_state(layout);
+    if state.pending.is_some() {
+        core::on_first_frame(&mut state);
+        save_state(layout, &state);
+        if let Ok(k) = registry::Key::create(&layout.uninstall) {
+            let _ = k.set_str("DisplayVersion", setup::version());
+        }
+    }
 }
 
 /// Starts the daily background check. A resident instance runs for days,
 /// so it looks again every hour and reads the setting each time.
 pub fn schedule() {
-    if core::RELEASE_KEY.is_none() || installed_layout().is_none() {
+    if core::RELEASE_KEY.is_none() {
         return;
     }
-    let _ = std::thread::Builder::new()
-        .name("blinzel-update".into())
-        .spawn(|| {
-            std::thread::sleep(Duration::from_secs(10));
-            loop {
-                if blinzel_ui::settings_store::load().auto_update {
-                    check_if_due();
-                }
-                std::thread::sleep(Duration::from_secs(3600));
-            }
-        });
-}
-
-fn check_if_due() {
     let Some(layout) = installed_layout() else {
         return;
     };
-    let mut state = load_state(&layout);
-    if !core::check_due(state.last_check, now()) {
-        return;
+    let _ = std::thread::Builder::new()
+        .name("blinzel-update".into())
+        .spawn(move || auto_checks(&mut Auto(layout)));
+}
+
+/// A Windows instance may keep running for days (resident mode): it looks
+/// every hour whether a check is due.
+fn auto_checks(shell: &mut impl core::AutoCheck) {
+    core::auto_checks(shell, true);
+}
+
+/// The automatic check of the installed copy.
+struct Auto(Layout);
+
+impl core::AutoCheck for Auto {
+    fn sleep(&mut self, d: Duration) -> bool {
+        std::thread::sleep(d);
+        true
     }
-    state.last_check = Some(now());
-    save_state(&layout, &state);
-    if let Err(e) = check_and_install(&layout) {
-        debug_log(&format!("update: {e}"));
+    fn auto_update(&mut self) -> bool {
+        blinzel_ui::settings_store::load().auto_update
+    }
+    fn now(&mut self) -> u64 {
+        now()
+    }
+    fn load(&mut self) -> State {
+        load_state(&self.0)
+    }
+    fn save(&mut self, state: &State) {
+        save_state(&self.0, state);
+    }
+    fn check(&mut self) {
+        if let Err(e) = check_and_install(&self.0) {
+            debug_log(&format!("update: {e}"));
+        }
     }
 }
 
 /// An update was installed while this process kept running the previous
 /// version (resident mode): it should hand over to the new executable.
 pub fn restart_pending() -> bool {
-    installed_layout().is_some_and(|l| {
-        load_state(&l)
-            .pending
-            .is_some_and(|p| p != running_version())
-    })
+    installed_layout().is_some_and(|l| load_state(&l).restart_pending(running_version()))
 }
 
 /// Starts the installed (updated) executable as the new resident instance.
@@ -222,35 +258,18 @@ pub fn check_now(hwnd: HWND, notice_msg: u32) {
 }
 
 fn check_and_install(layout: &Layout) -> Result<Outcome, String> {
-    let key = core::RELEASE_KEY.ok_or("no release signing key in this build")?;
-    let api = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        core::REPO
-    );
-    let json = http_get(&api, 1 << 20)?;
-    let json = String::from_utf8(json).map_err(|_| "release info is not UTF-8")?;
-    let Release {
-        version,
-        exe_url,
-        sums_url,
-        sig_url,
-    } = core::parse_release(&json, &core::asset_name(arch())).ok_or("no usable release")?;
-    let running = running_version();
-    if version <= running {
-        return Ok(Outcome::Current(running));
-    }
-
-    let sums = http_get(&sums_url, 64 << 10)?;
-    let sig = http_get(&sig_url, 4 << 10)?;
-    if !core::verify_signature(&sums, &sig, &key) {
-        return Err("checksums are not signed with the release key".into());
-    }
-    let sums = String::from_utf8(sums).map_err(|_| "checksums are not UTF-8")?;
-    let want = core::sum_for(&sums, &core::asset_name(arch())).ok_or("no checksum for us")?;
-    let exe = http_get(&exe_url, MAX_DOWNLOAD)?;
-    if sha256(&exe)? != want {
-        return Err("download does not match its checksum".into());
-    }
+    let found = core::check(
+        &core::asset_name(arch()),
+        running_version(),
+        core::RELEASE_KEY,
+        MAX_DOWNLOAD,
+        http_get,
+        sha256,
+    )?;
+    let (version, exe) = match found {
+        Found::Current(v) => return Ok(Outcome::Current(v)),
+        Found::New { version, download } => (version, download),
+    };
 
     let dir = layout.cache.join("updates").join(version.to_string());
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -479,6 +498,49 @@ impl Drop for Handle<'_> {
 mod tests {
     use super::*;
 
+    /// A shell for [`auto_checks`] that counts its looks and never waits.
+    #[derive(Default)]
+    struct Looks {
+        sleeps: Vec<u64>,
+        looks: u32,
+    }
+
+    impl core::AutoCheck for Looks {
+        fn sleep(&mut self, d: Duration) -> bool {
+            self.sleeps.push(d.as_secs());
+            self.sleeps.len() < 4
+        }
+        fn auto_update(&mut self) -> bool {
+            self.looks += 1;
+            false
+        }
+        fn now(&mut self) -> u64 {
+            0
+        }
+        fn load(&mut self) -> State {
+            State::default()
+        }
+        fn save(&mut self, _: &State) {}
+        fn check(&mut self) {}
+    }
+
+    /// updates AC-12: a Windows instance looks 10 s after start and then
+    /// every hour, reading the setting each time.
+    #[test]
+    fn a_running_instance_looks_every_hour() {
+        let mut l = Looks::default();
+        auto_checks(&mut l);
+        assert_eq!(l.sleeps, [10, 3600, 3600, 3600]);
+        assert_eq!(l.looks, 3);
+    }
+
+    /// updates AC-14: the test executable is not the installed
+    /// `blinzel.exe`, so it never checks.
+    #[test]
+    fn a_copy_outside_the_installation_does_not_update() {
+        assert!(installed_layout().is_none());
+    }
+
     #[test]
     fn hashes_with_cng() {
         // SHA-256("abc"), FIPS 180-2.
@@ -524,5 +586,124 @@ mod tests {
         assert!(swap(&installed, &dir.join("missing.exe"), &old).is_err());
         assert_eq!(std::fs::read(&installed).unwrap(), b"v2");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An installation in a fresh temporary folder and a private HKCU
+    /// branch, both removed by [`Sandbox::drop`].
+    struct Sandbox {
+        root: PathBuf,
+        reg: String,
+        layout: Layout,
+    }
+
+    impl Sandbox {
+        fn new(name: &str) -> Sandbox {
+            let id = std::process::id();
+            let root = std::env::temp_dir().join(format!("blinzel-{name}-{id}"));
+            let _ = std::fs::remove_dir_all(&root);
+            let reg = format!(r"Software\amigo-blinzel-test-{name}-{id}");
+            let layout = Layout::under(&root, &reg);
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            Sandbox { root, reg, layout }
+        }
+
+        fn set_state(&self, state: &State) {
+            save_state(&self.layout, state);
+        }
+
+        fn state(&self) -> State {
+            load_state(&self.layout)
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+            let _ = registry::delete_tree(&self.reg);
+        }
+    }
+
+    fn read(p: &Path) -> Vec<u8> {
+        std::fs::read(p).unwrap()
+    }
+
+    fn no_restart(_: Command) {
+        panic!("restarted although nothing was rolled back");
+    }
+
+    /// updates AC-20: three starts of an update on trial are counted; the
+    /// fourth puts `blinzel.exe.old` back, keeps the failed executable as
+    /// `blinzel.exe.bad` and starts the previous one with the same
+    /// arguments.
+    #[test]
+    fn a_failing_update_is_rolled_back_on_the_fourth_start() {
+        let sb = Sandbox::new("rollback");
+        let (exe, old, bad) = (sb.layout.exe(), old_exe(&sb.layout), bad_exe(&sb.layout));
+        let new = Version::parse("9.9.9").unwrap();
+        std::fs::write(&exe, b"v2").unwrap();
+        std::fs::write(&old, b"v1").unwrap();
+        sb.set_state(&State {
+            pending: Some(new),
+            ..State::default()
+        });
+        for n in 1..=3 {
+            assert!(!start(&sb.layout, new, [], no_restart));
+            assert_eq!(sb.state().failed_starts, n);
+            assert_eq!((read(&exe), read(&old)), (b"v2".into(), b"v1".into()));
+        }
+        let args = ["photo.jpg", "--resident"].map(OsString::from);
+        let mut restarted = None;
+        assert!(start(&sb.layout, new, args.clone(), |c| restarted = Some(c)));
+        let c = restarted.expect("the previous version is started");
+        assert_eq!(c.get_program(), exe);
+        assert_eq!(c.get_args().collect::<Vec<_>>(), args);
+        assert_eq!((read(&exe), read(&bad)), (b"v1".into(), b"v2".into()));
+        assert!(!old.exists());
+        assert_eq!(sb.state(), State::default());
+    }
+
+    /// updates AC-21: while an update is on trial `blinzel.exe.old` stays;
+    /// a start with no update on trial deletes it and `blinzel.exe.bad`.
+    #[test]
+    fn a_start_without_a_trial_deletes_the_previous_copies() {
+        let sb = Sandbox::new("forget");
+        let (exe, old, bad) = (sb.layout.exe(), old_exe(&sb.layout), bad_exe(&sb.layout));
+        let new = Version::parse("9.9.9").unwrap();
+        for (p, v) in [(&exe, b"v2"), (&old, b"v1"), (&bad, b"v0")] {
+            std::fs::write(p, v).unwrap();
+        }
+        sb.set_state(&State {
+            pending: Some(new),
+            ..State::default()
+        });
+        assert!(!start(&sb.layout, new, [], no_restart));
+        assert!(old.exists() && bad.exists(), "kept during the trial");
+        sb.set_state(&State::default());
+        assert!(!start(&sb.layout, new, [], no_restart));
+        assert!(!old.exists() && !bad.exists());
+        assert_eq!(read(&exe), b"v2");
+    }
+
+    /// updates AC-19: "Installed apps" keeps the previous version until the
+    /// update on trial shows its first frame, then shows the new one.
+    #[test]
+    fn installed_apps_shows_the_new_version_after_its_first_frame() {
+        let sb = Sandbox::new("display-version");
+        registry::Key::create(&sb.layout.uninstall)
+            .unwrap()
+            .set_str("DisplayVersion", "0.0.1")
+            .unwrap();
+        let shown = || registry::get_str(&sb.layout.uninstall, "DisplayVersion");
+        first_frame(&sb.layout);
+        assert_eq!(shown().as_deref(), Some("0.0.1"), "no update on trial");
+        sb.set_state(&State {
+            pending: Some(running_version()),
+            failed_starts: 1,
+            ..State::default()
+        });
+        assert_eq!(shown().as_deref(), Some("0.0.1"), "before the first frame");
+        first_frame(&sb.layout);
+        assert_eq!(shown().as_deref(), Some(setup::version()));
+        assert_eq!(sb.state(), State::default());
     }
 }

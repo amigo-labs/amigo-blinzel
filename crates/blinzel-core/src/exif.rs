@@ -310,6 +310,54 @@ pub(crate) mod tests {
         d
     }
 
+    /// Writes a little-endian TIFF whose IFD0 holds an image width (3)
+    /// ahead of `orientation`, and whose IFD1 holds `ifd1_orientation`
+    /// (if any) and points at `thumb`, which follows it.
+    pub(crate) fn tiff_le_with_ifd1(
+        orientation: u16,
+        ifd1_orientation: Option<u16>,
+        thumb: &[u8],
+    ) -> Vec<u8> {
+        let ifd = |d: &mut Vec<u8>, entries: &[(u16, u16, u32)], next: u32| {
+            d.extend((entries.len() as u16).to_le_bytes());
+            for &(tag, typ, v) in entries {
+                d.extend(tag.to_le_bytes());
+                d.extend(typ.to_le_bytes());
+                d.extend(1u32.to_le_bytes());
+                d.extend(v.to_le_bytes());
+            }
+            d.extend(next.to_le_bytes());
+        };
+        let ifd0 = [(0x0100, 4, 3), (0x0112, 3, orientation as u32)];
+        let mut ifd1 = Vec::new();
+        ifd1.extend(ifd1_orientation.map(|o| (0x0112, 3, o as u32)));
+        let ifd1_at = 8 + 2 + 12 * ifd0.len() + 4;
+        let thumb_at = ifd1_at + 2 + 12 * (ifd1.len() + 2) + 4;
+        ifd1.extend([
+            (0x0201, 4, thumb_at as u32),
+            (0x0202, 4, thumb.len() as u32),
+        ]);
+        let mut d = b"II*\0".to_vec();
+        d.extend(8u32.to_le_bytes());
+        ifd(&mut d, &ifd0, ifd1_at as u32);
+        ifd(&mut d, &ifd1, 0);
+        assert_eq!(d.len(), thumb_at);
+        d.extend_from_slice(thumb);
+        d
+    }
+
+    /// The orientation is IFD0's: not the thumbnail's in IFD1, nor the
+    /// first entry's value (AC-17).
+    #[test]
+    fn orientation_is_ifd0s_even_with_a_thumbnail_ifd() {
+        let thumb = [0xAB; 10];
+        for ifd1 in [Some(3), None] {
+            let t = tiff_le_with_ifd1(6, ifd1, &thumb);
+            assert_eq!(orientation(&t), Some(Orientation::from_exif(6)), "{ifd1:?}");
+            assert_eq!(exif_thumbnail(&t), Some(t.len() - 10..t.len()));
+        }
+    }
+
     #[test]
     fn reads_orientation_le_and_be() {
         assert_eq!(
@@ -327,6 +375,8 @@ pub(crate) mod tests {
         be.extend_from_slice(&0u32.to_be_bytes());
         assert_eq!(orientation(&be), Some(Orientation::from_exif(8)));
         assert_eq!(orientation(&tiff_le(9, None)), None);
+        // 1 is an orientation too, not a missing one.
+        assert_eq!(orientation(&tiff_le(1, None)), Some(Orientation::NORMAL));
     }
 
     #[test]
@@ -336,6 +386,9 @@ pub(crate) mod tests {
         assert_eq!(exif_thumbnail(&t), Some(60..70));
         let short = tiff_le(1, Some((60, 100)));
         assert_eq!(exif_thumbnail(&short), None);
+        // A thumbnail of no bytes is none, even at an offset inside the
+        // TIFF.
+        assert_eq!(exif_thumbnail(&tiff_le(1, Some((50, 0)))), None);
     }
 
     #[test]
@@ -354,31 +407,40 @@ pub(crate) mod tests {
 
     #[test]
     fn reads_mpf_index() {
-        // MP index IFD with tag B002 (UNDEFINED, 32 bytes) at offset 50.
+        // MP index IFD with tag B002 (UNDEFINED, 48 bytes) at offset 50.
         let mut d = b"II*\0".to_vec();
         d.extend_from_slice(&8u32.to_le_bytes());
         d.extend_from_slice(&1u16.to_le_bytes());
         d.extend_from_slice(&0xB002u16.to_le_bytes());
         d.extend_from_slice(&7u16.to_le_bytes());
-        d.extend_from_slice(&32u32.to_le_bytes());
+        d.extend_from_slice(&48u32.to_le_bytes());
         d.extend_from_slice(&50u32.to_le_bytes());
         d.extend_from_slice(&0u32.to_le_bytes());
         d.resize(50, 0);
-        // Primary image (offset 0), then a full-HD preview at 1000.
-        for (attr, size, off) in [(0x2003_0000u32, 5000u32, 0u32), (0x0001_0002, 400, 1000)] {
+        // Primary image (offset 0, inside the file but never a preview), a
+        // full-HD preview at 1000 (its flags in the top byte), an empty
+        // entry at 1500.
+        for (attr, size, off) in [
+            (0x2003_0000u32, 900u32, 0u32),
+            (0x8001_0002, 400, 1000),
+            (0x0001_0001, 0, 1500),
+        ] {
             d.extend_from_slice(&attr.to_le_bytes());
             d.extend_from_slice(&size.to_le_bytes());
             d.extend_from_slice(&off.to_le_bytes());
             d.extend_from_slice(&[0; 4]);
         }
-        let imgs = mpf_images(&d, 2000);
-        assert_eq!(
-            imgs,
-            vec![MpImage {
-                kind: 0x010002,
-                range: 1000..1400
-            }]
-        );
-        assert!(mpf_images(&d, 1200).is_empty());
+        let preview = vec![MpImage {
+            kind: 0x010002,
+            range: 1000..1400,
+        }];
+        assert_eq!(mpf_images(&d, 2000), preview);
+        // An image that ends where the file does is inside it.
+        assert_eq!(mpf_images(&d, 1400), preview);
+        assert!(mpf_images(&d, 1399).is_empty());
+        // The index is UNDEFINED; a LONG tag B002 is none.
+        d[12..14].copy_from_slice(&4u16.to_le_bytes());
+        d[14..18].copy_from_slice(&12u32.to_le_bytes());
+        assert!(mpf_images(&d, 2000).is_empty());
     }
 }

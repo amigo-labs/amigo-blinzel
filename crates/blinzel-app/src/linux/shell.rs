@@ -36,6 +36,7 @@ use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::{CursorIcon, Fullscreen, ResizeDirection, Window, WindowId};
 
+use super::clipboard;
 use super::gpu::{Gpu, Target, WgpuCanvas, WgpuDevice, instance};
 use super::install::APP_ID;
 
@@ -80,11 +81,19 @@ pub(super) fn log(msg: &str) {
     }
 }
 
-/// The desktop's language preference (`LANGUAGE`, `LC_ALL`, `LANG`).
+/// The desktop's language preference (`LANGUAGE`, `LC_ALL`,
+/// `LC_MESSAGES`, `LANG`).
 pub fn system_language() -> Lang {
+    language_from_env(|v| std::env::var(v).ok())
+}
+
+/// The language the variables `var` reads prefer, in the order
+/// `LANGUAGE` (colon-separated), `LC_ALL`, `LC_MESSAGES`, `LANG`; `C`,
+/// `POSIX` and `.encoding` / `@modifier` suffixes are ignored.
+fn language_from_env(var: impl Fn(&str) -> Option<String>) -> Lang {
     let vars: Vec<String> = ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
-        .filter_map(|v| std::env::var(v).ok())
+        .filter_map(|v| var(v))
         .flat_map(|v| {
             v.split(':')
                 .map(|tag| tag.split(['.', '@']).next().unwrap_or("").replace('_', "-"))
@@ -93,6 +102,19 @@ pub fn system_language() -> Lang {
         .filter(|t| !t.is_empty() && t != "C" && t != "POSIX")
         .collect();
     blinzel_i18n::negotiate(vars.iter().map(String::as_str))
+}
+
+/// Probes a file. Linux has no system decoder: the native probe is the
+/// whole answer (`docs/specs/image-formats.md` AC-24).
+fn probe(data: &[u8]) -> Result<Probe, DecodeError> {
+    decode::probe(data)
+}
+
+/// Decodes a file with the native decoders only; what they do not handle
+/// (a raw's sensor data, ICO, PSD, …) stays an error, and a raw shows its
+/// embedded previews instead.
+fn decode_with(data: &[u8], req: Request, threads: usize) -> Result<Image, DecodeError> {
+    decode::decode_with(data, req, threads)
 }
 
 impl Services for LinuxServices {
@@ -113,11 +135,11 @@ impl Services for LinuxServices {
     }
 
     fn probe(&self, data: &[u8]) -> Result<Probe, DecodeError> {
-        decode::probe(data)
+        probe(data)
     }
 
     fn decode(&self, data: &[u8], req: Request, threads: usize) -> Result<Image, DecodeError> {
-        decode::decode_with(data, req, threads)
+        decode_with(data, req, threads)
     }
 
     fn log(&self, msg: &str) {
@@ -196,18 +218,13 @@ impl Host for LinuxHost {
     }
 
     fn watch_dir(&self, dir: &Path) -> Option<Box<dyn std::any::Any>> {
-        use notify::Watcher;
         let proxy = Mutex::new(self.proxy.clone());
-        let mut w = notify::recommended_watcher(move |r: notify::Result<notify::Event>| {
-            if r.is_ok_and(|e| !e.kind.is_access()) {
-                let _ = proxy
-                    .lock()
-                    .unwrap()
-                    .send_event(UserEvent::Wake(Wake::DirChanged));
-            }
-        })
-        .ok()?;
-        w.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+        let w = crate::watch::folder(dir, move || {
+            let _ = proxy
+                .lock()
+                .unwrap()
+                .send_event(UserEvent::Wake(Wake::DirChanged));
+        })?;
         Some(Box::new(w))
     }
 }
@@ -245,6 +262,30 @@ const NOTICE: Duration = Duration::from_millis(3500);
 /// Folder changes are collected this long before relisting.
 const DIR_SETTLE: Duration = Duration::from_millis(150);
 
+/// When the shown folder is listed again: [`DIR_SETTLE`] after its last
+/// change (`docs/specs/browsing.md` AC-14).
+#[derive(Default)]
+struct DirSettle {
+    due: Option<Instant>,
+}
+
+impl DirSettle {
+    /// The folder changed at `now`.
+    fn changed(&mut self, now: Instant) {
+        self.due = Some(now + DIR_SETTLE);
+    }
+
+    /// Whether the folder is to be listed again at `now` (once per
+    /// settled change).
+    fn take_due(&mut self, now: Instant) -> bool {
+        let due = self.due.is_some_and(|t| t <= now);
+        if due {
+            self.due = None;
+        }
+        due
+    }
+}
+
 struct Shell {
     args: Args,
     proxy: EventLoopProxy<UserEvent>,
@@ -262,10 +303,38 @@ struct Shell {
     chrome_pressed: Option<Button>,
     clipboard: Option<arboard::Clipboard>,
     notice_until: Option<Instant>,
-    dir_due: Option<Instant>,
+    dir_due: DirSettle,
     /// Fractional wheel steps of touchpads (in 1/120).
     wheel_rest: f64,
+    /// The files of a drop still being reported.
+    dropped: Dropped,
     exiting: bool,
+}
+
+/// The files of one drop. winit reports a drop of several files as one
+/// `DroppedFile` event per file, in a row; they are collected until another
+/// event or the end of the event batch, so that the App gets the whole
+/// drop at once (and opens its first file when no dialog is open).
+#[derive(Default)]
+struct Dropped(Vec<PathBuf>);
+
+impl Dropped {
+    /// Keeps `event` when it reports a dropped file. Otherwise returns the
+    /// drop collected so far, which comes before `event`.
+    fn feed(&mut self, event: WindowEvent) -> (Option<Vec<PathBuf>>, Option<WindowEvent>) {
+        match event {
+            WindowEvent::DroppedFile(path) => {
+                self.0.push(path);
+                (None, None)
+            }
+            event => (self.take(), Some(event)),
+        }
+    }
+
+    /// The drop collected so far, if any.
+    fn take(&mut self) -> Option<Vec<PathBuf>> {
+        (!self.0.is_empty()).then(|| std::mem::take(&mut self.0))
+    }
 }
 
 impl Shell {
@@ -329,14 +398,7 @@ impl Shell {
             client,
         );
         app.cloaked = self.args.file.is_some();
-        if self.args.exit_after_first_frame {
-            app.exit_after_first_frame = Some(
-                self.args
-                    .json
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("startup.json")),
-            );
-        }
+        app.exit_after_first_frame = report_path(&self.args);
         let actions = match self.args.file.clone() {
             Some(f) => app.open(f),
             None => Vec::new(),
@@ -362,6 +424,14 @@ impl Shell {
         let (Some(app), Some(window)) = (self.app.as_mut(), self.window.clone()) else {
             return vec![];
         };
+        if ends_process(&a) {
+            self.exiting = true;
+            el.exit();
+            return vec![];
+        }
+        if takes_screenshots(&a) {
+            return vec![];
+        }
         match a {
             Action::ShowMenu { x, y } => {
                 app.open_menu((x as f64, y as f64));
@@ -426,13 +496,7 @@ impl Shell {
                     None => vec![],
                 }
             }
-            Action::Recycle(path) => match trash::delete(&path) {
-                Ok(()) => app.removed(&path),
-                Err(e) => {
-                    log(&format!("trash: {e}"));
-                    vec![]
-                }
-            },
+            Action::Recycle(path) => recycle(&path, |p| app.removed(p)),
             Action::SaveCutout(job) => {
                 self.save(job);
                 vec![]
@@ -480,11 +544,8 @@ impl Shell {
                 window.set_visible(true);
                 vec![]
             }
-            Action::Close | Action::Exit | Action::Quit => {
-                self.exiting = true;
-                el.exit();
-                vec![]
-            }
+            // Ended above.
+            Action::Close | Action::Exit | Action::Quit => vec![],
             Action::OpenWith(file) => {
                 open_with(&file);
                 vec![]
@@ -504,7 +565,7 @@ impl Shell {
                     None => vec![],
                 }
             }
-            // Screenshots are not on Linux yet (the menu does not offer them).
+            // Ignored above.
             Action::Capture { .. }
             | Action::SetScreenshotHotkey(_)
             | Action::PickScreenshotFolder => vec![],
@@ -529,67 +590,35 @@ impl Shell {
             return;
         };
         let services = self.services.clone();
-        let _ = std::thread::Builder::new()
-            .name("blinzel-save".into())
-            .spawn(move || {
-                let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
-                services.send(UserEvent::Notice(text));
+        let _ =
+            blinzel_ui::app::save_in_background(self.services.clone(), job, target, move |text| {
+                services.send(UserEvent::Notice(text))
             });
     }
 
     /// Work that waits for the end of an event: a copy's pixels.
+    /// Every file of one drop, to the App.
+    fn files_dropped(&mut self, el: &ActiveEventLoop, paths: Vec<PathBuf>) {
+        let actions = self.app.as_mut().unwrap().files_dropped(paths);
+        self.run(el, actions);
+    }
+
     fn after_event(&mut self) {
         let copy = std::mem::take(&mut self.host.borrow_mut().copy);
         if copy && let Some(src) = self.app.as_ref().and_then(|a| a.clip.clone()) {
             let services = self.services.clone();
-            let _ = std::thread::Builder::new()
-                .name("blinzel-copy".into())
-                .spawn(move || {
-                    let r = (|| -> Result<_, String> {
-                        let data = services.read_file(&src.path).map_err(|e| e.to_string())?;
-                        let img = services
-                            .decode(&data, Request::Region(src.stored_rect), 1)
-                            .map_err(|e| e.to_string())?;
-                        let bgra = img.to_bgra();
-                        let (px, w, h) = blinzel_core::selection::orient_bgra(
-                            &bgra,
-                            img.width,
-                            img.height,
-                            src.orientation,
-                        );
-                        let rgba = px
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .flat_map(|p| [p[2], p[1], p[0], p[3]])
-                            .collect();
-                        Ok((rgba, w, h))
-                    })();
-                    services.send(UserEvent::Clipboard(r));
-                });
+            let _ = blinzel_ui::app::copy_in_background(self.services.clone(), src, move |r| {
+                let r = r.map(|(px, w, h)| (clipboard::rgba(&px), w, h));
+                services.send(UserEvent::Clipboard(r));
+            });
         }
     }
 
     /// The resize direction for a client point near the window's edges.
     fn edge(&self, p: (f64, f64)) -> Option<ResizeDirection> {
         let (app, window) = (self.app.as_ref()?, self.window.as_ref()?);
-        if app.fullscreen || window.is_maximized() {
-            return None;
-        }
-        let e = EDGE * self.scale();
-        let (w, h) = (app.client.0 as f64, app.client.1 as f64);
-        let (l, r, t, b) = (p.0 < e, p.0 >= w - e, p.1 < e, p.1 >= h - e);
-        Some(match (l, r, t, b) {
-            (true, _, true, _) => ResizeDirection::NorthWest,
-            (_, true, true, _) => ResizeDirection::NorthEast,
-            (true, _, _, true) => ResizeDirection::SouthWest,
-            (_, true, _, true) => ResizeDirection::SouthEast,
-            (true, ..) => ResizeDirection::West,
-            (_, true, ..) => ResizeDirection::East,
-            (_, _, true, _) => ResizeDirection::North,
-            (_, _, _, true) => ResizeDirection::South,
-            _ => return None,
-        })
+        let plain = !app.fullscreen && !window.is_maximized();
+        resize_edge(p, app.client, EDGE * self.scale(), plain)
     }
 
     fn update_cursor(&self) {
@@ -598,10 +627,7 @@ impl Shell {
         };
         let p = self.cursor;
         let icon = match self.edge(p) {
-            Some(ResizeDirection::North | ResizeDirection::South) => CursorIcon::NsResize,
-            Some(ResizeDirection::East | ResizeDirection::West) => CursorIcon::EwResize,
-            Some(ResizeDirection::NorthWest | ResizeDirection::SouthEast) => CursorIcon::NwseResize,
-            Some(_) => CursorIcon::NeswResize,
+            Some(dir) => resize_cursor(dir),
             None if app.popup.is_some() => CursorIcon::Default,
             None => match app.cursor_at(p, self.modifiers.shift_key()) {
                 CursorKind::Arrow => CursorIcon::Default,
@@ -626,47 +652,40 @@ impl Shell {
                 && (q.1 - p.1).abs() < 4.0
         });
         self.last_click = (!double).then(|| (Instant::now(), p));
+        let edge = self.edge(p);
         let (Some(app), Some(window)) = (self.app.as_mut(), self.window.clone()) else {
             return;
         };
-        if app.popup.is_none() {
-            if let Some(dir) = self.edge(p) {
-                let _ = window.drag_resize_window(dir);
-                return;
-            }
-            let app = self.app.as_mut().unwrap();
+        let what = if app.popup.is_some() {
+            Press::App
+        } else {
             let chrome = app.chrome();
             let button = (!app.fullscreen).then(|| chrome.hit(p)).flatten();
-            if let Some(b @ (Button::Minimize | Button::Maximize | Button::Close)) = button {
+            let caption = !app.fullscreen && p.1 < chrome.caption_height() && !app.is_dragging();
+            press(edge, button, double, caption)
+        };
+        match what {
+            Press::Resize(dir) => {
+                let _ = window.drag_resize_window(dir);
+            }
+            Press::Button(b) => {
                 app.pressed = Some(b);
                 self.chrome_pressed = Some(b);
                 app.invalidate();
-                return;
             }
-            if double {
-                let actions = match app.double_click(p) {
-                    Some(a) => a,
-                    None if !app.fullscreen && p.1 < chrome.caption_height() => {
-                        vec![Action::ToggleMaximize]
-                    }
-                    None => vec![Action::ToggleFullscreen],
-                };
+            Press::DoubleClick => {
+                let actions = double_clicked(app.double_click(p));
                 self.run(el, actions);
-                return;
             }
-            if !app.fullscreen
-                && button.is_none()
-                && p.1 < chrome.caption_height()
-                && !app.is_dragging()
-            {
+            Press::MoveWindow => {
                 let _ = window.drag_window();
-                return;
+            }
+            Press::App => {
+                let ctrl = self.modifiers.control_key();
+                let actions = app.mouse_down(p, shift, ctrl, false);
+                self.run(el, actions);
             }
         }
-        let app = self.app.as_mut().unwrap();
-        let ctrl = self.modifiers.control_key();
-        let actions = app.mouse_down(p, shift, ctrl, false);
-        self.run(el, actions);
     }
 
     fn left_up(&mut self, el: &ActiveEventLoop) {
@@ -727,8 +746,7 @@ impl Shell {
                 app.notice = None;
                 app.invalidate();
             }
-            if self.dir_due.is_some_and(|t| t <= now) {
-                self.dir_due = None;
+            if self.dir_due.take_due(now) {
                 app.on_dir_changed();
             }
         }
@@ -739,7 +757,7 @@ impl Shell {
             .values()
             .copied()
             .chain(self.notice_until)
-            .chain(self.dir_due)
+            .chain(self.dir_due.due)
             .min();
         el.set_control_flow(match next {
             Some(t) => ControlFlow::WaitUntil(t),
@@ -749,6 +767,94 @@ impl Shell {
 }
 
 const URL: &str = "https://github.com/amigo-labs/amigo-blinzel";
+
+/// The resize direction for client point `p` within `edge` physical pixels
+/// of the edges of a `client`-sized window (diagonal in the corners); none
+/// while the window is maximized or full screen (`plain` false).
+fn resize_edge(
+    p: (f64, f64),
+    client: (u32, u32),
+    edge: f64,
+    plain: bool,
+) -> Option<ResizeDirection> {
+    if !plain {
+        return None;
+    }
+    let (w, h) = (client.0 as f64, client.1 as f64);
+    let (l, r, t, b) = (p.0 < edge, p.0 >= w - edge, p.1 < edge, p.1 >= h - edge);
+    Some(match (l, r, t, b) {
+        (true, _, true, _) => ResizeDirection::NorthWest,
+        (_, true, true, _) => ResizeDirection::NorthEast,
+        (true, _, _, true) => ResizeDirection::SouthWest,
+        (_, true, _, true) => ResizeDirection::SouthEast,
+        (true, ..) => ResizeDirection::West,
+        (_, true, ..) => ResizeDirection::East,
+        (_, _, true, _) => ResizeDirection::North,
+        (_, _, _, true) => ResizeDirection::South,
+        _ => return None,
+    })
+}
+
+/// The pointer over a resize edge.
+fn resize_cursor(dir: ResizeDirection) -> CursorIcon {
+    match dir {
+        ResizeDirection::North | ResizeDirection::South => CursorIcon::NsResize,
+        ResizeDirection::East | ResizeDirection::West => CursorIcon::EwResize,
+        ResizeDirection::NorthWest | ResizeDirection::SouthEast => CursorIcon::NwseResize,
+        ResizeDirection::NorthEast | ResizeDirection::SouthWest => CursorIcon::NeswResize,
+    }
+}
+
+/// What a left press does before the App sees it.
+#[derive(Debug, PartialEq)]
+enum Press {
+    /// Resize the window from this edge.
+    Resize(ResizeDirection),
+    /// A caption button, acting on release.
+    Button(Button),
+    /// The second press of a double click.
+    DoubleClick,
+    /// Move the window.
+    MoveWindow,
+    /// The App's own press (image, selection, ☰).
+    App,
+}
+
+/// A left press at a resize `edge`, on a caption `button`, as the second of
+/// a `double` click, or on the free `caption` strip (not full screen, no
+/// selection drag running).
+fn press(
+    edge: Option<ResizeDirection>,
+    button: Option<Button>,
+    double: bool,
+    caption: bool,
+) -> Press {
+    match (edge, button) {
+        (Some(dir), _) => Press::Resize(dir),
+        (_, Some(b @ (Button::Minimize | Button::Maximize | Button::Close))) => Press::Button(b),
+        _ if double => Press::DoubleClick,
+        (_, None) if caption => Press::MoveWindow,
+        _ => Press::App,
+    }
+}
+
+/// A double click: the App's `answer`, or on the free caption strip (where
+/// the App answers none) maximize or restore.
+fn double_clicked(answer: Option<Vec<Action>>) -> Vec<Action> {
+    answer.unwrap_or_else(|| vec![Action::ToggleMaximize])
+}
+
+/// Moves `path` to the desktop's trash; only then does `removed` take it
+/// out of the file list. A refused move leaves the file and the list alone.
+fn recycle(path: &Path, removed: impl FnOnce(&Path) -> Vec<Action>) -> Vec<Action> {
+    match trash::delete(path) {
+        Ok(()) => removed(path),
+        Err(e) => {
+            log(&format!("trash: {e}"));
+            vec![]
+        }
+    }
+}
 
 fn open_url(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
@@ -792,13 +898,18 @@ fn open_with(file: &Path) {
 
 /// Writes the licence texts next to the cache and opens them.
 fn show_notices() -> Result<(), String> {
-    let dir = dirs::cache().ok_or("no cache folder")?;
-    let path = dir.join("THIRD-PARTY-NOTICES.txt");
-    std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(&path, crate::notices_text::TEXT))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let path = write_notices(&dirs::cache().ok_or("no cache folder")?)?;
     open_url(&path.to_string_lossy());
     Ok(())
+}
+
+/// Writes the built-in licence texts to `dir`; returns the file.
+fn write_notices(dir: &Path) -> Result<PathBuf, String> {
+    let path = dir.join("THIRD-PARTY-NOTICES.txt");
+    std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(&path, crate::notices_text::TEXT))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
 }
 
 fn key_of(k: &WKey) -> Option<Key> {
@@ -855,11 +966,13 @@ impl ApplicationHandler<UserEvent> for Shell {
         if self.app.is_none() || self.exiting {
             return;
         }
+        let (dropped, event) = self.dropped.feed(event);
+        if let Some(paths) = dropped {
+            self.files_dropped(el, paths);
+        }
+        let Some(event) = event else { return };
         match event {
-            WindowEvent::CloseRequested => {
-                self.exiting = true;
-                el.exit();
-            }
+            WindowEvent::CloseRequested => self.run(el, vec![Action::Close]),
             WindowEvent::Resized(size) => {
                 let app = self.app.as_mut().unwrap();
                 app.maximized = self.window.as_ref().is_some_and(|w| w.is_maximized());
@@ -920,8 +1033,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                     }
                     (MouseButton::Middle, false) => self.app.as_mut().unwrap().mouse_up(),
                     (MouseButton::Right, false) => {
-                        let (x, y) = (self.cursor.0 as i32, self.cursor.1 as i32);
-                        self.run(el, vec![Action::ShowMenu { x, y }]);
+                        let actions = self.app.as_mut().unwrap().right_click(self.cursor);
+                        self.run(el, actions);
                     }
                     (MouseButton::Back, true) => {
                         let actions = self.app.as_mut().unwrap().command(Cmd::Prev);
@@ -955,10 +1068,6 @@ impl ApplicationHandler<UserEvent> for Shell {
                 self.update_cursor();
             }
             WindowEvent::KeyboardInput { event, .. } => self.key(el, &event),
-            WindowEvent::DroppedFile(path) => {
-                let actions = self.app.as_mut().unwrap().files_dropped(vec![path]);
-                self.run(el, actions);
-            }
             _ => {}
         }
         self.after_event();
@@ -970,7 +1079,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             UserEvent::Wake(Wake::Loaded) => app.on_loaded(),
             UserEvent::Wake(Wake::List) => app.on_list(),
             UserEvent::Wake(Wake::DirChanged) => {
-                self.dir_due = Some(Instant::now() + DIR_SETTLE);
+                self.dir_due.changed(Instant::now());
                 vec![]
             }
             UserEvent::Wake(Wake::Thumbs) => {
@@ -985,34 +1094,15 @@ impl ApplicationHandler<UserEvent> for Shell {
                 app.on_color_target(monitor, target);
                 vec![]
             }
-            UserEvent::Open(file) => {
-                let mut a = match file {
-                    Some(f) => app.open(f),
-                    None => vec![],
-                };
-                a.push(Action::Activate);
-                a
-            }
+            UserEvent::Open(file) => handed_over(file, |f| app.open(f)),
             UserEvent::Notice(text) => {
                 app.show_notice(text);
                 self.notice_until = Some(Instant::now() + NOTICE);
                 vec![]
             }
             UserEvent::Clipboard(r) => {
-                let set = r.and_then(|(rgba, w, h)| {
-                    let cb = match &mut self.clipboard {
-                        Some(c) => c,
-                        None => self
-                            .clipboard
-                            .insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
-                    };
-                    cb.set_image(arboard::ImageData {
-                        width: w as usize,
-                        height: h as usize,
-                        bytes: rgba.into(),
-                    })
-                    .map_err(|e| e.to_string())
-                });
+                let set = r
+                    .and_then(|(rgba, w, h)| clipboard::put_image(&mut self.clipboard, rgba, w, h));
                 if let Err(e) = set {
                     log(&format!("clipboard: {e}"));
                 }
@@ -1023,32 +1113,55 @@ impl ApplicationHandler<UserEvent> for Shell {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if let Some(paths) = self.dropped.take()
+            && self.app.is_some()
+            && !self.exiting
+        {
+            self.files_dropped(el, paths);
+        }
         self.timers(el);
     }
 }
 
 /// Runs the viewer; returns the process exit code.
+/// Whether this launch takes part in "Open images in the same window": it
+/// hands over to a running window or listens for later launches. Not while
+/// measuring the first frame.
+fn same_window(settings: &Settings, args: &Args) -> bool {
+    settings.single_instance && !args.exit_after_first_frame
+}
+
+/// Where `--exit-after-first-frame` writes the startup report: the
+/// `--json` path, else `startup.json` in the working directory.
+fn report_path(args: &Args) -> Option<PathBuf> {
+    let json = || args.json.clone().unwrap_or_else(|| "startup.json".into());
+    args.exit_after_first_frame.then(json)
+}
+
+/// What a later launch's hand-over does: the window opens its file, if it
+/// sent one, and comes to the foreground.
+fn handed_over(file: Option<PathBuf>, open: impl FnOnce(PathBuf) -> Vec<Action>) -> Vec<Action> {
+    let mut a = file.map(open).unwrap_or_default();
+    a.push(Action::Activate);
+    a
+}
+
 pub fn run() -> i32 {
     timing::init(0);
     timing::mark("main");
     let args = parse_args();
     let settings = settings_store::load();
-    let lang = settings
-        .language
-        .as_deref()
-        .and_then(blinzel_i18n::lang_from_code)
-        .unwrap_or_else(system_language);
-    blinzel_i18n::set_lang(lang);
+    blinzel_i18n::set_lang(blinzel_i18n::choose(
+        settings.language.as_deref(),
+        system_language,
+    ));
     if args.install || args.uninstall {
         return super::install::run(args.uninstall);
     }
     if super::update::on_start() {
         return 0;
     }
-    if settings.single_instance
-        && !args.exit_after_first_frame
-        && super::instance::hand_off(args.file.as_deref())
-    {
+    if same_window(&settings, &args) && super::instance::hand_off(args.file.as_deref()) {
         return 0;
     }
     let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
@@ -1062,7 +1175,7 @@ pub fn run() -> i32 {
     let services = Arc::new(LinuxServices {
         proxy: Mutex::new(proxy.clone()),
     });
-    if settings.single_instance && !args.exit_after_first_frame {
+    if same_window(&settings, &args) {
         let p = Mutex::new(proxy.clone());
         super::instance::listen(move |file| {
             let _ = p.lock().unwrap().send_event(UserEvent::Open(file));
@@ -1108,16 +1221,342 @@ pub fn run() -> i32 {
         chrome_pressed: None,
         clipboard: None,
         notice_until: None,
-        dir_due: None,
+        dir_due: DirSettle::default(),
         wheel_rest: 0.0,
+        dropped: Dropped::default(),
         exiting: false,
     };
     if let Err(e) = event_loop.run_app(&mut shell) {
         eprintln!("amigo-blinzel: {e}");
         return 1;
     }
-    if let Some(app) = &shell.app {
-        settings_store::save(&app.settings);
+    let Some(app) = &shell.app else { return 0 };
+    app.save_settings_on_exit();
+    app.exit_code()
+}
+
+/// Whether `a` ends the process. Every way of closing the window does
+/// (close button, menu "Exit"), in resident mode too: the Linux shell has
+/// no tray to hide the window in (`docs/specs/resident-mode.md` AC-01).
+fn ends_process(a: &Action) -> bool {
+    matches!(a, Action::Close | Action::Exit | Action::Quit)
+}
+
+/// Whether `a` is a screenshot action, which the Linux shell ignores:
+/// screenshots are not on Linux yet, and the menu does not offer them
+/// (`docs/specs/screenshots.md` AC-01).
+fn takes_screenshots(a: &Action) -> bool {
+    matches!(
+        a,
+        Action::Capture { .. } | Action::SetScreenshotHotkey(_) | Action::PickScreenshotFolder
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `docs/specs/release.md` AC-18: "Third-party notices" writes the
+    /// Linux notices built into the executable to the file it opens.
+    #[test]
+    fn the_notices_file_holds_the_built_in_linux_notices() {
+        let dir = std::env::temp_dir().join(format!("blinzel-notices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = write_notices(&dir.join("cache")).unwrap();
+        assert_eq!(path, dir.join("cache/THIRD-PARTY-NOTICES.txt"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text, crate::notices_text::TEXT);
+        assert!(text.contains("The Linux build\nalso contains"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
-    0
+
+    /// `docs/specs/screenshots.md` AC-01: Linux offers no screenshots, and
+    /// the screenshot actions the App gives (the key follows resident
+    /// mode's toggle on every platform) do nothing.
+    #[test]
+    fn screenshot_actions_do_nothing_on_linux() {
+        const { assert!(!blinzel_ui::menu::SCREENSHOTS) };
+        for a in [
+            Action::Capture { whole_screen: true },
+            Action::Capture {
+                whole_screen: false,
+            },
+            Action::SetScreenshotHotkey(true),
+            Action::PickScreenshotFolder,
+        ] {
+            assert!(takes_screenshots(&a), "{a:?}");
+        }
+        assert!(!takes_screenshots(&Action::OpenWith("a.png".into())));
+        assert!(!takes_screenshots(&Action::ChooseEditor { then: None }));
+    }
+
+    /// `docs/specs/resident-mode.md` AC-01: on Linux closing the window
+    /// ends the process even with resident mode on in the settings.
+    #[test]
+    fn closing_the_window_always_ends_the_process() {
+        const { assert!(!blinzel_ui::menu::RESIDENT) };
+        for a in [Action::Close, Action::Exit, Action::Quit] {
+            assert!(ends_process(&a), "{a:?}");
+        }
+        assert!(!ends_process(&Action::Wake { opened: false }));
+        assert!(!ends_process(&Action::Minimize));
+    }
+
+    /// `docs/specs/localization.md` AC-10: the UI language from the
+    /// environment, in the order the variables are read.
+    #[test]
+    fn the_system_language_comes_from_the_locale_variables_in_order() {
+        let code = |vars: &[(&str, &str)]| {
+            language_from_env(|name| {
+                vars.iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| v.to_string())
+            })
+            .code()
+        };
+        assert_eq!(code(&[]), "en");
+        assert_eq!(code(&[("LANG", "C.UTF-8")]), "en");
+        assert_eq!(code(&[("LANG", "POSIX")]), "en");
+        assert_eq!(code(&[("LANG", "de_DE.UTF-8")]), "de");
+        assert_eq!(code(&[("LANG", "de_DE"), ("LC_MESSAGES", "fr_FR")]), "fr");
+        assert_eq!(
+            code(&[("LC_MESSAGES", "fr_FR"), ("LC_ALL", "it_IT.UTF-8")]),
+            "it"
+        );
+        assert_eq!(code(&[("LC_ALL", "it_IT"), ("LANGUAGE", "ja_JP")]), "ja");
+        // `LANGUAGE` is a list; tags that map to nothing are skipped.
+        assert_eq!(
+            code(&[("LANGUAGE", "xx:C:ru_RU@euro"), ("LANG", "de_DE")]),
+            "ru"
+        );
+        assert_eq!(code(&[("LANGUAGE", "pt_PT.UTF-8:de")]), "pt-br");
+        assert_eq!(code(&[("LC_ALL", "C"), ("LANG", "es_ES.UTF-8")]), "es");
+        assert_eq!(code(&[("LANG", "sr_RS@latin")]), "en");
+    }
+
+    /// `docs/specs/batch-resize.md` AC-23: the files of one drop reach the
+    /// App together, in order, before the next event.
+    #[test]
+    fn the_files_of_one_drop_are_handed_over_together() {
+        let mut d = Dropped::default();
+        let (a, b, c) = (
+            PathBuf::from("/a.png"),
+            PathBuf::from("/b.png"),
+            PathBuf::from("/c"),
+        );
+        for p in [&a, &b, &c] {
+            let (dropped, event) = d.feed(WindowEvent::DroppedFile(p.clone()));
+            assert!(dropped.is_none() && event.is_none(), "still collecting");
+        }
+        let (dropped, event) = d.feed(WindowEvent::Focused(true));
+        assert_eq!(dropped, Some(vec![a.clone(), b.clone(), c]));
+        assert!(matches!(event, Some(WindowEvent::Focused(true))));
+        let (dropped, event) = d.feed(WindowEvent::Focused(false));
+        assert!(
+            dropped.is_none() && event.is_some(),
+            "nothing dropped since"
+        );
+
+        // The end of the event batch ends a drop too.
+        d.feed(WindowEvent::DroppedFile(b.clone()));
+        d.feed(WindowEvent::DroppedFile(a.clone()));
+        assert_eq!(d.take(), Some(vec![b, a]));
+        assert_eq!(d.take(), None);
+    }
+
+    /// `docs/specs/browsing.md` AC-15: on by default, off opens every
+    /// launch in its own window.
+    #[test]
+    fn same_window_follows_the_setting() {
+        let mut settings = Settings::default();
+        let args = Args::default();
+        assert!(same_window(&settings, &args), "on by default");
+        settings.single_instance = false;
+        assert!(!same_window(&settings, &args));
+        let measuring = Args {
+            exit_after_first_frame: true,
+            ..Args::default()
+        };
+        assert!(!same_window(&Settings::default(), &measuring));
+    }
+
+    /// `docs/specs/startup.md` AC-10: measuring writes `--json`'s path, or
+    /// `startup.json` without it; without the mode there is no report.
+    #[test]
+    fn the_startup_report_goes_to_json_or_startup_json() {
+        let mut args = Args::default();
+        assert_eq!(report_path(&args), None);
+        args.json = Some(PathBuf::from("out.json"));
+        assert_eq!(report_path(&args), None, "--json alone measures nothing");
+        args.exit_after_first_frame = true;
+        assert_eq!(report_path(&args), Some(PathBuf::from("out.json")));
+        args.json = None;
+        assert_eq!(report_path(&args), Some(PathBuf::from("startup.json")));
+    }
+
+    /// `docs/specs/browsing.md` AC-15: the running window shows the handed
+    /// file and comes to the foreground; without a file it only comes up.
+    #[test]
+    fn a_handed_over_file_opens_and_the_window_comes_to_the_front() {
+        let file = PathBuf::from("/pics/a.png");
+        let a = handed_over(Some(file.clone()), |f| {
+            assert_eq!(f, file);
+            vec![Action::Uncloak]
+        });
+        assert_eq!(a, [Action::Uncloak, Action::Activate]);
+        let a = handed_over(None, |_| panic!("nothing to open"));
+        assert_eq!(a, [Action::Activate]);
+    }
+
+    /// `docs/specs/image-formats.md` AC-24: there is no system decoder: a
+    /// raw keeps its embedded previews, and what the native decoders do
+    /// not handle fails as not decoded natively.
+    #[test]
+    fn without_a_system_decoder_raws_keep_their_previews_and_other_files_fail() {
+        // A Fujifilm RAF pointing at a 600 × 400 JPEG (header and an empty
+        // scan) and saying 6240 × 4160 in its cropped-size record.
+        let jpeg: &[u8] = &[
+            0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8, 1, 0x90, 2, 0x58, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11,
+            1, 0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0x11, 3, 0x11, 0, 63, 0, 0xFF, 0xD9,
+        ];
+        let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+        raf.resize(200, 0);
+        raf[84..88].copy_from_slice(&200u32.to_be_bytes());
+        raf[88..92].copy_from_slice(&(jpeg.len() as u32).to_be_bytes());
+        raf[92..96].copy_from_slice(&(200 + jpeg.len() as u32).to_be_bytes());
+        raf.extend_from_slice(jpeg);
+        raf.extend([0, 0, 0, 1, 0x01, 0x11, 0, 4, 0x10, 0x40, 0x18, 0x60]);
+
+        let p = probe(&raf).unwrap();
+        assert!(p.is_raw());
+        assert_eq!((p.width, p.height), (6240, 4160));
+        let sizes: Vec<_> = p.previews.iter().map(|p| (p.width, p.height)).collect();
+        assert_eq!(sizes, [(600, 400)]);
+        let e = decode_with(&raf, Request::Full, 2).unwrap_err();
+        assert_eq!(e.to_string(), "Raw is not decoded natively");
+
+        // Recognized, but not decoded natively: probe and decode say so.
+        let ico: &[u8] = &[0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0];
+        let psd: &[u8] = b"8BPS\0\x01\0\0\0\0\0\0\0\x03\0\0\0\x10\0\0\0\x10\0\x08\0\x03";
+        // A raw without an embedded preview.
+        let orf: &[u8] = b"IIRO\x08\0\0\0\0\0\0\0\0\0\0\0";
+        for (data, name) in [(ico, "Ico"), (psd, "Psd"), (orf, "Raw")] {
+            let msg = format!("{name} is not decoded natively");
+            assert_eq!(probe(data).unwrap_err().to_string(), msg);
+            let e = decode_with(data, Request::Fit { w: 64, h: 64 }, 1).unwrap_err();
+            assert_eq!(e.to_string(), msg);
+        }
+    }
+
+    /// `docs/specs/platform-shells.md` AC-11: within 6 logical px of an
+    /// edge a press resizes in that direction, diagonally in the corners,
+    /// under the matching cursor; never while maximized or full screen.
+    #[test]
+    fn the_edges_resize_the_plain_window_only() {
+        use ResizeDirection::*;
+        let client = (800, 600);
+        let at = |p, scale: f64| resize_edge(p, client, EDGE * scale, true);
+        assert_eq!(at((0.0, 0.0), 1.0), Some(NorthWest));
+        assert_eq!(at((799.0, 3.0), 1.0), Some(NorthEast));
+        assert_eq!(at((5.9, 599.0), 1.0), Some(SouthWest));
+        assert_eq!(at((794.0, 594.0), 1.0), Some(SouthEast));
+        assert_eq!(at((2.0, 300.0), 1.0), Some(West));
+        assert_eq!(at((797.0, 300.0), 1.0), Some(East));
+        assert_eq!(at((400.0, 1.0), 1.0), Some(North));
+        assert_eq!(at((400.0, 598.0), 1.0), Some(South));
+        assert_eq!(at((6.0, 300.0), 1.0), None, "6 px in: the image");
+        assert_eq!(at((400.0, 593.0), 1.0), None);
+        // Logical pixels: twice as wide at 200 %.
+        assert_eq!(at((11.0, 300.0), 2.0), Some(West));
+        assert_eq!(at((12.0, 300.0), 2.0), None);
+        assert_eq!(resize_edge((0.0, 0.0), client, EDGE, false), None);
+        assert_eq!(resize_edge((400.0, 599.0), client, EDGE, false), None);
+
+        assert_eq!(resize_cursor(North), CursorIcon::NsResize);
+        assert_eq!(resize_cursor(South), CursorIcon::NsResize);
+        assert_eq!(resize_cursor(West), CursorIcon::EwResize);
+        assert_eq!(resize_cursor(East), CursorIcon::EwResize);
+        assert_eq!(resize_cursor(NorthWest), CursorIcon::NwseResize);
+        assert_eq!(resize_cursor(SouthEast), CursorIcon::NwseResize);
+        assert_eq!(resize_cursor(NorthEast), CursorIcon::NeswResize);
+        assert_eq!(resize_cursor(SouthWest), CursorIcon::NeswResize);
+    }
+
+    /// `docs/specs/platform-shells.md` AC-11: a press on the free caption
+    /// strip moves the window and a double click there is the App's (which
+    /// answers none there, so the window maximizes or restores); edges come
+    /// before everything, caption buttons act on release.
+    #[test]
+    fn a_press_resizes_moves_or_goes_to_the_app() {
+        let north = Some(ResizeDirection::North);
+        assert_eq!(
+            press(north, Some(Button::Close), true, true),
+            Press::Resize(ResizeDirection::North)
+        );
+        for b in [Button::Minimize, Button::Maximize, Button::Close] {
+            assert_eq!(press(None, Some(b), true, true), Press::Button(b));
+        }
+        assert_eq!(press(None, None, false, true), Press::MoveWindow);
+        assert_eq!(press(None, None, true, true), Press::DoubleClick);
+        assert_eq!(press(None, None, true, false), Press::DoubleClick);
+        assert_eq!(press(None, Some(Button::Menu), false, true), Press::App);
+        assert_eq!(
+            press(None, Some(Button::Menu), true, true),
+            Press::DoubleClick
+        );
+        // Below the strip, full screen or while a selection drag runs.
+        assert_eq!(press(None, None, false, false), Press::App);
+        assert_eq!(double_clicked(None), [Action::ToggleMaximize]);
+        let full = vec![Action::ToggleFullscreen];
+        assert_eq!(double_clicked(Some(full.clone())), full);
+    }
+
+    /// `docs/specs/platform-shells.md` AC-14: a deleted image goes to the
+    /// desktop's trash and only then leaves the list; a refused move
+    /// leaves the list alone.
+    #[test]
+    fn a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed() {
+        let dir = std::env::temp_dir().join(format!("blinzel-trash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let file = dir.join("a.png");
+        std::fs::write(&file, b"png").unwrap();
+        let mut removed = vec![];
+        let a = recycle(&file, |p| {
+            removed.push(p.to_path_buf());
+            vec![Action::Uncloak]
+        });
+        assert_eq!(a, [Action::Uncloak]);
+        assert_eq!(removed, std::slice::from_ref(&file));
+        assert!(!file.exists());
+        let trashed: Vec<_> = trash::os_limited::list()
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.original_parent == dir && i.name == "a.png")
+            .collect();
+        assert_eq!(trashed.len(), 1, "in the trash");
+        trash::os_limited::purge_all(trashed).unwrap();
+
+        let missing = dir.join("b.png");
+        let a = recycle(&missing, |_| panic!("the list keeps it"));
+        assert!(a.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `docs/specs/browsing.md` AC-14: changes in the folder are collected
+    /// for about 150 ms before it is listed again.
+    #[test]
+    fn folder_changes_settle_for_150_ms_before_relisting() {
+        let ms = Duration::from_millis;
+        let t0 = Instant::now();
+        let mut settle = DirSettle::default();
+        assert!(!settle.take_due(t0), "nothing changed");
+        settle.changed(t0);
+        assert!(!settle.take_due(t0), "not at once");
+        assert!(!settle.take_due(t0 + ms(149)), "not before 150 ms");
+        assert!(settle.take_due(t0 + ms(150)), "listed at 150 ms");
+        assert!(!settle.take_due(t0 + ms(300)), "once per change");
+        assert_eq!(settle.due, None, "no timer left");
+    }
 }

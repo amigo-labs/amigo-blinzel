@@ -575,6 +575,66 @@ pub fn encode_bgra(
     take_output(&tj, rc, out, size)
 }
 
+/// JPEGs the viewer never writes but has to read.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Unusual {
+    /// Four components (Adobe CMYK).
+    Cmyk,
+    /// Three components stored as RGB (Adobe transform 0).
+    Rgb,
+    /// YCbCr with 4:1:1 subsampling.
+    S411,
+    /// Lossless (SOF3), YCbCr 4:4:4.
+    Lossless,
+}
+
+/// Encodes the test pattern of `width × height` as an [`Unusual`] JPEG.
+#[cfg(test)]
+pub(crate) fn encode_unusual(kind: Unusual, width: u32, height: u32) -> Vec<u8> {
+    const CS_RGB: c_int = 0;
+    const SAMP_411: c_int = 5;
+    let rgb = crate::testimg::rgb(width, height);
+    let (pixels, pf, bpp, colorspace, samp) = match kind {
+        Unusual::Cmyk => (
+            rgb.chunks(3)
+                .flat_map(|p| [255 - p[0], 255 - p[1], 255 - p[2], 0])
+                .collect(),
+            ffi::PF_CMYK,
+            4,
+            ffi::CS_CMYK,
+            ffi::SAMP_444,
+        ),
+        Unusual::Rgb => (rgb, ffi::PF_RGB, 3, CS_RGB, ffi::SAMP_444),
+        Unusual::S411 => (rgb, ffi::PF_RGB, 3, ffi::CS_YCBCR, SAMP_411),
+        Unusual::Lossless => (rgb, ffi::PF_RGB, 3, ffi::CS_YCBCR, ffi::SAMP_444),
+    };
+    let tj = Tj::new(ffi::INIT_COMPRESS).unwrap();
+    tj.set(ffi::P_QUALITY, 90).unwrap();
+    tj.set(ffi::P_SUBSAMP, samp).unwrap();
+    tj.set(ffi::P_COLORSPACE, colorspace).unwrap();
+    if let Unusual::Lossless = kind {
+        tj.set(ffi::P_LOSSLESS, 1).unwrap();
+    }
+    let mut out: *mut c_uchar = std::ptr::null_mut();
+    let mut size: usize = 0;
+    // SAFETY: `pixels` holds `height` rows of `width * bpp` bytes in the
+    // format `pf`; TurboJPEG allocates `out`, which `take_output` frees.
+    let rc = unsafe {
+        ffi::tj3Compress8(
+            tj.0,
+            pixels.as_ptr(),
+            width as c_int,
+            (width * bpp) as c_int,
+            height as c_int,
+            pf,
+            &mut out,
+            &mut size,
+        )
+    };
+    take_output(&tj, rc, out, size).unwrap()
+}
+
 /// Copies a TurboJPEG-allocated output buffer into a Vec and frees it.
 fn take_output(tj: &Tj, rc: c_int, out: *mut c_uchar, size: usize) -> Result<Vec<u8>> {
     if rc != 0 {
@@ -669,6 +729,12 @@ mod tests {
         assert_eq!((img.full_width, img.full_height), (1600, 1200));
         let img = decode(&data, Request::Fit { w: 401, h: 10 }).unwrap();
         assert_eq!((img.width, img.height), (600, 450));
+        // The height decides as well as the width.
+        let img = decode(&data, Request::Fit { w: 10, h: 301 }).unwrap();
+        assert_eq!((img.width, img.height), (600, 450));
+        // More than the image has: full resolution.
+        let img = decode(&data, Request::Fit { w: 2000, h: 10 }).unwrap();
+        assert_eq!((img.width, img.height), (1600, 1200));
         let img = decode(&data, Request::Fit { w: 1, h: 1 }).unwrap();
         assert_eq!((img.width, img.height), (200, 150));
         if let Pixels::Ycc { cb, sub, .. } = &img.pixels {
@@ -677,6 +743,25 @@ mod tests {
         } else {
             panic!("expected planes");
         }
+    }
+
+    /// AC-04: a side that does not divide by 8 rounds up at every scale, as
+    /// libjpeg-turbo does, so 1/8 of 801 × 601 already gives 101 × 76.
+    #[test]
+    fn dct_scaling_rounds_odd_sides_up() {
+        // The buffer is sized from `scaled`; a size below libjpeg-turbo's
+        // would overrun it, so the sizes are checked before any decode.
+        assert_eq!((scaled(801, 1), scaled(601, 1)), (101, 76));
+        assert_eq!((scaled(801, 2), scaled(601, 2)), (201, 151));
+        let data = jpeg(801, 601, EncodeOptions::default());
+        for (w, h) in [(101, 1), (1, 76), (101, 76)] {
+            let img = decode(&data, Request::Fit { w, h }).unwrap();
+            assert_eq!((img.width, img.height), (101, 76), "1/8 for {w} × {h}");
+            assert_eq!((img.full_width, img.full_height), (801, 601));
+        }
+        // One pixel more than 1/8 gives: 2/8, 801 × 2 / 8 = 200.25 up to 201.
+        let img = decode(&data, Request::Fit { w: 102, h: 1 }).unwrap();
+        assert_eq!((img.width, img.height), (201, 151));
     }
 
     #[test]
@@ -713,8 +798,84 @@ mod tests {
             );
         }
         assert!(decode(&data, Request::Region(PixelRect::new(300, 0, 30, 10))).is_err());
+        assert!(decode(&data, Request::Region(PixelRect::new(0, 195, 10, 10))).is_err());
         // The handle is reusable after a region decode.
         assert_eq!(decode(&data, Request::Full).unwrap().width, 321);
+    }
+
+    /// `r` of a `w`-wide image, cut from its BGRA.
+    fn crop(full: &[u8], w: u32, r: PixelRect) -> Vec<u8> {
+        let mut out = Vec::new();
+        for y in r.y..r.bottom() {
+            let s = ((y * w + r.x) * 4) as usize;
+            out.extend_from_slice(&full[s..s + r.w as usize * 4]);
+        }
+        out
+    }
+
+    /// AC-04: the strip's left edge is on the iMCU of the file's
+    /// subsampling: 16 pixels for 4:2:2, 8 for 4:4:0, 32 for 4:1:1. The
+    /// regions start where those alignments differ (x = 8, 40, 48).
+    #[test]
+    fn region_left_edge_is_on_each_subsamplings_imcu() {
+        let files = [
+            (
+                "4:2:2",
+                jpeg(
+                    96,
+                    64,
+                    EncodeOptions {
+                        subsampling: 422,
+                        ..Default::default()
+                    },
+                ),
+            ),
+            (
+                "4:4:0",
+                jpeg(
+                    96,
+                    64,
+                    EncodeOptions {
+                        subsampling: 440,
+                        ..Default::default()
+                    },
+                ),
+            ),
+            ("4:1:1", encode_unusual(Unusual::S411, 96, 64)),
+        ];
+        for (name, data) in files {
+            let full = decode(&data, Request::Region(PixelRect::new(0, 0, 96, 64)))
+                .unwrap()
+                .to_bgra();
+            for r in [
+                PixelRect::new(8, 5, 40, 30),
+                PixelRect::new(40, 9, 50, 40),
+                PixelRect::new(48, 3, 30, 20),
+            ] {
+                let img = decode(&data, Request::Region(r))
+                    .unwrap_or_else(|e| panic!("{name} {r:?}: {e}"));
+                assert_eq!((img.width, img.height, img.region), (r.w, r.h, Some(r)));
+                let p = psnr(&img.to_bgra(), &crop(&full, 96, r));
+                assert!(p > 40.0, "{name} {r:?}: psnr {p}");
+            }
+        }
+    }
+
+    /// AC-04: a lossless JPEG cannot be cropped, so the whole image is
+    /// decoded and the region copied from its rows and columns.
+    #[test]
+    fn lossless_region_is_cut_from_the_whole_image() {
+        let data = encode_unusual(Unusual::Lossless, 96, 64);
+        let full = decode(&data, Request::Full).unwrap().to_bgra();
+        for r in [
+            PixelRect::new(0, 0, 96, 64),
+            PixelRect::new(37, 11, 40, 30),
+            PixelRect::new(5, 50, 91, 14),
+        ] {
+            let img = decode(&data, Request::Region(r)).unwrap();
+            assert_eq!((img.width, img.height, img.region), (r.w, r.h, Some(r)));
+            assert_eq!(img.to_bgra(), crop(&full, 96, r), "{r:?}");
+        }
     }
 
     #[test]
@@ -768,6 +929,35 @@ mod tests {
         let data = jpeg(300, 200, EncodeOptions::default());
         // Truncated entropy data: a warning, the visible part is decoded.
         assert!(decode(&data[..data.len() / 2], Request::Full).is_ok());
+        // The same on the packed paths: gray, and a 4:2:0 region reaching
+        // into the missing half.
+        let gray = jpeg(
+            300,
+            200,
+            EncodeOptions {
+                gray: true,
+                ..Default::default()
+            },
+        );
+        let g = decode(&gray[..gray.len() / 2], Request::Full).unwrap();
+        assert!(matches!(
+            g.pixels,
+            Pixels::Packed {
+                format: PackedFormat::Gray8,
+                ..
+            }
+        ));
+        let c = jpeg(
+            300,
+            200,
+            EncodeOptions {
+                subsampling: 420,
+                ..Default::default()
+            },
+        );
+        let region = PixelRect::new(37, 11, 200, 189);
+        let r = decode(&c[..c.len() / 2], Request::Region(region)).unwrap();
+        assert_eq!((r.width, r.height, r.region), (200, 189, Some(region)));
         // Truncated header: an error, no crash.
         assert!(decode(&data[..20], Request::Full).is_err());
     }

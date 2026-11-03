@@ -35,6 +35,7 @@ save_suffix = "裁剪"
 saved = "已保存“{name}”"
 saved_lossless = "已无损保存“{name}”"
 error_save = "无法保存“{name}”：{reason}"
+error_save_source = "“{name}”是裁剪的来源图像：不会被替换"
 show_original = "显示原图"
 
 nav_next = "下一张图片"

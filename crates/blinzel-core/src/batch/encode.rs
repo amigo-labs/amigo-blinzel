@@ -568,6 +568,11 @@ mod tests {
                 assert_eq!(got_icc.as_deref(), Some(&icc[..]), "{codec:?} ICC");
                 let got_exif = crate::batch::meta::read_exif(&file, fmt);
                 assert_eq!(got_exif.as_deref(), Some(&exif[..]), "{codec:?} EXIF");
+                if codec == Codec::Avif {
+                    // HEIC keeps its EXIF in the same HEIF item as AVIF.
+                    let heif = crate::batch::meta::read_exif(&file, Format::Heif);
+                    assert_eq!(heif.as_deref(), Some(&exif[..]), "HEIF EXIF");
+                }
 
                 let img = decode::decode(&file, Request::Full).unwrap();
                 let back = img.to_bgra();
@@ -601,6 +606,28 @@ mod tests {
             if b[3] != 0 {
                 assert_eq!(a, b);
             }
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-08.
+    #[test]
+    fn jpeg_keeps_full_chroma_from_quality_90() {
+        use blinzel_jpeg::Subsampling;
+        let (w, h) = (32, 32);
+        let px = gradient(w, h, false);
+        for (jpeg, want) in [
+            (50, Subsampling::S420),
+            (89, Subsampling::S420),
+            (90, Subsampling::S444),
+            (100, Subsampling::S444),
+        ] {
+            let q = Quality {
+                jpeg,
+                ..Default::default()
+            };
+            let file = encode(&px, w, h, Codec::Jpeg, &q, None, None).unwrap();
+            let info = blinzel_jpeg::parse(&file).unwrap();
+            assert_eq!(info.subsampling(), want, "quality {jpeg}");
         }
     }
 }

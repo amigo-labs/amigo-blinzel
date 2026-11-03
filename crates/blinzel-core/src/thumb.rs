@@ -440,6 +440,80 @@ mod tests {
         assert_eq!(reduce(&src, (2, 1), (1, 1)), [0, 0, 255, 128]);
     }
 
+    /// A 6000 × 4000 "file" of 1000 bytes with embedded previews at
+    /// 100-byte slots, and a decoder that logs which bytes it was handed
+    /// (as (offset, length)) and fails on the slots in `broken`.
+    fn with_previews(
+        previews: &[(u32, u32)],
+        broken: &[usize],
+    ) -> (Result<Thumb>, Vec<(usize, usize)>) {
+        use crate::exif::EmbeddedPreview;
+        let data = vec![0u8; 1000];
+        let probe = Probe {
+            format: crate::format::Format::Jpeg,
+            width: 6000,
+            height: 4000,
+            orientation: Orientation::NORMAL,
+            previews: previews
+                .iter()
+                .enumerate()
+                .map(|(k, &(width, height))| EmbeddedPreview {
+                    range: k * 100..k * 100 + 100,
+                    width,
+                    height,
+                })
+                .collect(),
+            icc: None,
+        };
+        let png = crate::export::encode_png_bgra(&[90; 256 * 171 * 4], 256, 171).unwrap();
+        let calls = std::cell::RefCell::new(Vec::new());
+        let decode = |bytes: &[u8], req: Request| {
+            assert_eq!(req, Request::Fit { w: 256, h: 171 });
+            let at = bytes.as_ptr() as usize - data.as_ptr() as usize;
+            calls.borrow_mut().push((at, bytes.len()));
+            if bytes.len() == 100 && broken.contains(&(at / 100)) {
+                return Err(decode::DecodeError::Corrupt("broken preview".into()));
+            }
+            decode::decode(&png, Request::Full)
+        };
+        let t = make(&data, &probe, EDGE, &decode);
+        (t, calls.into_inner())
+    }
+
+    #[test]
+    fn takes_the_smallest_preview_that_covers_the_thumbnail() {
+        // 4:3 with bars, 3:2 large, 3:2 just large enough, 2:1, 3:2 too
+        // small.
+        let previews = [(160, 120), (1620, 1080), (384, 256), (400, 200), (200, 133)];
+        let (t, calls) = with_previews(&previews, &[]);
+        assert_eq!(calls, [(200, 100)], "the 384 × 256 preview");
+        let t = t.unwrap();
+        assert_eq!((t.width, t.height, t.full), (256, 171, (6000, 4000)));
+        // Within 2 % of the aspect ratio still counts, beyond it not.
+        let (_, calls) = with_previews(&[(1620, 1080), (390, 256)], &[]);
+        assert_eq!(calls, [(100, 100)], "390 × 256 is 1.6 % off");
+        let (_, calls) = with_previews(&[(1620, 1080), (400, 256)], &[]);
+        assert_eq!(calls, [(0, 100)], "400 × 256 is 4 % off");
+    }
+
+    #[test]
+    fn without_a_fitting_preview_the_image_itself_is_decoded() {
+        let (t, calls) = with_previews(&[(160, 120), (400, 200), (200, 133)], &[]);
+        assert_eq!(calls, [(0, 1000)], "the whole file");
+        assert!(t.is_ok());
+        let (_, calls) = with_previews(&[], &[]);
+        assert_eq!(calls, [(0, 1000)]);
+    }
+
+    #[test]
+    fn a_broken_preview_falls_back_to_the_image() {
+        let (t, calls) = with_previews(&[(1620, 1080), (384, 256)], &[1]);
+        assert_eq!(calls, [(100, 100), (0, 1000)]);
+        let t = t.unwrap();
+        assert_eq!((t.width, t.height), (256, 171));
+        assert_eq!(&t.bgra[..4], &[90, 90, 90, 90]);
+    }
+
     #[cfg(feature = "turbojpeg")]
     #[test]
     fn thumbnails_a_jpeg_with_dct_scaling() {

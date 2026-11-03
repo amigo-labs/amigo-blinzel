@@ -155,7 +155,7 @@ pub fn targets(job: &Job, files: &[(&Path, &SourceInfo)]) -> Vec<Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::batch::Size;
+    use crate::batch::{Codec, Size};
 
     fn info(stored: (u32, u32), exif: u16) -> SourceInfo {
         SourceInfo {
@@ -210,5 +210,105 @@ mod tests {
             "portrait by EXIF"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A clock 90 minutes ahead of UTC.
+    struct Ahead;
+
+    impl Source for Ahead {
+        fn probe(&self, data: &[u8]) -> Result<crate::decode::Probe, crate::decode::DecodeError> {
+            crate::decode::probe(data)
+        }
+        fn decode(
+            &self,
+            data: &[u8],
+            req: Request,
+        ) -> Result<crate::pixel::Image, crate::decode::DecodeError> {
+            crate::decode::decode(data, req)
+        }
+        fn utc_offset(&self, _t: SystemTime) -> i32 {
+            90 * 60
+        }
+    }
+
+    /// `docs/specs/batch-resize.md` AC-12, and AC-13 for the default
+    /// clock (UTC).
+    #[test]
+    fn dates_are_the_capture_time_else_the_modification_time() {
+        use crate::batch::run::Native;
+        let dir = std::env::temp_dir().join(format!("blinzel-dates-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let px = vec![90u8; 8 * 6 * 4];
+        let exif = crate::batch::meta::tests::sample();
+        let png = |exif| {
+            crate::batch::encode::encode(&px, 8, 6, Codec::Png, &Default::default(), exif, None)
+        };
+        let (dated, plain) = (dir.join("dated.png"), dir.join("plain.png"));
+        std::fs::write(&dated, png(Some(&exif)).unwrap()).unwrap();
+        std::fs::write(&plain, png(None).unwrap()).unwrap();
+        // 2023-11-14 22:13:20 UTC.
+        let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for f in [&dated, &plain] {
+            let file = std::fs::File::options().write(true).open(f).unwrap();
+            file.set_modified(modified).unwrap();
+        }
+        let date = |p: &Path, s: &dyn Source| {
+            let info = inspect(p, s).unwrap();
+            info.date.map(|d| d.format("YYYY-MM-DD hh:mm:ss"))
+        };
+        assert_eq!(
+            date(&dated, &Native).as_deref(),
+            Some("2024-05-17 10:11:12"),
+            "DateTimeOriginal"
+        );
+        assert_eq!(date(&dated, &Ahead).as_deref(), Some("2024-05-17 10:11:12"));
+        assert_eq!(
+            date(&plain, &Native).as_deref(),
+            Some("2023-11-14 22:13:20"),
+            "modification time, UTC"
+        );
+        assert_eq!(
+            date(&plain, &Ahead).as_deref(),
+            Some("2023-11-14 23:43:20"),
+            "the platform's local time"
+        );
+        let job = Job {
+            pattern: "{name}_{date}".into(),
+            ..Job::default()
+        };
+        let info = inspect(&plain, &Native).unwrap();
+        assert_eq!(
+            targets(&job, &[(&plain, &info)]),
+            [Ok(dir.join("resized/plain_2023-11-14.png"))]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `docs/specs/batch-resize.md` AC-14.
+    #[test]
+    fn relative_folders_follow_each_source_and_absolute_ones_are_kept() {
+        let dir = std::env::temp_dir().join(format!("blinzel-folders-{}", std::process::id()));
+        let (a, b) = (dir.join("one/a.jpg"), dir.join("two/b.jpg"));
+        let i = info((600, 400), 1);
+        let relative = Job {
+            out_dir: PathBuf::from("small/web"),
+            ..Job::default()
+        };
+        assert_eq!(
+            targets(&relative, &[(&a, &i), (&b, &i)]),
+            [
+                Ok(dir.join("one/small/web/a.jpg")),
+                Ok(dir.join("two/small/web/b.jpg"))
+            ]
+        );
+        let absolute = Job {
+            out_dir: dir.join("all"),
+            ..Job::default()
+        };
+        assert_eq!(
+            targets(&absolute, &[(&a, &i), (&b, &i)]),
+            [Ok(dir.join("all/a.jpg")), Ok(dir.join("all/b.jpg"))]
+        );
     }
 }

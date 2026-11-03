@@ -6,6 +6,10 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr::null_mut;
 
+use blinzel_core::settings::Settings;
+use blinzel_i18n::{Msg, tr};
+use blinzel_ui::app::Action;
+
 use super::shell::{UserEvent, post};
 
 type OsStatus = i32;
@@ -60,6 +64,28 @@ thread_local! {
     static HOT_KEY: Cell<*mut c_void> = const { Cell::new(null_mut()) };
 }
 
+/// The key and its modifiers: kVK_ANSI_1 with cmdKey and shiftKey.
+fn combo() -> (u32, u32) {
+    (KEY_1, CMD_KEY | SHIFT_KEY)
+}
+
+/// Whether ⌘⇧1 belongs registered: resident mode and the key setting both
+/// on.
+pub fn wanted(settings: &Settings) -> bool {
+    settings.resident && settings.screenshot_hotkey
+}
+
+/// What a press of ⌘⇧1 does, with the window shown or hidden.
+pub const ON_PRESS: Action = Action::Capture {
+    whole_screen: false,
+};
+
+/// The notice after [`set`]: none when it worked, else that another app
+/// holds ⌘⇧1 and the menu bar icon still takes screenshots.
+pub fn notice(registered: bool) -> Option<&'static str> {
+    (!registered).then(|| tr(Msg::HotkeyTakenMac))
+}
+
 extern "C" fn pressed(_call: *mut c_void, _event: *mut c_void, _data: *mut c_void) -> OsStatus {
     post(UserEvent::Hotkey);
     0
@@ -99,11 +125,45 @@ pub fn set(on: bool) -> bool {
             signature: SIGNATURE,
             id: 1,
         };
+        let (key, modifiers) = combo();
         let mut hot_key = null_mut();
-        if RegisterEventHotKey(KEY_1, CMD_KEY | SHIFT_KEY, id, target, 0, &mut hot_key) != 0 {
+        if RegisterEventHotKey(key, modifiers, id, target, 0, &mut hot_key) != 0 {
             return false;
         }
         HOT_KEY.with(|h| h.set(hot_key));
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinzel_i18n::{Lang, tr_in};
+
+    /// `docs/specs/screenshots.md` AC-04: ⌘⇧1 opens the overlay, shown or
+    /// hidden, where resident mode and the key are on; taken by another
+    /// app, a notice points to the menu bar icon.
+    #[test]
+    fn cmd_shift_1_opens_the_overlay_or_says_the_menu_bar_icon_still_works() {
+        // kVK_ANSI_1, cmdKey | shiftKey (Carbon's Events.h).
+        assert_eq!(combo(), (0x12, 0x100 | 0x200));
+        assert_eq!(
+            ON_PRESS,
+            Action::Capture {
+                whole_screen: false
+            }
+        );
+        for (resident, key) in [(true, true), (true, false), (false, true), (false, false)] {
+            let s = Settings {
+                resident,
+                screenshot_hotkey: key,
+                ..Settings::default()
+            };
+            assert_eq!(wanted(&s), resident && key);
+        }
+        assert_eq!(notice(true), None);
+        assert_eq!(notice(false), Some(tr(Msg::HotkeyTakenMac)));
+        let en = tr_in(Lang::En, Msg::HotkeyTakenMac);
+        assert!(en.contains("⌘⇧1") && en.contains("menu bar icon"), "{en}");
+    }
 }

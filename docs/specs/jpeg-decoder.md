@@ -48,7 +48,7 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 - [ ] AC-14 (error): If the decoder declines a JPEG that the viewer decodes with several threads (four components, three components that are not YCbCr, 4:1:1 or other unusual subsampling, a size over the pixel limit, corrupt entropy data), then the viewer hands it to libjpeg-turbo, which decodes it or reports its own error.
 - [ ] AC-15 (option): Where the build has no `turbojpeg` feature, the viewer decodes every supported JPEG with this decoder on any number of threads, decodes a region request at full size and crops it, and reports every JPEG the decoder declines as not decoded natively.
 - [ ] AC-16 (event): When a thread-init function has been registered, then every helper thread the decoder starts (scan threads, synchronization, bands, IDCT) runs it before decoding; only the first registration counts.
-- [ ] AC-17 (always): Decoding a 24 MP 4:2:0 baseline JPEG at full size on all cores of an 8-core machine, and at 1/8, is faster than libjpeg-turbo on one core by at least the factors of the M3 target (`blinzel.md` §12), measured alternately with `blinzel-bench jpeg-ab` on the corpus file `jpeg-24mp-420.jpg`.
+- [ ] AC-17 (always, manual: measurement on an 8-core machine): Decoding a 24 MP 4:2:0 baseline JPEG at full size on all cores of an 8-core machine, and at 1/8, is faster than libjpeg-turbo on one core by at least the factors of the M3 target (`blinzel.md` §12), measured alternately with `blinzel-bench jpeg-ab` on the corpus file `jpeg-24mp-420.jpg`.
 
 ## Technical notes
 
@@ -88,17 +88,23 @@ Opening a large JPEG is the most common thing the viewer does, and Huffman decod
 | AC-05 | `parses_baseline_420`, `classifies_subsampling`, `finds_app_segments` (`crates/blinzel-jpeg/src/lib.rs`), CI: Linux | built | |
 | AC-06 | `header_prefix_is_enough` (`crates/blinzel-jpeg/src/lib.rs`), CI: Linux | built | |
 | AC-07 | `dct_scale_choice` (`crates/blinzel-jpeg/src/lib.rs`), `scales_round_up` (`crates/blinzel-jpeg/src/decoder.rs`), CI: Linux | built | |
-| AC-08 | `rejects_garbage` (`crates/blinzel-jpeg/src/lib.rs`), `rejects_garbage` (`crates/blinzel-jpeg/src/decoder.rs`), `rejects_overfull_tables` (`crates/blinzel-jpeg/src/huffman.rs`), CI: Linux | built | |
-| AC-09 | — | open | |
-| AC-10 | — | open | |
+| AC-08 | `rejects_garbage` (`crates/blinzel-jpeg/src/lib.rs`; sampling factors 0x55, 0x10 and 0x01: red with 0 allowed), `rejects_garbage` (`crates/blinzel-jpeg/src/decoder.rs`), `rejects_overfull_tables` (`crates/blinzel-jpeg/src/huffman.rs`), CI: Linux | built | |
+| AC-09 | `refuses_unsupported_files_and_scales_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
+| AC-10 | `refuses_missing_or_short_buffers_without_writing` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-11 | `truncated_data_decodes_partially_without_panicking` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
 | AC-12 | `decode_with_threads_matches_the_turbojpeg_path` (`crates/blinzel-core/tests/own_jpeg.rs`), CI: Linux | built | |
-| AC-13 | — (no test tells which decoder ran) | open | |
-| AC-14 | — | open | |
-| AC-15 | — (no CI job builds without `turbojpeg`) | open | |
-| AC-16 | — | open | |
-| AC-17 | — (`blinzel-bench run` and `jpeg-ab` measure but assert no speed ratio) | open | |
+| AC-13 | `one_thread_and_regions_decode_with_libjpeg_turbo` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
+| AC-14 | `files_blinzel_jpeg_declines_go_to_libjpeg_turbo` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
+| AC-15 | `without_libjpeg_turbo_blinzel_jpeg_decodes_alone` (`crates/blinzel-core/src/decode/mod.rs`), CI: Linux | built | |
+| AC-16 | `every_helper_thread_runs_the_first_registered_init` (`crates/blinzel-core/tests/jpeg_thread_init.rs`), CI: Linux | built | |
+| AC-17 | manual: measurement on an 8-core machine (`blinzel-bench jpeg-ab`, alternately) | open | |
 
 ## Decisions
 
 - 2026-11-02: Extracted from the code (`/spec-extract`). The design spec's "pipeline of entropy decode and IDCT" exists only for progressive files (scans pipelined across threads); sequential files decode and transform each block in one pass.
+- 2026-11-02: AC-09 and AC-10 already held in `decode_planes`; their tests were green at once. They went red with the `is_supported`/scale check and the buffer check disabled, so they guard the behavior. The unsupported files are a real baseline file with only the frame marker and precision byte patched, so without the check the decoder would write output.
+- 2026-11-02: The JPEG choice is one function, `decode_jpeg(data, req, threads, turbo)`, and `decode_inner` passes `cfg!(feature = "turbojpeg")` as `turbo`. AC-15 is tested through `turbo = false` in the default build, because no gate or CI job builds without the feature and the test files come from libjpeg-turbo's encoder; `cargo check -p blinzel-core --no-default-features` stays green.
+- 2026-11-02: Which decoder ran shows in the result, not in a hook: libjpeg-turbo scales in eighths (3/8 for at least 401 of 1600 pixels), blinzel-jpeg rounds up to 1/2; and libjpeg-turbo's cropped region differs in its pixels from a crop of blinzel-jpeg's full image (the tests assert that difference, so they cannot pass by accident).
+- 2026-11-02: AC-13 to AC-15 already held; their tests were green at once and went red with the thread condition, the region exclusion, the libjpeg-turbo fallback or the YCbCr check of `own_jpeg::decode` disabled. The over-the-limit case of AC-14 checks the outcome (libjpeg-turbo's `TooLarge`): a file over 2^30 pixels that blinzel-jpeg could otherwise decode would need a gigabyte of output, so the header-only file is declined by blinzel-jpeg for missing tables as well.
+- 2026-11-02: AC-16 already held; its test was green at once. It lives in a test binary of its own because the hook is process-wide. It counts the init calls per decode against the helper threads the decoder starts (pass A, synchronization, bands; per progressive scan, IDCT bands), each on a thread of its own and never the caller's. It went red with the call removed from any one of the five spawn sites, and with a later registration replacing the first.
+- 2026-11-02: AC-17 is a manual measurement (option (a) of the open question): it names an 8-core machine, the development VM has 4 cores, the CI runners at most 4 vCPUs, and no CI step asserts a speed ratio, so only a fresh `blinzel-bench jpeg-ab` run on an 8-core machine, alternating both decoders, can be its evidence. The same holds for the other measurements on a named machine (browsing AC-21, startup AC-12). For reference, on the 4-vCPU development VM (Intel Xeon @ 2.80 GHz) on 2026-11-02, `jpeg-ab` on `jpeg-24mp-420.jpg` gave medians: full size, 4 threads, libjpeg-turbo 134 ms, blinzel-jpeg 104 ms (1.28×); 1/8, 4 threads, 82 ms vs. 56 ms (1.47×); full size, 1 thread, 132 ms vs. 194 ms (0.68×, where §15 has 1.01× on the Ryzen). The single-thread gap does not change a choice, since one-thread decodes go to libjpeg-turbo (AC-13); worth re-measuring on the Ryzen.

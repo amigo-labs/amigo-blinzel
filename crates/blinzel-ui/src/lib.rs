@@ -19,5 +19,7 @@ pub mod menu;
 pub mod popup;
 pub mod settings_store;
 pub mod snip;
+#[cfg(test)]
+pub(crate) mod testkit;
 pub mod thumbs;
 pub mod widgets;

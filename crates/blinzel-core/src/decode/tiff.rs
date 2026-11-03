@@ -157,7 +157,18 @@ pub fn decode(data: &[u8], threads: usize) -> Result<Image> {
     let (mut dec, (w, h)) = open(data)?;
     let (channels, bits) = match dec.colortype().map_err(err)? {
         ColorType::Gray(b) => (1, b),
-        ColorType::GrayA(b) => (2, b),
+        // The crate reports gray with an extra sample (the alpha) as
+        // `Multiband`, never as `GrayA`.
+        ColorType::Multiband {
+            bit_depth: b,
+            num_samples: 2,
+        } if dec
+            .find_tag_unsigned::<u16>(Tag::PhotometricInterpretation)
+            .map_err(err)?
+            == Some(1) =>
+        {
+            (2, b)
+        }
         ColorType::RGB(b) => (3, b),
         ColorType::RGBA(b) => (4, b),
         _ => return Err(UNSUPPORTED),
@@ -259,6 +270,22 @@ mod tests {
         out.into_inner()
     }
 
+    /// AC-03: the probe yields the ICC profile tag.
+    #[test]
+    fn probe_reads_the_icc_profile_tag() {
+        use crate::icc::{Trc, colorants, matrix_profile};
+        let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3 test");
+        let (w, h) = (6, 4);
+        let mut out = Cursor::new(Vec::new());
+        let mut enc = TiffEncoder::new(&mut out).unwrap();
+        let mut img = enc.new_image::<colortype::RGB8>(w, h).unwrap();
+        img.encoder().write_tag(Tag::IccProfile, &p3[..]).unwrap();
+        img.write_data(&crate::testimg::rgb(w, h)).unwrap();
+        let data = out.into_inner();
+        let icc = crate::decode::probe(&data).unwrap().icc.expect("profile");
+        assert_eq!(&icc.bytes[..], &p3[..]);
+    }
+
     #[test]
     fn strips_decode_in_parallel() {
         let (w, h) = (37, 23);
@@ -292,12 +319,23 @@ mod tests {
             .unwrap();
         let img = decode(out.get_ref(), 4).unwrap();
         let px = rgba_of(&img);
+        // Rounded, not truncated: 1500 is 5.84 in 8 bits, 10500 is 40.86.
+        let first: Vec<u8> = px.as_chunks::<4>().0[..8].iter().map(|p| p[0]).collect();
+        assert_eq!(first, [0, 6, 12, 18, 23, 29, 35, 41]);
         for (i, &g) in gray.iter().enumerate() {
-            assert_eq!(
-                px[i * 4..i * 4 + 4],
-                [to_u8(g); 3].into_iter().chain([255]).collect::<Vec<_>>()[..]
-            );
+            let v = (g as f64 * 255.0 / 65535.0).round() as u8;
+            assert_eq!(px[i * 4..i * 4 + 4], [v, v, v, 255], "sample {g}");
         }
+        // The same samples in one strip per row, read in parallel.
+        let mut out = Cursor::new(Vec::new());
+        let mut enc = TiffEncoder::new(&mut out)
+            .unwrap()
+            .with_compression(Compression::Deflate(DeflateLevel::Fast));
+        let mut strip_rows = enc.new_image::<colortype::Gray16>(w, h).unwrap();
+        strip_rows.rows_per_strip(1).unwrap();
+        strip_rows.write_data(&gray).unwrap();
+        assert_eq!(strips(out.get_ref()), h as usize);
+        assert_eq!(rgba_of(&decode(out.get_ref(), 4).unwrap()), px);
 
         // Premultiplied 100,50,25 at alpha 128 is straight 199,100,50.
         let mut out = Cursor::new(Vec::new());
@@ -308,6 +346,44 @@ mod tests {
         let img = decode(out.get_ref(), 1).unwrap();
         assert!(img.has_alpha());
         assert_eq!(rgba_of(&img), [199, 100, 50, 128, 7, 8, 9, 255]);
+
+        // Unassociated alpha is straight already.
+        let mut out = Cursor::new(Vec::new());
+        let mut enc = TiffEncoder::new(&mut out).unwrap();
+        let mut img = enc.new_image::<colortype::RGB8>(2, 1).unwrap();
+        img.extra_samples(&[ExtraSamples::UnassociatedAlpha])
+            .unwrap();
+        img.write_data(&[100, 50, 25, 128, 7, 8, 9, 255]).unwrap();
+        let img = decode(out.get_ref(), 1).unwrap();
+        assert!(img.has_alpha());
+        assert_eq!(rgba_of(&img), [100, 50, 25, 128, 7, 8, 9, 255]);
+    }
+
+    /// Gray + alpha keeps its alpha, straight as stored or un-premultiplied.
+    #[test]
+    fn gray_alpha_keeps_partial_alpha() {
+        for (extra, want) in [
+            (
+                ExtraSamples::UnassociatedAlpha,
+                [90, 90, 90, 128, 7, 7, 7, 255, 30, 30, 30, 0],
+            ),
+            (
+                ExtraSamples::AssociatedAlpha,
+                [179, 179, 179, 128, 7, 7, 7, 255, 30, 30, 30, 0],
+            ),
+        ] {
+            let mut out = Cursor::new(Vec::new());
+            let mut enc = TiffEncoder::new(&mut out).unwrap();
+            let mut img = enc.new_image::<colortype::Gray8>(3, 1).unwrap();
+            img.extra_samples(&[extra]).unwrap();
+            img.write_data(&[90, 128, 7, 255, 30, 0]).unwrap();
+            let data = out.into_inner();
+            for threads in [1, 4] {
+                let img = decode(&data, threads).unwrap();
+                assert!(img.has_alpha(), "{extra:?}");
+                assert_eq!(rgba_of(&img), want, "{extra:?}");
+            }
+        }
     }
 
     #[test]

@@ -23,9 +23,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use blinzel_core::settings::Settings;
 use blinzel_ui::app::Action;
 use blinzel_ui::backend::{CursorKind, Key};
-use blinzel_ui::chrome::Button;
+use blinzel_ui::chrome::{Button, Chrome};
 use blinzel_ui::settings_store;
 
 use crate::backend::{
@@ -99,24 +100,30 @@ fn nc_calc_size(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         return LRESULT(0);
     }
     let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) }.max(96);
-    let (bx, by) = frame_borders(dpi);
     let params = unsafe { &mut *(lp.0 as *mut NCCALCSIZE_PARAMS) };
-    let r = &mut params.rgrc[0];
-    r.left += bx;
-    r.right -= bx;
-    r.bottom -= by;
-    if is_maximized(hwnd) {
-        // Maximized windows hang over the monitor edge by the border.
-        r.top += by;
-    }
+    params.rgrc[0] = client_area(params.rgrc[0], frame_borders(dpi), is_maximized(hwnd));
     LRESULT(0)
+}
+
+/// The client area of the frameless `window`: no caption, the invisible
+/// side and bottom resize borders `(bx, by)` stay frame. A maximized
+/// window hangs over the monitor edge by the border on all four sides, so
+/// it loses the top one too.
+fn client_area(window: RECT, (bx, by): (i32, i32), maximized: bool) -> RECT {
+    RECT {
+        left: window.left + bx,
+        top: if maximized {
+            window.top + by
+        } else {
+            window.top
+        },
+        right: window.right - bx,
+        bottom: window.bottom - by,
+    }
 }
 
 fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
     let def = unsafe { DefWindowProcW(hwnd, WM_NCHITTEST, WPARAM(0), lp) }.0 as u32;
-    if def != HTCLIENT || app.fullscreen {
-        return def;
-    }
     let mut pt = POINT {
         x: lo_word(lp.0),
         y: hi_word(lp.0),
@@ -124,21 +131,45 @@ fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
     unsafe {
         let _ = ScreenToClient(hwnd, &mut pt);
     }
-    let p = (pt.x as f64, pt.y as f64);
-    let maximized = is_maximized(hwnd);
-    if !maximized {
-        let (bx, by) = frame_borders(app.dpi);
+    let frame = Frame {
+        borders: frame_borders(app.dpi),
+        maximized: is_maximized(hwnd),
+        fullscreen: app.fullscreen,
+        dragging: app.is_dragging(),
+    };
+    hit_zone(def, pt, &frame, &app.chrome())
+}
+
+/// The window state a hit test depends on.
+struct Frame {
+    /// Invisible resize border thickness (x, y).
+    borders: (i32, i32),
+    maximized: bool,
+    fullscreen: bool,
+    /// A selection drag runs.
+    dragging: bool,
+}
+
+/// What the point `pt` (client coordinates) of the frameless window is:
+/// `def` is `DefWindowProcW`'s answer (the side and bottom borders), the
+/// top border and the caption strip with its buttons come from here.
+fn hit_zone(def: u32, pt: POINT, frame: &Frame, chrome: &Chrome) -> u32 {
+    if def != HTCLIENT || frame.fullscreen {
+        return def;
+    }
+    if !frame.maximized {
+        let (bx, by) = frame.borders;
         if pt.y < by {
             return if pt.x < bx * 2 {
                 HTTOPLEFT
-            } else if pt.x >= app.client.0 as i32 - bx * 2 {
+            } else if pt.x >= chrome.client.0 as i32 - bx * 2 {
                 HTTOPRIGHT
             } else {
                 HTTOP
             };
         }
     }
-    let chrome = app.chrome();
+    let p = (pt.x as f64, pt.y as f64);
     if p.1 < chrome.caption_height() {
         return match chrome.hit(p) {
             Some(Button::Close) => HTCLOSE,
@@ -147,7 +178,7 @@ fn nc_hit_test(hwnd: HWND, app: &App, lp: LPARAM) -> u32 {
             Some(Button::Menu) => HTCLIENT,
             // Free caption strip: drag the window, but not while a
             // selection drag runs.
-            None if !app.is_dragging() => HTCAPTION,
+            None if !frame.dragging => HTCAPTION,
             None => HTCLIENT,
         };
     }
@@ -358,14 +389,17 @@ fn handle(
         }
         WM_LBUTTONDBLCLK => {
             let p = point_from_lparam(lp);
+            // The free caption strip is `HTCAPTION`: Windows maximizes.
             if let Some(a) = app.double_click(p) {
                 actions.extend(a);
-            } else if app.fullscreen || app.chrome().hit(p).is_none() {
-                actions.push(Action::ToggleFullscreen);
             }
             done
         }
-        WM_RBUTTONUP | WM_CONTEXTMENU => {
+        WM_RBUTTONUP => {
+            actions.extend(app.right_click(point_from_lparam(lp)));
+            done
+        }
+        WM_CONTEXTMENU => {
             let mut pt = POINT::default();
             unsafe {
                 let _ = GetCursorPos(&mut pt);
@@ -435,25 +469,21 @@ fn handle(
             done
         }
         WM_TIMER if wp.0 == TIMER_HOTKEY => {
-            let wanted = app.settings.resident && app.settings.screenshot_hotkey;
+            let wanted = screenshot::hotkey_wanted(&app.settings);
             let left = HOTKEY_TRIES
                 .fetch_sub(1, Ordering::Relaxed)
                 .saturating_sub(1);
-            if !wanted || screenshot::set_hotkey(hwnd, true) || left == 0 {
+            let retry = screenshot::retry(wanted, || screenshot::set_hotkey(hwnd, true), left);
+            if retry != screenshot::Retry::Again {
                 unsafe {
                     let _ = KillTimer(Some(hwnd), TIMER_HOTKEY);
                 }
-                if wanted && left == 0 {
-                    if app.hidden {
-                        // Now in the tray, and again in the window: a
-                        // notification may be switched off.
-                        resident::balloon(hwnd, &screenshot::hotkey_taken());
-                        screenshot::hint_pending(true);
-                    } else {
-                        app.show_notice(screenshot::hotkey_taken());
-                        unsafe {
-                            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
-                        }
+                if retry == screenshot::Retry::GiveUp {
+                    match screenshot::route_hint(app.tell(screenshot::hotkey_taken())) {
+                        screenshot::HintRoute::Balloon(text) => resident::balloon(hwnd, &text),
+                        screenshot::HintRoute::Window(ms) => unsafe {
+                            SetTimer(Some(hwnd), TIMER_NOTICE, ms, None);
+                        },
                     }
                 }
             }
@@ -542,9 +572,7 @@ fn handle(
             done
         }
         WM_HOTKEY if screenshot::is_hotkey(wp) => {
-            actions.push(Action::Capture {
-                whole_screen: false,
-            });
+            actions.push(screenshot::ON_HOTKEY);
             done
         }
         screenshot::WM_SCREENSHOT => {
@@ -556,28 +584,18 @@ fn handle(
                     // borrowed app here.
                     app.clip = None;
                     let copied = clipboard::put_shot(hwnd, &t.bgra, t.width, t.height, &t.png);
-                    match t.file {
-                        Ok(file) => {
-                            actions.extend(app.on_screenshot(file));
-                            match (copied, app.settings.screenshot_open) {
-                                (false, _) => Some(screenshot::failure("clipboard")),
-                                (true, false) => Some(screenshot::copied()),
-                                (true, true) => None,
-                            }
-                        }
-                        Err(e) => Some(screenshot::failure(&e)),
-                    }
+                    let (more, text) = app.on_screenshot(copied, t.file);
+                    actions.extend(more);
+                    text
                 }
                 Err(e) => Some(screenshot::failure(&e)),
             };
             if let Some(text) = text {
-                if app.hidden {
-                    resident::balloon(hwnd, &text);
-                } else {
-                    app.show_notice(text);
-                    unsafe {
+                match app.tell(text) {
+                    Some(text) => resident::balloon(hwnd, &text),
+                    None => unsafe {
                         SetTimer(Some(hwnd), TIMER_NOTICE, 3500, None);
-                    }
+                    },
                 }
             }
             done
@@ -596,20 +614,8 @@ fn handle(
             actions.extend(app.files_dropped(paths));
             done
         }
-        WM_RENDERFORMAT => {
-            if let Some(src) = &app.clip {
-                clipboard::render(src, wp.0 as u32);
-            }
-            done
-        }
-        WM_RENDERALLFORMATS => {
-            if let Some(src) = app.clip.clone() {
-                clipboard::render_all(hwnd, &src);
-            }
-            done
-        }
-        WM_DESTROYCLIPBOARD => {
-            app.clip = None;
+        WM_RENDERFORMAT | WM_RENDERALLFORMATS | WM_DESTROYCLIPBOARD => {
+            clipboard::on_message(hwnd, msg, wp, &mut app.clip);
             done
         }
         WM_CLOSE => {
@@ -732,12 +738,8 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::OpenDialog => match crate::dialogs::open_file(hwnd) {
-            Some(p) => {
-                // From the tray the window may be hidden.
-                let mut more = with_app(|a| a.open(p)).unwrap_or_default();
-                more.push(Action::Wake { opened: true });
-                more
-            }
+            // From the tray the window may be hidden.
+            Some(p) => with_app(|a| a.open_chosen(p)).unwrap_or_default(),
             None => vec![],
         },
         Action::Recycle(path) => {
@@ -753,26 +755,24 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
                 crate::dialogs::save_file(hwnd, &folder, &job.default_name, job.prefer_png)
             {
                 let raw = hwnd.0 as isize;
-                let services = with_app(|a| a.services.clone());
-                let _ = std::thread::Builder::new()
-                    .name("blinzel-save".into())
-                    .spawn(move || {
-                        let Some(services) = services else { return };
-                        let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
-                        let ptr = Box::into_raw(Box::new(text)) as isize;
-                        unsafe {
-                            if PostMessageW(
-                                Some(HWND(raw as *mut _)),
-                                WM_NOTICE,
-                                WPARAM(0),
-                                LPARAM(ptr),
-                            )
-                            .is_err()
-                            {
-                                drop(Box::from_raw(ptr as *mut String));
+                if let Some(services) = with_app(|a| a.services.clone()) {
+                    let _ =
+                        blinzel_ui::app::save_in_background(services, job, target, move |text| {
+                            let ptr = Box::into_raw(Box::new(text)) as isize;
+                            unsafe {
+                                if PostMessageW(
+                                    Some(HWND(raw as *mut _)),
+                                    WM_NOTICE,
+                                    WPARAM(0),
+                                    LPARAM(ptr),
+                                )
+                                .is_err()
+                                {
+                                    drop(Box::from_raw(ptr as *mut String));
+                                }
                             }
-                        }
-                    });
+                        });
+                }
             }
             vec![]
         }
@@ -817,12 +817,7 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::SetResident(on) => {
-            resident::set_autostart(on);
-            if on {
-                resident::add_tray(hwnd);
-            } else {
-                resident::remove_tray(hwnd);
-            }
+            resident::set_resident(hwnd, on, resident::set_autostart);
             vec![]
         }
         Action::TrayMenu { x, y } => match menu::show_tray(hwnd, x, y) {
@@ -848,7 +843,7 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             if !screenshot::set_hotkey(hwnd, on) {
                 with_app(|a| a.show_notice(screenshot::hotkey_taken()));
                 unsafe {
-                    SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+                    SetTimer(Some(hwnd), TIMER_NOTICE, screenshot::HINT_MS, None);
                 }
             }
             vec![]
@@ -873,11 +868,10 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
         },
         Action::Wake { opened } => wake(hwnd, opened),
         Action::Close => {
-            // One hidden instance is enough (several windows with "open in
-            // the same window" off). A hidden window closed by someone
-            // else (e.g. taskkill) exits.
-            let hide = with_app(|a| a.settings.resident && !a.hidden).unwrap_or(false)
-                && instance::hidden(Some(hwnd)).is_none();
+            let state = with_app(|a| (a.settings.resident, a.hidden));
+            let hide = state.is_some_and(|(resident, hidden)| {
+                close_hides(resident, hidden, || instance::hidden(Some(hwnd)).is_some())
+            });
             if hide {
                 hide_window(hwnd);
             } else {
@@ -965,11 +959,12 @@ pub fn restore_placement(hwnd: HWND, saved: Option<[i32; 4]>, maximized: bool) -
     unsafe { SetWindowPlacement(hwnd, &wp) }.is_ok() && maximized
 }
 
-/// Remembers where the window is, for the next start.
-fn remember_placement(hwnd: HWND, a: &mut App) {
+/// Remembers where the window is, for the next start: its normal (not
+/// maximized) rect and whether it is maximized.
+pub fn remember_placement(hwnd: HWND, settings: &mut Settings) {
     if let Some((rect, maximized)) = placement(hwnd) {
-        a.settings.window = Some(rect);
-        a.settings.maximized = maximized;
+        settings.window = Some(rect);
+        settings.maximized = maximized;
     }
 }
 
@@ -977,12 +972,11 @@ fn remember_placement(hwnd: HWND, a: &mut App) {
 /// tray icon and closes the window (which ends the message loop).
 fn exit(hwnd: HWND) {
     let clip = with_app(|a| {
-        // A hidden instance's copy may be older than what another window
-        // saved.
+        // A hidden window's placement was remembered when it hid.
         if !a.hidden {
-            remember_placement(hwnd, a);
-            settings_store::save(&a.settings);
+            remember_placement(hwnd, &mut a.settings);
         }
+        a.save_settings_on_exit();
         a.clip.take()
     })
     .flatten();
@@ -995,6 +989,15 @@ fn exit(hwnd: HWND) {
     }
 }
 
+/// Whether closing the window hides it instead of ending the process
+/// (`docs/specs/resident-mode.md` AC-03, AC-04, AC-11): in resident mode,
+/// unless it is hidden already (someone else closed it, e.g. taskkill) or
+/// `other_hidden` finds another hidden instance (several windows with
+/// "Open images in the same window" off): one is enough.
+fn close_hides(resident: bool, hidden: bool, other_hidden: impl FnOnce() -> bool) -> bool {
+    resident && !hidden && !other_hidden()
+}
+
 /// Resident mode: the window goes away, the process stays warm. An
 /// installed update takes over now instead.
 fn hide_window(hwnd: HWND) {
@@ -1002,7 +1005,7 @@ fn hide_window(hwnd: HWND) {
         toggle_fullscreen(hwnd);
     }
     with_app(|a| {
-        remember_placement(hwnd, a);
+        remember_placement(hwnd, &mut a.settings);
         settings_store::save(&a.settings);
     });
     set_cloak(hwnd, true);
@@ -1027,40 +1030,43 @@ pub fn restart_requested() -> bool {
     RESTART.with(|r| r.get())
 }
 
+/// The `--resident` start's warm-up (`docs/specs/resident-mode.md` AC-20):
+/// `warm` runs while the cloaked window is shown once (the first present
+/// of a never visible window costs extra in DWM), as a tool window so the
+/// taskbar adds no button; then it hides, with its style back.
+pub fn warm_hidden(hwnd: HWND, warm: impl FnOnce()) {
+    let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    unsafe {
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as isize);
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+    }
+    warm();
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_HIDE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+    }
+}
+
 /// Brings a hidden resident window back: shown cloaked, uncloaked with the
 /// first frame of the file just opened (or right away with the hint), then
 /// activated. A visible window is only activated.
 fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
-    let was_hidden = with_app(|a| {
-        let hidden = a.hidden;
-        if hidden {
-            if !opened {
-                a.reload_settings();
-            }
-            a.hidden = false;
-            a.cloaked = true;
-            a.activate_on_uncloak = true;
-        }
-        hidden
-    })
-    .unwrap_or(false);
+    let was_hidden = with_app(|a| a.wake(opened)).unwrap_or(false);
     if screenshot::take_hint() {
         with_app(|a| a.show_notice(screenshot::hotkey_taken()));
         unsafe {
-            SetTimer(Some(hwnd), TIMER_NOTICE, 9000, None);
+            SetTimer(Some(hwnd), TIMER_NOTICE, screenshot::HINT_MS, None);
         }
     }
     if !was_hidden {
         return vec![Action::Activate];
     }
-    blinzel_core::timing::mark("wake");
-    blinzel_core::bufpool::global().set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
     unsafe {
         // Painted while cloaked; not activated yet (costs ~20 ms).
         let _ = ShowWindow(hwnd, SW_SHOWNA);
     }
     if opened {
-        start_uncloak_timer(hwnd, 400);
+        start_uncloak_timer(hwnd, UNCLOAK_FALLBACK_MS);
         vec![]
     } else {
         let mut more = with_app(|a| a.render()).unwrap_or_default();
@@ -1073,9 +1079,9 @@ fn wake(hwnd: HWND, opened: bool) -> Vec<Action> {
 /// Print key: tries again for a minute, then leaves a notice for the next
 /// wake. Ctrl+Shift+Print works meanwhile.
 pub fn retry_hotkey(hwnd: HWND) {
-    HOTKEY_TRIES.store(12, Ordering::Relaxed);
+    HOTKEY_TRIES.store(screenshot::RETRY_TRIES, Ordering::Relaxed);
     unsafe {
-        SetTimer(Some(hwnd), TIMER_HOTKEY, 5000, None);
+        SetTimer(Some(hwnd), TIMER_HOTKEY, screenshot::RETRY_MS, None);
     }
 }
 
@@ -1091,6 +1097,10 @@ pub(crate) fn uncloak(hwnd: HWND) {
     platform::debug_log("window visible");
     blinzel_core::timing::mark("uncloak");
 }
+
+/// How long a cloaked window with a file to show waits for its image
+/// before it becomes visible anyway (`docs/specs/startup.md` AC-07).
+pub const UNCLOAK_FALLBACK_MS: u32 = 400;
 
 pub fn start_uncloak_timer(hwnd: HWND, ms: u32) {
     unsafe {
@@ -1239,4 +1249,404 @@ pub fn register_class(
         return Err(windows::core::Error::from_thread());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::core::w;
+
+    use crate::backend::{D3dCanvas, D3dDevice, Loader, WinHost, WinServices};
+    use crate::gfx::{Gfx, Renderer, SwapChain};
+
+    /// An 800 × 600 window at 100 % (with 8 px resize borders below); the
+    /// caption buttons are 46 × 32: close from x 754, maximize from 708,
+    /// minimize from 662, ☰ up to 46.
+    fn chrome() -> Chrome {
+        Chrome {
+            scale: 1.0,
+            client: (800.0, 600.0),
+            rtl: false,
+            system_buttons: false,
+        }
+    }
+
+    fn frame(maximized: bool, fullscreen: bool, dragging: bool) -> Frame {
+        Frame {
+            borders: (8, 8),
+            maximized,
+            fullscreen,
+            dragging,
+        }
+    }
+
+    fn hit(f: &Frame, def: u32, x: i32, y: i32) -> u32 {
+        hit_zone(def, POINT { x, y }, f, &chrome())
+    }
+
+    /// AC-03 (`docs/specs/platform-shells.md`): the plain window has no
+    /// caption, keeps the system's side and bottom borders, resizes at the
+    /// top border (diagonally in its outer corners) and moves on the free
+    /// caption strip, except while a selection drag runs.
+    #[test]
+    fn the_plain_window_resizes_at_the_top_and_moves_on_the_free_strip() {
+        let window = RECT {
+            left: 100,
+            top: 50,
+            right: 900,
+            bottom: 650,
+        };
+        let client = RECT {
+            left: 108,
+            top: 50,
+            right: 892,
+            bottom: 642,
+        };
+        assert_eq!(client_area(window, (8, 8), false), client);
+
+        let f = frame(false, false, false);
+        for def in [HTLEFT, HTRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT] {
+            assert_eq!(hit(&f, def, 400, 300), def, "the system's border");
+        }
+        assert_eq!(hit(&f, HTCLIENT, 400, 0), HTTOP);
+        assert_eq!(hit(&f, HTCLIENT, 400, 7), HTTOP);
+        assert_eq!(hit(&f, HTCLIENT, 0, 3), HTTOPLEFT);
+        assert_eq!(hit(&f, HTCLIENT, 15, 3), HTTOPLEFT);
+        assert_eq!(hit(&f, HTCLIENT, 16, 3), HTTOP);
+        assert_eq!(hit(&f, HTCLIENT, 784, 3), HTTOPRIGHT);
+        assert_eq!(hit(&f, HTCLIENT, 799, 3), HTTOPRIGHT);
+        assert_eq!(hit(&f, HTCLIENT, 400, 8), HTCAPTION);
+        assert_eq!(hit(&f, HTCLIENT, 400, 31), HTCAPTION);
+        assert_eq!(hit(&f, HTCLIENT, 400, 32), HTCLIENT, "below the strip");
+        assert_eq!(hit(&f, HTCLIENT, 20, 16), HTCLIENT, "☰");
+        assert_eq!(hit(&f, HTCLIENT, 680, 16), HTMINBUTTON);
+        assert_eq!(hit(&f, HTCLIENT, 730, 16), HTMAXBUTTON);
+        assert_eq!(hit(&f, HTCLIENT, 780, 16), HTCLOSE);
+
+        let dragging = frame(false, false, true);
+        assert_eq!(hit(&dragging, HTCLIENT, 400, 16), HTCLIENT);
+        assert_eq!(hit(&dragging, HTCLIENT, 780, 16), HTCLOSE);
+    }
+
+    /// AC-04: maximized, the content stays on the monitor and the top edge
+    /// does not resize; in full screen nothing is a caption.
+    #[test]
+    fn maximized_stays_on_the_monitor_and_full_screen_has_no_caption() {
+        // A maximized window on a 1920 × 1080 monitor hangs 8 px over
+        // each edge.
+        let window = RECT {
+            left: -8,
+            top: -8,
+            right: 1928,
+            bottom: 1088,
+        };
+        let monitor = RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        assert_eq!(client_area(window, (8, 8), true), monitor);
+
+        let max = frame(true, false, false);
+        assert_eq!(hit(&max, HTCLIENT, 400, 0), HTCAPTION);
+        assert_eq!(hit(&max, HTCLIENT, 100, 3), HTCAPTION);
+        assert_eq!(hit(&max, HTCLIENT, 790, 0), HTCLOSE, "the corner closes");
+        assert_eq!(hit(&max, HTCLIENT, 20, 0), HTCLIENT, "☰");
+
+        let full = frame(false, true, false);
+        for (x, y) in [(400, 0), (400, 16), (5, 3), (680, 16), (730, 16), (780, 16)] {
+            assert_eq!(hit(&full, HTCLIENT, x, y), HTCLIENT, "({x}, {y})");
+        }
+    }
+
+    extern "system" fn plain_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        unsafe { DefWindowProcW(h, m, w, l) }
+    }
+
+    /// AC-08: in full screen the window covers the monitor, yet what is
+    /// remembered for the next start is the rect from before full screen
+    /// and whether the window was maximized then.
+    #[test]
+    fn full_screen_remembers_the_rect_from_before() {
+        let instance = unsafe { GetModuleHandleW(None) }.unwrap().into();
+        let class = w!("BlinzelFullscreenTest");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(plain_proc),
+            hInstance: instance,
+            lpszClassName: class,
+            ..Default::default()
+        };
+        let hwnd = unsafe {
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("test"),
+                WS_OVERLAPPEDWINDOW,
+                100,
+                100,
+                480,
+                360,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .unwrap();
+        let remembered = || {
+            let mut s = Settings::default();
+            remember_placement(hwnd, &mut s);
+            (s.window.unwrap(), s.maximized)
+        };
+        let window_rect = || {
+            let mut r = RECT::default();
+            unsafe { GetWindowRect(hwnd, &mut r) }.unwrap();
+            r
+        };
+        let (normal, maximized) = remembered();
+        assert!(!maximized);
+
+        toggle_fullscreen(hwnd);
+        assert_eq!(
+            Some(window_rect()),
+            monitor_rect(hwnd, false),
+            "full screen"
+        );
+        assert_eq!(remembered(), (normal, false));
+        toggle_fullscreen(hwnd);
+        assert_eq!(remembered(), (normal, false));
+
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+        }
+        toggle_fullscreen(hwnd);
+        assert_eq!(
+            Some(window_rect()),
+            monitor_rect(hwnd, false),
+            "full screen"
+        );
+        assert_eq!(remembered(), (normal, true));
+        toggle_fullscreen(hwnd);
+        assert!(is_maximized(hwnd), "maximized again");
+        assert_eq!(remembered(), (normal, true));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    fn cloaked(hwnd: HWND) -> bool {
+        let mut c = 0u32;
+        // SAFETY: `c` is a live u32, the size passed.
+        unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut c).cast(), 4) }.unwrap();
+        c != 0
+    }
+
+    /// `docs/specs/startup.md` AC-07: with a file to show and the device
+    /// and swap chain ready, a window whose image does not come stays
+    /// cloaked, and the timer makes it visible after 400 ms. The loader has
+    /// no device here, so the decoded image never reaches the screen (a
+    /// slow file).
+    #[test]
+    fn a_window_whose_image_does_not_come_becomes_visible_after_400_ms() {
+        let hwnd = cloaked_window(w!("BlinzelUncloakTest"));
+        let mut app = warp_app(hwnd);
+        app.cloaked = true;
+        let actions = app.open(test_image());
+        APP.with(|cell| *cell.borrow_mut() = Some(app));
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+        run_actions(hwnd, actions);
+
+        start_uncloak_timer(hwnd, UNCLOAK_FALLBACK_MS);
+        let after = pump_while_cloaked(hwnd);
+        assert!(!cloaked(hwnd), "still invisible after {after:?}");
+        assert!(
+            after >= Duration::from_millis(350),
+            "visible after {after:?} already"
+        );
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert_eq!(with_app(|a| a.cloaked), Some(false));
+        drop(APP.with(|cell| cell.borrow_mut().take()));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// `docs/specs/resident-mode.md` AC-09 (the shell half): a hidden
+    /// window woken with a file is shown without activation and stays
+    /// cloaked until its image comes, 400 ms at the latest; woken without
+    /// one it is visible at once with the hint. A visible window is only
+    /// activated.
+    #[test]
+    fn a_woken_window_is_shown_cloaked_until_its_image_or_400_ms() {
+        let hwnd = cloaked_window(w!("BlinzelWakeTest"));
+        let mut app = warp_app(hwnd);
+        app.hide();
+        let mut actions = app.open(test_image());
+        actions.push(Action::Wake { opened: true });
+        APP.with(|cell| *cell.borrow_mut() = Some(app));
+        run_actions(hwnd, actions);
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool(), "shown");
+        assert!(cloaked(hwnd), "invisible until the first frame");
+        assert_eq!(with_app(|a| a.activate_on_uncloak), Some(true));
+        let after = pump_while_cloaked(hwnd);
+        assert!(!cloaked(hwnd), "still invisible after {after:?}");
+        assert!(
+            after >= Duration::from_millis(350),
+            "visible after {after:?}"
+        );
+        assert_eq!(
+            with_app(|a| a.activate_on_uncloak),
+            Some(false),
+            "activated"
+        );
+
+        // Hidden again, woken without a file: visible with the hint at once.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        set_cloak(hwnd, true);
+        with_app(|a| a.hide());
+        run_actions(hwnd, vec![Action::Wake { opened: false }]);
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert!(!cloaked(hwnd), "visible at once");
+        // Awake already: only activated.
+        assert_eq!(wake(hwnd, false), [Action::Activate]);
+        drop(APP.with(|cell| cell.borrow_mut().take()));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// `docs/specs/resident-mode.md` AC-03, AC-04, AC-11: closing hides the
+    /// window only in resident mode, only while it is visible and only
+    /// while no other instance is hidden; else the process ends.
+    #[test]
+    fn closing_hides_a_resident_window_unless_another_one_is_hidden() {
+        assert!(close_hides(true, false, || false));
+        assert!(!close_hides(true, false, || true), "another one is hidden");
+        assert!(
+            !close_hides(false, false, || panic!("no lookup")),
+            "not resident"
+        );
+        assert!(
+            !close_hides(true, true, || panic!("no lookup")),
+            "closed while hidden"
+        );
+    }
+
+    /// The test image the loader decodes but cannot show (no device).
+    fn test_image() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../blinzel-core/testdata/rgb420-64x48.avif")
+    }
+
+    /// Pumps messages while `hwnd` is cloaked, for 2 s at most; returns
+    /// how long.
+    fn pump_while_cloaked(hwnd: HWND) -> Duration {
+        let start = Instant::now();
+        let mut msg = MSG::default();
+        while cloaked(hwnd) && start.elapsed() < Duration::from_secs(2) {
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        start.elapsed()
+    }
+
+    /// A cloaked, never shown 480 × 360 window of a new class with our
+    /// window procedure.
+    fn cloaked_window(class: windows::core::PCWSTR) -> HWND {
+        let instance = unsafe { GetModuleHandleW(None) }.unwrap().into();
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(wndproc),
+            hInstance: instance,
+            lpszClassName: class,
+            ..Default::default()
+        };
+        let hwnd = unsafe {
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("test"),
+                WS_OVERLAPPEDWINDOW,
+                100,
+                100,
+                480,
+                360,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .unwrap();
+        set_cloak(hwnd, true);
+        hwnd
+    }
+
+    /// An App on a WARP device for `hwnd`, as `run.rs` builds it once
+    /// Direct3D is up.
+    fn warp_app(hwnd: HWND) -> App {
+        let mut cr = RECT::default();
+        unsafe {
+            let _ = GetClientRect(hwnd, &mut cr);
+        }
+        let client = (
+            (cr.right - cr.left).max(1) as u32,
+            (cr.bottom - cr.top).max(1) as u32,
+        );
+        let gfx = Gfx::create(true).expect("WARP device");
+        let device = Arc::new(D3dDevice::new(&gfx));
+        let renderer = Renderer::new(&gfx.device).unwrap();
+        let swap = SwapChain::new(&gfx, hwnd, client).unwrap();
+        let services = Arc::new(WinServices::default());
+        let loader = Loader::new(services.clone(), 1, 2, 2);
+        let color = blinzel_ui::color::ColorManager::new(false, crate::color::build_lut);
+        App::new(
+            WinHost { hwnd },
+            device,
+            D3dCanvas::new(gfx, renderer, swap),
+            services,
+            Settings::default(),
+            loader,
+            color,
+            96,
+            client,
+        )
+    }
+
+    /// `docs/specs/resident-mode.md` AC-20 (the window): the `--resident`
+    /// warm-up runs in the cloaked window shown as a tool window (no
+    /// taskbar button), which then hides with its style back.
+    #[test]
+    fn the_resident_warm_up_runs_in_a_hidden_tool_window() {
+        let hwnd = cloaked_window(w!("blinzel-test-warm-up"));
+        let style = || unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+        let before = style();
+        let mut during = None;
+        warm_hidden(hwnd, || {
+            let tool = style() & WS_EX_TOOLWINDOW.0 as isize != 0;
+            let shown = unsafe { IsWindowVisible(hwnd) }.as_bool();
+            during = Some((tool, shown, cloaked(hwnd)));
+        });
+        assert_eq!(during, Some((true, true, true)), "tool window, cloaked");
+        assert!(!unsafe { IsWindowVisible(hwnd) }.as_bool(), "hidden after");
+        assert_eq!(style(), before);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
 }

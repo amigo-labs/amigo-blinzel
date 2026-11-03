@@ -153,6 +153,17 @@ mod tests {
         }
     }
 
+    /// AC-03: the probe yields the `colr` profile, the same as the
+    /// container read for the system decoders.
+    #[test]
+    fn probe_reads_the_colour_profile() {
+        let tagged = include_bytes!("../../testdata/p3-64x48.heic");
+        let icc = crate::decode::probe(tagged).unwrap().icc.expect("profile");
+        assert!(!icc.srgb);
+        assert_eq!(Some(icc), crate::decode::avif::container_profile(tagged));
+        assert!(crate::decode::probe(RGB).unwrap().icc.is_none());
+    }
+
     #[test]
     fn alpha_is_straight() {
         let img = decode(RGBA, 1).unwrap();
@@ -162,12 +173,39 @@ mod tests {
         assert!(close(pixel(&img, 10, 5), [40, 25, 200, 255]));
     }
 
+    /// AC-15: partial alpha comes out straight whether the file stores it
+    /// straight or premultiplied (`prem` reference). Both are a flat
+    /// (100, 60, 200) at alpha 128; the premultiplied one stores
+    /// (50, 30, 100), made with heif-enc `--premultiplied-alpha`.
+    #[test]
+    fn partial_alpha_is_straight_in_both_storages() {
+        let straight = include_bytes!("../../testdata/half-alpha-16x16.heic");
+        let prem = include_bytes!("../../testdata/half-alpha-prem-16x16.heic");
+        for (name, file) in [("straight", &straight[..]), ("premultiplied", &prem[..])] {
+            let img = decode(file, 1).unwrap();
+            assert!(img.has_alpha(), "{name}");
+            for (x, y) in [(0, 0), (8, 8), (15, 15)] {
+                let p = pixel(&img, x, y);
+                assert!(close(p, [100, 60, 200, 128]), "{name} ({x}, {y}): {p:?}");
+            }
+        }
+    }
+
     #[test]
     fn broken_files_go_to_the_platform() {
-        assert!(matches!(
-            decode(&RGB[..RGB.len() / 2], 1),
-            Err(DecodeError::Unsupported(Format::Heif))
-        ));
+        // Cut anywhere, in the headers or in the image data.
+        for len in (0..RGB.len()).step_by(RGB.len() / 16 + 1) {
+            let cut = &RGB[..len];
+            assert!(
+                matches!(decode(cut, 1), Err(DecodeError::Unsupported(Format::Heif))),
+                "{len} bytes"
+            );
+            assert!(
+                matches!(info(cut), Err(DecodeError::Unsupported(Format::Heif)))
+                    || len * 2 > RGB.len(),
+                "{len} bytes"
+            );
+        }
         let mut bad = RGB.to_vec();
         for b in bad.iter_mut().skip(200) {
             *b ^= 0x5a;

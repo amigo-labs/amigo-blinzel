@@ -12,6 +12,8 @@ pub mod macos;
 pub mod notices_text;
 #[cfg(unix)]
 pub mod selfupdate;
+#[cfg(unix)]
+mod watch;
 
 #[cfg(windows)]
 pub mod backend;

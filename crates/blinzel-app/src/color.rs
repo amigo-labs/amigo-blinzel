@@ -76,10 +76,16 @@ pub fn display_target(monitor: HMONITOR) -> Option<Profile> {
 /// asking Windows; `None` if it never did.
 pub fn remembered_target(monitor: HMONITOR) -> Option<Option<Profile>> {
     let (name, _) = monitor_device(monitor)?;
-    let text = std::fs::read_to_string(cache_file()?).ok()?;
+    remembered(&cache_file()?, &name)
+}
+
+/// What `file` remembers for `device`: `Some(None)` for sRGB, `None` if
+/// nothing or the profile file cannot be read.
+fn remembered(file: &Path, device: &str) -> Option<Option<Profile>> {
+    let text = std::fs::read_to_string(file).ok()?;
     let path = text
         .lines()
-        .find_map(|l| l.strip_prefix(name.as_str())?.strip_prefix('\t'))?;
+        .find_map(|l| l.strip_prefix(device)?.strip_prefix('\t'))?;
     if path.is_empty() {
         return Some(None);
     }
@@ -98,10 +104,15 @@ fn cache_file() -> Option<PathBuf> {
 }
 
 fn remember(device: &str, profile: Option<&Path>) {
-    let Some(file) = cache_file() else {
-        return;
-    };
-    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    if let Some(file) = cache_file() {
+        remember_in(&file, device, profile);
+    }
+}
+
+/// Records `profile` (none: sRGB) for `device` in `file`, replacing what
+/// it held for that device.
+fn remember_in(file: &Path, device: &str, profile: Option<&Path>) {
+    let old = std::fs::read_to_string(file).unwrap_or_default();
     let mut lines: Vec<String> = old
         .lines()
         .filter(|l| l.split('\t').next() != Some(device))
@@ -114,7 +125,7 @@ fn remember(device: &str, profile: Option<&Path>) {
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(&file, text);
+        let _ = std::fs::write(file, text);
     }
 }
 
@@ -289,6 +300,39 @@ mod tests {
 
     fn to8(v: f32) -> i32 {
         (v * 255.0).round() as i32
+    }
+
+    /// `docs/specs/color-management.md` AC-11: a start takes the target
+    /// remembered for its monitor (sRGB when nothing is remembered, the
+    /// profile is sRGB or its file is gone); each answer replaces that
+    /// monitor's line for the next start.
+    #[test]
+    fn remembers_the_target_per_monitor_for_the_next_start() {
+        let dir = std::env::temp_dir().join(format!("blinzel-display-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("amigo-blinzel").join("display-color.txt");
+        let (one, ten) = (r"\\.\DISPLAY1", r"\\.\DISPLAY10");
+        assert_eq!(remembered(&file, one), None, "nothing remembered yet");
+
+        remember_in(&file, one, None);
+        assert_eq!(remembered(&file, one), Some(None), "sRGB remembered");
+        assert_eq!(remembered(&file, ten), None, "only for that monitor");
+
+        let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3 display");
+        let srgb = matrix_profile(colorants::SRGB, Trc::Srgb, "sRGB display");
+        let (p3_file, srgb_file) = (dir.join("p3.icc"), dir.join("srgb.icc"));
+        std::fs::write(&p3_file, &p3).unwrap();
+        std::fs::write(&srgb_file, &srgb).unwrap();
+        remember_in(&file, one, Some(&p3_file));
+        remember_in(&file, ten, Some(&srgb_file));
+        assert_eq!(remembered(&file, one), Some(Some(Profile::new(p3))));
+        assert_eq!(remembered(&file, ten), Some(None), "an sRGB profile");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(text.lines().count(), 2, "one line per monitor: {text:?}");
+
+        std::fs::remove_file(&p3_file).unwrap();
+        assert_eq!(remembered(&file, one), None, "the profile file is gone");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

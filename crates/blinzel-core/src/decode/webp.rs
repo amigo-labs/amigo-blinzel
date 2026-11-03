@@ -143,6 +143,10 @@ pub fn stream_animation(
             })?
     ];
     let frame_bytes = size.0 as usize * size.1 as usize * 4;
+    let plays = match dec.loop_count() {
+        LoopCount::Forever => None,
+        LoopCount::Times(n) => Some(n.get() as u32),
+    };
     let mut count = 0;
     while count < dec.num_frames() as usize && (count + 1) * frame_bytes <= budget {
         let ms = dec.read_frame(&mut buf).map_err(err)?;
@@ -150,15 +154,12 @@ pub fn stream_animation(
         let more = sink(AnimFrame {
             image: image(&buf, size, alpha),
             delay_ms: super::min_delay_ms(ms),
+            plays,
         });
         if !more {
             break;
         }
     }
-    let plays = match dec.loop_count() {
-        LoopCount::Forever => None,
-        LoopCount::Times(n) => Some(n.get() as u32),
-    };
     Ok(super::AnimInfo {
         frames: count,
         plays,
@@ -196,6 +197,17 @@ mod tests {
     /// An animation of lossless full-canvas frames `(rgba, delay ms)`
     /// playing `loops` times (0: for ever).
     fn animated(w: u32, h: u32, frames: &[(Vec<u8>, u32)], loops: u16) -> Vec<u8> {
+        let frames: Vec<(Vec<u8>, u32)> = frames
+            .iter()
+            // The encoder writes RIFF....WEBP and then the VP8L chunk.
+            .map(|(rgba, delay)| (lossless(w, h, rgba)[12..].to_vec(), *delay))
+            .collect();
+        animation(w, h, &frames, loops)
+    }
+
+    /// An animation of full-canvas frames `(image chunk, delay ms)`
+    /// playing `loops` times (0: for ever).
+    fn animation(w: u32, h: u32, frames: &[(Vec<u8>, u32)], loops: u16) -> Vec<u8> {
         let mut vp8x = vec![0x02 | 0x10, 0, 0, 0];
         vp8x.extend(u24(w - 1));
         vp8x.extend(u24(h - 1));
@@ -204,13 +216,11 @@ mod tests {
         let mut body = b"WEBP".to_vec();
         body.extend(chunk(b"VP8X", &vp8x));
         body.extend(chunk(b"ANIM", &anim));
-        for (rgba, delay) in frames {
-            // The encoder writes RIFF....WEBP and then the VP8L chunk.
-            let file = lossless(w, h, rgba);
+        for (image, delay) in frames {
             let mut anmf = [u24(0), u24(0), u24(w - 1), u24(h - 1), u24(*delay)].concat();
             // No blending: each frame replaces the canvas.
             anmf.push(0x02);
-            anmf.extend(&file[12..]);
+            anmf.extend(image);
             body.extend(chunk(b"ANMF", &anmf));
         }
         chunk(b"RIFF", &body)
@@ -226,6 +236,14 @@ mod tests {
         assert!(!is_lossy_still(&data));
         let anim = decode_animation(&data, usize::MAX).unwrap().unwrap();
         assert_eq!(anim.plays, Some(3));
+        // Every frame carries the loop count, for a decode error after it.
+        let mut plays = Vec::new();
+        stream_animation(&data, usize::MAX, &mut |f| {
+            plays.push(f.plays);
+            true
+        })
+        .unwrap();
+        assert_eq!(plays, [Some(3), Some(3)]);
         let delays: Vec<u32> = anim.frames.iter().map(|f| f.delay_ms).collect();
         // Browsers stretch delays under 20 ms to 100 ms.
         assert_eq!(delays, [70, 100]);
@@ -267,6 +285,14 @@ mod tests {
             "{px:?}"
         );
         assert!(!is_lossy_still(b"RIFF    WEBPVP8 "));
+        // An animation of lossy (VP8) frames is lossy, but no still.
+        let vp8 = TINY_LOSSY[12..].to_vec();
+        let anim = animation(8, 6, &[(vp8.clone(), 50), (vp8, 50)], 0);
+        let mut dec = open(&anim).unwrap();
+        assert!(dec.is_animated() && dec.is_lossy());
+        assert!(!is_lossy_still(&anim));
+        let first = decode(&anim).unwrap();
+        assert_eq!((first.width, first.height), (8, 6));
     }
 
     #[test]
@@ -289,5 +315,44 @@ mod tests {
         assert!(decode_animation(&data, usize::MAX).unwrap().is_none());
         assert!(!is_lossy_still(&data));
         assert!(decode(b"RIFF\0\0\0\0WEBPVP8 ").is_err());
+    }
+
+    /// AC-03: the probe yields the ICC chunk's profile.
+    #[test]
+    fn probe_reads_the_icc_chunk() {
+        use crate::icc::{Trc, colorants, matrix_profile};
+        let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "P3 test");
+        let (w, h) = (5, 4);
+        let mut data = Vec::new();
+        let mut enc = image_webp::WebPEncoder::new(&mut data);
+        enc.set_icc_profile(p3.clone());
+        let rgba = crate::testimg::rgba(w, h);
+        enc.encode(&rgba, w, h, image_webp::ColorType::Rgba8)
+            .unwrap();
+        let icc = crate::decode::probe(&data).unwrap().icc.expect("profile");
+        assert_eq!(&icc.bytes[..], &p3[..]);
+    }
+
+    /// The probe reads the EXIF orientation, with or without JPEG's
+    /// `Exif\0\0` in front of the TIFF data (AC-17).
+    #[test]
+    fn exif_orientation_is_probed() {
+        let (w, h) = (5, 4);
+        let tiff = crate::exif::tests::tiff_le(6, None);
+        for exif in [tiff.clone(), [b"Exif\0\0".as_slice(), &tiff].concat()] {
+            let mut data = Vec::new();
+            let mut enc = image_webp::WebPEncoder::new(&mut data);
+            enc.set_exif_metadata(exif);
+            enc.encode(
+                &crate::testimg::rgba(w, h),
+                w,
+                h,
+                image_webp::ColorType::Rgba8,
+            )
+            .unwrap();
+            let probe = crate::decode::probe(&data).unwrap();
+            assert_eq!(probe.orientation, Orientation::from_exif(6));
+            assert_eq!((probe.width, probe.height), (w, h));
+        }
     }
 }

@@ -4,6 +4,7 @@
 //! (app menu, "Open with") and an icon. `blinzel --uninstall` removes all
 //! of it; settings in `~/.config/amigo-blinzel` stay.
 
+use std::ffi::OsString;
 use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -47,9 +48,22 @@ pub struct Layout {
 
 impl Layout {
     pub fn user() -> Option<Layout> {
-        let home = std::env::var_os("HOME").filter(|h| !h.is_empty())?;
-        let home = PathBuf::from(home);
-        let data = std::env::var_os("XDG_DATA_HOME")
+        Layout::user_from(
+            std::env::var_os("HOME"),
+            std::env::var_os("XDG_DATA_HOME"),
+            blinzel_ui::dirs::cache(),
+        )
+    }
+
+    /// The user's layout from the values of `HOME` and `XDG_DATA_HOME`
+    /// (unset or empty: `~/.local/share`) and the viewer's cache folder.
+    fn user_from(
+        home: Option<OsString>,
+        xdg_data_home: Option<OsString>,
+        cache: Option<PathBuf>,
+    ) -> Option<Layout> {
+        let home = PathBuf::from(home.filter(|h| !h.is_empty())?);
+        let data = xdg_data_home
             .filter(|d| !d.is_empty())
             .map_or_else(|| home.join(".local/share"), PathBuf::from);
         Some(Layout {
@@ -57,7 +71,7 @@ impl Layout {
             bin: home.join(".local/bin"),
             applications: data.join("applications"),
             icons: data.join("icons/hicolor/scalable/apps"),
-            cache: blinzel_ui::dirs::cache()?,
+            cache: cache?,
             notify_desktop: true,
         })
     }
@@ -175,6 +189,11 @@ pub fn uninstall(layout: &Layout) -> Result<(), String> {
     }
 }
 
+/// What `--uninstall` prints when it is done: the `settings` folder stays.
+fn uninstalled(settings: &Path) -> String {
+    trf(Msg::UninstallDone, &[("dir", &settings.display())])
+}
+
 /// The desktop entry (freedesktop Desktop Entry Specification 1.5).
 pub fn desktop_entry(exe: &Path, comment: &str) -> String {
     let mut mime = MIME_TYPES.join(";");
@@ -255,10 +274,7 @@ pub fn run(uninstall_mode: bool) -> i32 {
         return match uninstall(&layout) {
             Ok(()) => {
                 let settings = blinzel_ui::dirs::config().unwrap_or_default();
-                println!(
-                    "{}",
-                    trf(Msg::UninstallDone, &[("dir", &settings.display())])
-                );
+                println!("{}", uninstalled(&settings));
                 0
             }
             Err(e) => {
@@ -333,7 +349,19 @@ mod tests {
         // From the installed copy itself: nothing to copy.
         install(&layout, &layout.exe()).unwrap();
 
+        // The settings folder, next to the cache like `~/.config` and
+        // `~/.cache`.
+        let settings = root.join("config").join(PRODUCT);
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(settings.join("settings.toml"), b"resident = true\n").unwrap();
+
         uninstall(&layout).unwrap();
+        assert!(settings.join("settings.toml").exists(), "the settings stay");
+        let message = uninstalled(&settings);
+        assert!(
+            message.contains(&settings.display().to_string()),
+            "{message}"
+        );
         for p in [
             layout.exe(),
             layout.link(),
@@ -345,6 +373,31 @@ mod tests {
         }
         assert!(source.exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// AC-12: `<data>` is `$XDG_DATA_HOME`, else `~/.local/share`; the
+    /// link is in `~/.local/bin` either way.
+    #[test]
+    fn the_data_folder_is_xdg_data_home_else_local_share() {
+        let cache = Some(PathBuf::from("/c/amigo-blinzel"));
+        let home = || Some(OsString::from("/home/u"));
+        let xdg = Layout::user_from(home(), Some("/d".into()), cache.clone()).unwrap();
+        assert_eq!(xdg.dir, Path::new("/d/amigo-blinzel"));
+        assert_eq!(xdg.applications, Path::new("/d/applications"));
+        assert_eq!(xdg.icons, Path::new("/d/icons/hicolor/scalable/apps"));
+        assert_eq!(xdg.bin, Path::new("/home/u/.local/bin"));
+        assert_eq!(xdg.cache, Path::new("/c/amigo-blinzel"));
+        for unset in [None, Some(OsString::new())] {
+            let l = Layout::user_from(home(), unset, cache.clone()).unwrap();
+            assert_eq!(l.dir, Path::new("/home/u/.local/share/amigo-blinzel"));
+            assert_eq!(
+                l.applications,
+                Path::new("/home/u/.local/share/applications")
+            );
+            assert_eq!(l.bin, Path::new("/home/u/.local/bin"));
+        }
+        assert!(Layout::user_from(None, Some("/d".into()), cache.clone()).is_none());
+        assert!(Layout::user_from(Some("".into()), None, cache).is_none());
     }
 
     #[test]

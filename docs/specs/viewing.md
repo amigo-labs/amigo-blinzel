@@ -74,7 +74,7 @@ This spec records what the code does today (reverse engineered on 2026-11-02). T
 - **Delete.** `Cmd::Recycle` → `Action::Recycle(path)`; the shell moves the file (`SHFileOperationW` with `FOF_ALLOWUNDO` on Windows, the `trash` crate on Linux, `NSFileManager.trashItemAtURL` on macOS) and calls `App::removed`, which uses `FileList::remove` to pick the next index.
 - **Menu.** `menu::items(&MenuState)` builds the tree every shell shows (Windows `TrackPopupMenuEx`, macOS menu bar, Linux `Popup` drawn by the UI). Commands carry stable ids (`Cmd::id` / `from_id`). Resident and screenshot entries are compiled in only on Windows and macOS (`RESIDENT`, `SCREENSHOTS`).
 - **Editor.** `edit_action` returns `Action::EditWith` or `Action::ChooseEditor { then: Some(file) }`; `App::editor_chosen` saves the editor path unless it contains `"`, `\n` or `\r`.
-- **Testing.** `App` has no headless test harness yet; only `edit_action` is tested in `app.rs`. `popup.rs` has a `NoDevice`/`NoCanvas` backend in its tests that a harness for `App<B>` could build on.
+- **Testing.** The App-level ACs are tested in `crates/blinzel-ui/src/app_viewing_tests.rs` with the headless harness `testkit::Harness`: keys, commands and mouse go in, the returned `Action`s, the view state, the menu model and the recorded frame (texts and their positions) come out. The window-state actions are applied the way the Linux shell does (`Harness::shell`).
 
 ## Edge cases
 
@@ -103,28 +103,35 @@ This spec records what the code does today (reverse engineered on 2026-11-02). T
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
 | AC-01 | `roundtrip`, `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`) | built | |
-| AC-02 | | open | |
+| AC-02 | `keys_and_the_menu_switch_the_mode_save_it_and_drop_zoom_and_pan` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
 | AC-03 | `fit_image_to_window`, `actual_size_overflows_and_clamps_pan`, `origin_snaps_to_whole_pixels_without_drift` (`crates/blinzel-core/src/layout.rs`) | built | |
 | AC-04 | `window_sizing_and_decode_size`, `window_grows_for_large_images_only` (`crates/blinzel-core/src/layout.rs`) | built | |
-| AC-05 | | open | |
-| AC-06 | partial: `zoom_keeps_point_under_cursor`, `zoom_steps_and_modes` (`crates/blinzel-core/src/layout.rs`) check the fixed point and the step list, not the wheel factor, the centre for keys or the reset | open | |
+| AC-05 | `the_window_takes_each_images_size_once_per_image_and_rotation`, `in_fit_image_to_window_the_window_may_grow_for_each_image` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
+| AC-06 | `the_wheel_zooms_by_1_2_per_notch_around_the_cursor_within_the_limits`, `plus_and_minus_step_through_the_levels_around_the_window_centre`, `zero_returns_to_the_modes_scale_centred` (`crates/blinzel-ui/src/app_viewing_tests.rs`); `zoom_keeps_point_under_cursor`, `zoom_steps_and_modes` (`crates/blinzel-core/src/layout.rs`) | built | |
 | AC-07 | `drag_modes_depend_on_overflow_and_shift` (`crates/blinzel-core/src/selection.rs`) | built | |
-| AC-08 | | open | |
-| AC-09 | | open | |
+| AC-08 | `a_middle_drag_pans_whatever_the_size_and_arrows_pan_only_an_overflowing_image` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
+| AC-09 | `r_and_l_turn_the_view_and_drop_selection_zoom_pan_and_crop` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
 | AC-10 | `composition_matches_transforms` (`crates/blinzel-core/src/geom.rs`), `all_orientations_minified` (`crates/blinzel-app/tests/wgpu_golden.rs`, Linux job with lavapipe; also `warp_golden.rs` in the Windows job and `metal_golden.rs` in the macOS job) | built | |
-| AC-11 | | open | |
-| AC-12 | | open | |
-| AC-13 | | open | |
-| AC-14 | | open | |
-| AC-15 | partial: `remove_and_placeholders` (`crates/blinzel-core/src/filelist.rs`) checks the next index only | open | |
+| AC-11 | `f11_and_enter_toggle_full_screen_which_hides_the_buttons`, `a_double_click_below_the_caption_strip_toggles_full_screen` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
+| AC-12 | `escape_ends_a_drag_clears_the_selection_shows_the_original_leaves_full_screen_and_closes` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
+| AC-13 | `without_an_image_the_window_shows_the_hint_or_why_the_open_failed`, `a_broken_image_shows_why_instead_of_the_previous_one` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
+| AC-14 | `ctrl_o_and_open_ask_for_the_dialog_and_a_drop_opens_its_first_file` (`crates/blinzel-ui/src/app_viewing_tests.rs`); `drops_fill_the_open_dialog_and_otherwise_open_the_first_file` (`crates/blinzel-ui/src/app_batch_tests.rs`) | built | |
+| AC-15 | `delete_moves_the_file_away_and_shows_the_one_that_took_its_place` (`crates/blinzel-ui/src/app_viewing_tests.rs`); `remove_and_placeholders` (`crates/blinzel-core/src/filelist.rs`) | built | |
 | AC-16 | `layout_and_hits`, `right_to_left_mirrors`, `system_buttons_leave_the_menu_alone` (`crates/blinzel-ui/src/chrome.rs`) | built | |
 | AC-17 | manual | open | |
-| AC-18 | | open | |
-| AC-19 | | open | |
+| AC-18 | `the_menu_opens_below_its_button_and_at_a_right_click` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
+| AC-19 | `the_menu_enables_and_checks_its_entries_by_state` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | built | |
 | AC-20 | `keyboard_skips_separators_and_disabled_items`, `mouse_opens_submenus_and_chooses`, `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`) | built | |
-| AC-21 | partial: `edit_asks_for_an_editor_first` (`crates/blinzel-ui/src/app.rs`) checks the choice between editor and question, not remembering the chosen editor | open | |
-| AC-22 | manual | open | |
+| AC-21 | `e_opens_the_image_in_the_editor_asking_for_one_the_first_time` (`crates/blinzel-ui/src/app_viewing_tests.rs`); `edit_asks_for_an_editor_first` (`crates/blinzel-ui/src/app.rs`) | built | |
+| AC-22 | manual; the request to the platform: `open_with_hands_the_current_file_to_the_platform` (`crates/blinzel-ui/src/app_viewing_tests.rs`) | open | |
 
 ## Decisions
 
 - 2026-11-02: Extracted from the code. Deviations from the design spec recorded as current behavior: + and − zoom around the window centre, not the cursor; "fit image to window" also resizes the window (grows it for images larger than the window); rotation drops a view crop; the "Move to Recycle Bin" label is used on macOS and Linux too, where the file goes to the Trash.
+- 2026-11-02 (spec-build): AC-02, AC-06, AC-08 and AC-09 held already; their App tests went green at once and were checked instead by breaking the code on purpose (saving, the dropped zoom, pan and crop, the menu's check mark, Ctrl with the digits, the wheel factor, its fixed point, the step table, the limits, the reset of the centre, the middle button, the pan step, Ctrl with the arrows, the rotation's direction and what it drops): every such change turned a test red.
+- 2026-11-02 (spec-build): AC-05 is tested on the `FitWindow` request `App` hands the shell: its size is the oriented image (or the crop) plus the strip, and the shell turns it into the size of AC-04 (`layout::window_client_size` / `grown_client_size`, tested there). The behavior held already; breaking each trigger, the once-per-image tag, the crop, the strip, `grow_only` and the maximized, full screen and "100 %" exits turned the tests red.
+- 2026-11-02 (spec-build): AC-11's double click was decided in each shell (Linux and macOS: the caption strip maximizes, everything else toggles full screen; Windows: everything but a button). `App::double_click` now returns the full screen toggle itself for the image area below the caption strip and for any point in full screen, and `None` only for the caption strip and its buttons, which the shells keep for maximizing (Linux, macOS) or leave to `HTCAPTION` (Windows). The behavior is the same on every platform, now tested once. The keys, the hidden buttons, AC-12 and AC-13 held already and were checked by breaking the code on purpose.
+- 2026-11-02 (spec-build): AC-18's right click was turned into a menu request by each shell. New public API `App::right_click(p)` returns that request (`ShowMenu` at `Host::to_screen(p)`); the Linux and macOS shells and the Windows `WM_RBUTTONUP` call it (`WM_CONTEXTMENU` keeps the cursor position). The menu button's corner is the function `menu_corner(button, rtl)`, tested for both directions directly: no right-to-left language exists yet, so the App-level test can only run left to right.
+- 2026-11-02 (spec-build): AC-15 is tested in `App`: Del and the menu ask the shell to move the current file (`Action::Recycle`), the image stays until the shell reports the move with `App::removed` (a failed move reports nothing), then the file that took its place shows, or the empty hint. The move itself is one platform call per shell (`SHFileOperationW` with `FOF_ALLOWUNDO`, `trash::delete`, `NSFileManager.trashItemAtURL`) and has no automated test. The menu label stays "Move to Recycle Bin" on macOS and Linux as recorded above: no AC or edge case asks for another label there.
+- 2026-11-02 (spec-build): AC-14, AC-15, AC-19 and AC-21 held already; breaking Ctrl+O, the open command, the first dropped file, the dialog's drop, the Del key, a premature removal, the next index, the empty state and title, each enabled and checked state, the E key and remembering, saving and filtering the editor path turned their tests red. Dropping `shown` after the last file goes is not observable (nothing is drawn without a current image) and survives such a change.
+- 2026-11-02 (spec-build): AC-06's fixed point under the cursor is tested where the zoomed image overflows the window. Where it still fits, AC-03's centring wins on that axis (`layout::compute` centres an axis that fits), so a small image zoomed by the wheel stays centred rather than sliding towards the cursor. For + and − the point at the window centre is checked within one client pixel: after a pan the exact origin is fractional, and both the point and its new place go through the whole-pixel snap.

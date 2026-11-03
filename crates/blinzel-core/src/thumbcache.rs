@@ -33,8 +33,15 @@ pub struct Key {
 impl Key {
     pub fn new(path: &Path, size: u64, mtime: u64) -> Key {
         let mut h = Fnv::new();
-        // Windows paths are case-insensitive.
-        h.write(path.to_string_lossy().to_lowercase().as_bytes());
+        let path = path.to_string_lossy();
+        // Windows paths are case-insensitive; Linux and macOS ones are
+        // case-sensitive (a case-insensitive APFS volume only costs a
+        // second entry for a file opened under another spelling).
+        if cfg!(windows) {
+            h.write(path.to_lowercase().as_bytes());
+        } else {
+            h.write(path.as_bytes());
+        }
         Key {
             path_hash: h.finish(),
             size,
@@ -353,13 +360,24 @@ mod tests {
             // Lossy (JPEG) where available, but close.
             assert!(crate::cpuref::psnr(&got.bgra, &t.bgra) > 30.0);
         }
-        // Reopened: from the index file; the key is case-insensitive.
+        // Reopened: from the index file; on Windows the key is
+        // case-insensitive.
         let c = ThumbCache::open(&dir, 1 << 30).unwrap();
-        let same = Key::new(Path::new(r"c:\bilder\a.JPG"), 1234, 99);
-        assert!(c.get(&same).is_some());
+        assert!(c.get(&key).is_some());
+        let other_case = Key::new(Path::new(r"c:\bilder\a.JPG"), 1234, 99);
+        assert_eq!(c.get(&other_case).is_some(), cfg!(windows));
         // A changed file misses.
         assert!(c.get(&Key { mtime: 100, ..key }).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows paths are case-insensitive; on Linux and macOS `A.jpg` and
+    /// `a.jpg` are two files with two entries.
+    #[test]
+    fn the_key_folds_case_only_on_windows() {
+        let upper = Key::new(Path::new("/photos/A.jpg"), 1234, 99);
+        let lower = Key::new(Path::new("/photos/a.jpg"), 1234, 99);
+        assert_eq!(upper == lower, cfg!(windows));
     }
 
     #[test]
@@ -410,6 +428,57 @@ mod tests {
         assert!(c.len() < keys.len());
         let reopened = ThumbCache::open(&dir, 40_000).unwrap();
         assert_eq!(reopened.len(), c.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn instances_share_the_cache_without_interleaving() {
+        let dir = temp_dir("shared");
+        let a = ThumbCache::open(&dir, 1 << 30).unwrap();
+        let b = ThumbCache::open(&dir, 1 << 30).unwrap();
+        // Two instances, two threads each, appending at the same time;
+        // every thumbnail has its own size, so a torn blob shows.
+        let key = |i: u32| Key::new(Path::new(&format!("{i}.png")), 1, 1);
+        let size = |i: u32| (8 + i, 4 + i % 7);
+        std::thread::scope(|s| {
+            for (c, first) in [(&a, 0), (&a, 1), (&b, 2), (&b, 3)] {
+                s.spawn(move || {
+                    for i in (first..80).step_by(4) {
+                        let (w, h) = size(i);
+                        c.put(&key(i), &thumb(w, h, i % 2 == 0)).unwrap();
+                    }
+                });
+            }
+        });
+        // An instance sees the other's entries after the next open.
+        assert!(a.get(&key(2)).is_none(), "b's, not seen by a yet");
+        let c = ThumbCache::open(&dir, 1 << 30).unwrap();
+        assert_eq!(c.len(), 80);
+        for i in 0..80 {
+            let t = c.get(&key(i)).unwrap_or_else(|| panic!("{i}"));
+            assert_eq!((t.width, t.height), size(i), "{i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_entry_from_an_old_generation_reads_as_a_miss() {
+        let dir = temp_dir("generation");
+        let old = Key::new(Path::new("old.png"), 1, 1);
+        let new = Key::new(Path::new("new.png"), 1, 1);
+        let t = thumb(32, 16, false);
+        let a = ThumbCache::open(&dir, 1 << 30).unwrap();
+        a.put(&old, &t).unwrap();
+        assert!(a.get(&old).is_some());
+        // Another instance starts a new generation (every append passes
+        // its limit) and writes a blob of the same length where `old` was.
+        let b = ThumbCache::open(&dir, 1).unwrap();
+        b.put(&new, &t).unwrap();
+        assert!(a.get(&old).is_none(), "a miss, not new.png's pixels");
+        assert!(a.get(&new).is_none(), "not in a's index");
+        let reopened = ThumbCache::open(&dir, 1 << 30).unwrap();
+        assert!(reopened.get(&old).is_none());
+        assert!(reopened.get(&new).is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

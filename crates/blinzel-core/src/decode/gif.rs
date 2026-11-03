@@ -25,11 +25,20 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
     let mut opts = gif::DecodeOptions::new();
     opts.set_color_output(gif::ColorOutput::RGBA);
     let mut dec = opts.read_info(data).map_err(err)?;
-    let (w, h) = (dec.width() as usize, dec.height() as usize);
+    // A 0 × 0 screen takes the first frame's extent, as the still does.
+    let (w, h) = match (dec.width(), dec.height()) {
+        (0, _) | (_, 0) => header_size(data)?,
+        (w, h) => (w as u32, h as u32),
+    };
+    let (w, h) = (w as usize, h as usize);
     check_size(w as u64, h as u64)?;
     let mut canvas = vec![0u8; w * h * 4];
     let mut count = 0;
     let mut used = 0usize;
+    let plays = |dec: &gif::Decoder<&[u8]>| match dec.repeat() {
+        gif::Repeat::Infinite => None,
+        gif::Repeat::Finite(n) => Some(n as u32 + 1),
+    };
     while let Some(f) = dec.read_next_frame().map_err(err)? {
         if used + canvas.len() > budget {
             break;
@@ -57,6 +66,7 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
                 }
             }
         }
+        let (dispose, delay) = (f.dispose, f.delay);
         let mut plane = Plane::new(w as u32, h as u32, 4);
         plane.data.copy_from_slice(&canvas);
         let opaque = canvas.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
@@ -77,14 +87,15 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
                 full_height: h as u32,
                 region: None,
             },
-            delay_ms: delay_ms(f.delay),
+            delay_ms: delay_ms(delay),
+            plays: plays(&dec),
         });
         count += 1;
         used += canvas.len();
         if !more {
             break;
         }
-        match (f.dispose, before) {
+        match (dispose, before) {
             (gif::DisposalMethod::Background, _) => {
                 for row in 0..fh.min(h.saturating_sub(fy)) {
                     canvas[((fy + row) * w + fx) * 4..][..cols * 4].fill(0);
@@ -94,24 +105,33 @@ pub fn stream_animation(data: &[u8], budget: usize, sink: &mut FrameSink) -> Res
             _ => {}
         }
     }
-    let plays = match dec.repeat() {
-        gif::Repeat::Infinite => None,
-        gif::Repeat::Finite(n) => Some(n as u32 + 1),
-    };
     Ok(AnimInfo {
         frames: count,
-        plays,
+        plays: plays(&dec),
     })
 }
 
-/// Logical screen size from the header.
+/// Logical screen size from the header; a 0 × 0 screen takes the first
+/// frame's extent, as [`decode`] and [`stream_animation`] do.
 pub fn header_size(d: &[u8]) -> Result<(u32, u32)> {
     if d.len() < 10 {
         return Err(DecodeError::Corrupt("GIF header truncated".into()));
     }
     let w = u16::from_le_bytes([d[6], d[7]]) as u32;
     let h = u16::from_le_bytes([d[8], d[9]]) as u32;
-    Ok((w, h))
+    if w != 0 && h != 0 {
+        return Ok((w, h));
+    }
+    let err = |e: gif::DecodingError| DecodeError::Corrupt(e.to_string());
+    let mut dec = gif::DecodeOptions::new().read_info(d).map_err(err)?;
+    let f = dec
+        .next_frame_info()
+        .map_err(err)?
+        .ok_or_else(|| DecodeError::Corrupt("no frames".into()))?;
+    Ok((
+        f.left as u32 + f.width as u32,
+        f.top as u32 + f.height as u32,
+    ))
 }
 
 pub fn decode(data: &[u8]) -> Result<Image> {
@@ -305,12 +325,90 @@ mod tests {
     }
 
     #[test]
+    fn frames_carry_the_loop_count_up_to_a_decode_error() {
+        use gif::DisposalMethod::Keep;
+        let three = animated(&[(0, Keep, (0, 0, 4, 2)); 3], None, gif::Repeat::Finite(2));
+        // The third frame's image data cut short.
+        let cut = &three[..three.len() - 4];
+        let mut plays = Vec::new();
+        let r = stream_animation(cut, usize::MAX, &mut |f| {
+            plays.push(f.plays);
+            true
+        });
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(plays, [Some(3), Some(3)]);
+    }
+
+    #[test]
     fn offset_frames_and_transparency() {
         let img = decode(&gif(6, 4, (2, 1, 2, 2), None)).unwrap();
         assert!(img.has_alpha());
         assert_eq!(img.to_bgra()[3], 0);
+        // The frame's first pixels (red, green) land at its offset.
+        let bgra = img.to_bgra();
+        let at = |x: usize, y: usize| &bgra[(y * 6 + x) * 4..][..4];
+        assert_eq!(at(2, 1), [0, 0, 255, 255]);
+        assert_eq!(at(3, 1), [0, 255, 0, 255]);
+        assert_eq!(at(2, 0)[3], 0);
+        assert_eq!(at(1, 1)[3], 0);
+        // A frame at the top left that leaves the right edge, or the
+        // bottom edge, uncovered.
+        for (frame, (x, y)) in [((0, 0, 2, 2), (3, 0)), ((0, 0, 4, 1), (0, 1))] {
+            let img = decode(&gif(4, 2, frame, None)).unwrap();
+            assert!(img.has_alpha(), "{frame:?}");
+            let bgra = img.to_bgra();
+            assert_eq!(bgra[3], 255, "{frame:?}: covered");
+            assert_eq!(bgra[(y * 4 + x) * 4 + 3], 0, "{frame:?}: uncovered");
+        }
         let img = decode(&gif(4, 2, (0, 0, 4, 2), Some(3))).unwrap();
         assert!(img.has_alpha());
+        // Index 3 is the fourth pixel of the first row.
+        assert_eq!(img.to_bgra()[3 * 4 + 3], 0);
+        assert_eq!(img.to_bgra()[2 * 4 + 3], 255);
         assert!(decode(b"GIF89a\x01\0\x01\0").is_err());
+    }
+
+    /// A 0 × 0 logical screen takes the first frame's extent, in the probe
+    /// as in the decoder (docs/specs/image-formats.md, edge cases).
+    #[test]
+    fn zero_screen_takes_the_frame_extent() {
+        let data = gif(0, 0, (1, 1, 3, 2), None);
+        let probe = crate::decode::probe(&data).unwrap();
+        assert_eq!((probe.width, probe.height), (4, 3));
+        let img = crate::decode::decode(&data, crate::decode::Request::Full).unwrap();
+        assert_eq!((img.width, img.height), (4, 3));
+        assert_eq!(img.to_bgra()[3], 0);
+    }
+
+    /// An animation on a 0 × 0 logical screen plays at the first frame's
+    /// extent too, instead of failing as zero-sized
+    /// (docs/specs/animations.md, edge cases).
+    #[test]
+    fn zero_screen_animations_take_the_first_frame_extent() {
+        let mut data = Vec::new();
+        {
+            let palette = [255, 0, 0, 0, 255, 0];
+            let mut enc = gif::Encoder::new(&mut data, 0, 0, &palette).unwrap();
+            for colour in [0u8, 1] {
+                let f = gif::Frame {
+                    left: 1,
+                    top: 1,
+                    width: 3,
+                    height: 2,
+                    delay: 5,
+                    buffer: std::borrow::Cow::Owned(vec![colour; 6]),
+                    ..Default::default()
+                };
+                enc.write_frame(&f).unwrap();
+            }
+        }
+        let anim = decode_animation(&data, usize::MAX).unwrap().unwrap();
+        assert_eq!(anim.frames.len(), 2);
+        let f = &anim.frames[1];
+        assert_eq!((f.image.width, f.image.height), (4, 3));
+        let b = f.image.to_bgra();
+        let at = |x: usize, y: usize| &b[(y * 4 + x) * 4..][..4];
+        assert_eq!(at(0, 0)[3], 0, "outside the frame");
+        assert_eq!(at(3, 2), [0, 255, 0, 255], "the second frame's green");
     }
 }

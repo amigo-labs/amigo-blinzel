@@ -62,7 +62,7 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 - Linux (`src/linux/`): `shell.rs` (winit `with_decorations(false)`, `drag_resize_window`, `drag_window`, `EDGE = 6.0`, `rfd::FileDialog`, `trash::delete`, `arboard` with `wayland-data-control`, `notify::recommended_watcher` = inotify, `WindowEvent::DroppedFile`), `instance.rs` (`hand_off`, `listen`), `gpu.rs` (wgpu with Vulkan and GL ES). The self-drawn menu is `blinzel_ui::popup`.
 - macOS (`src/macos/shell.rs`): `NSWindow` with `FullSizeContentView`, `setTitlebarAppearsTransparent(true)`, hidden title, `CAMetalLayer` as the layer of a layer-hosting view; `build_menu_bar` + `menuNeedsUpdate:`; `NSOpenPanel` / `NSSavePanel`; `NSFileManager trashItemAtURL`; `NSPasteboardTypePNG`; `notify` (FSEvents); `application:openURLs:`; `registerForDraggedTypes` with file URLs, `performDragOperation:`. `Chrome { system_buttons: true }` moves ☰ to the right.
 - Golden tests: `crates/blinzel-app/tests/warp_golden.rs` (`#![cfg(all(windows, feature = "turbojpeg"))]`), `wgpu_golden.rs` (`cfg(all(unix, not(target_os = "macos"), …))`), `metal_golden.rs` (`cfg(all(target_os = "macos", …))`); test fns `ycc_subsamplings_with_tile_seams`, `all_orientations_minified`, `zoom_crop_gray_and_alpha`, `heavy_minification_uses_box_filter`, `overlay_shapes_and_text_render`, `colour_transform_lut`. On mismatch both images go to `target/<backend>-golden/`. `BLINZEL_REQUIRE_GPU=1` (Linux and macOS jobs) turns a missing adapter into a failure; WARP always exists.
-- Smoke tests in `.github/workflows/ci.yml`: Linux "Linux viewer smoke test" (Xvfb, `timeout 120`), macOS "App bundle and smoke test (window, first frame)" (`perl -e 'alarm 120'`, `codesign --verify`), Windows "Startup smoke test (window, first frame)" — the last one is `continue-on-error: true`.
+- Smoke tests in `.github/workflows/ci.yml`: Linux "Linux viewer smoke test" (Xvfb, `timeout 120`), macOS "App bundle and smoke test (window, first frame)" (`perl -e 'alarm 120'`, `codesign --verify`), Windows "Startup smoke test (window, first frame)".
 
 ## Edge cases
 
@@ -81,29 +81,40 @@ One interface (`blinzel-ui`) runs in three native shells (decision in `blinzel.m
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 |      | open   |        |
-| AC-02 |      | open   |        |
-| AC-03 |      | open   |        |
-| AC-04 |      | open   |        |
+| AC-01 | `windows_11_24h2_and_newer_are_supported`, `the_build_number_is_the_real_one` (`crates/blinzel-app/src/platform/os.rs`), `an_unsupported_windows_refuses_the_install_with_2` (`crates/blinzel-app/src/setup/mod.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-02 | `the_executable_embeds_its_application_manifest` (`crates/blinzel-app/tests/manifest.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-03 | `the_plain_window_resizes_at_the_top_and_moves_on_the_free_strip` (`crates/blinzel-app/src/window.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-04 | `maximized_stays_on_the_monitor_and_full_screen_has_no_caption` (`crates/blinzel-app/src/window.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-05 |      | open   |        |
 | AC-06 |      | open   |        |
 | AC-07 | `restores_on_an_existing_monitor_only` (`crates/blinzel-app/tests/placement.rs`), Windows CI job | built |        |
-| AC-08 |      | open   |        |
+| AC-08 | `remembers_the_normal_rect_and_whether_it_is_maximized` (`crates/blinzel-app/tests/placement.rs`), `full_screen_remembers_the_rect_from_before` (`crates/blinzel-app/src/window.rs`), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-09 | `warp_golden.rs`: `ycc_subsamplings_with_tile_seams`, `all_orientations_minified`, `zoom_crop_gray_and_alpha`, `heavy_minification_uses_box_filter`, `overlay_shapes_and_text_render`, `colour_transform_lut`, Windows CI job | built |        |
-| AC-10 | CI step "Startup smoke test (window, first frame)" exists but is `continue-on-error`, so it asserts nothing | open |        |
-| AC-11 |      | open   |        |
+| AC-10 | CI step "Startup smoke test (window, first frame)" of the Windows job, no longer `continue-on-error` — Windows job ok (CI run 41532658575, `51202b8`) | built |        |
+| AC-11 | `the_edges_resize_the_plain_window_only`, `a_press_resizes_moves_or_goes_to_the_app` (`crates/blinzel-app/src/linux/shell.rs`); `a_double_click_below_the_caption_strip_toggles_full_screen` (`crates/blinzel-ui/src/app_viewing_tests.rs`, the App answers none on the strip) | built |        |
 | AC-12 | `keyboard_skips_separators_and_disabled_items`, `mouse_opens_submenus_and_chooses`, `stays_inside_and_mirrors_for_rtl` (`crates/blinzel-ui/src/popup.rs`), Linux CI job | built |        |
 | AC-13 |      | open   |        |
-| AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
-| AC-16 |      | open   |        |
+| AC-14 | `a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed` (`crates/blinzel-app/src/linux/shell.rs`); `delete_moves_the_file_away_and_shows_the_one_that_took_its_place` (`crates/blinzel-ui/src/app_viewing_tests.rs`); `a_copy_is_offered_to_other_programs_as_png` (`crates/blinzel-app/src/linux/clipboard.rs`, the Xvfb step of the Linux CI job) | built |        |
+| AC-15 | `adding_renaming_and_removing_a_file_are_reported` (`crates/blinzel-app/src/watch.rs`, Linux and macOS jobs); `a_changed_folder_is_listed_again_and_the_current_image_stays` (`crates/blinzel-ui/src/app_browsing_tests.rs`) | built |        |
+| AC-16 | `a_later_launch_hands_its_file_to_the_running_window`, `the_socket_of_a_crashed_instance_is_replaced`, `without_a_runtime_folder_there_is_no_socket` (`crates/blinzel-app/src/linux/instance.rs`); `same_window_follows_the_setting`, `a_handed_over_file_opens_and_the_window_comes_to_the_front` (`crates/blinzel-app/src/linux/shell.rs`); `a_launch_hands_its_file_over_and_exits_before_the_window` (`crates/blinzel-app/tests/startup.rs`, exit code 0) | built |        |
 | AC-17 | `wgpu_golden.rs`: the same six tests on lavapipe, Linux CI job (`BLINZEL_REQUIRE_GPU=1`) | built |        |
 | AC-18 | CI step "Linux viewer smoke test" (Linux job) | built |        |
 | AC-19 | `system_buttons_leave_the_menu_alone` (`crates/blinzel-ui/src/chrome.rs`), Linux CI job and all others | built |        |
 | AC-20 |      | open   |        |
-| AC-21 |      | open   |        |
+| AC-21 | `a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed`, `a_copy_lands_on_the_general_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`); `delete_moves_the_file_away_and_shows_the_one_that_took_its_place` (`crates/blinzel-ui/src/app_viewing_tests.rs`), CI: macOS, macOS job ok (CI run 41532658575, `51202b8`) | built |        |
 | AC-22 |      | open   |        |
 | AC-23 | `metal_golden.rs`: the same six tests, macOS CI job (`BLINZEL_REQUIRE_GPU=1`) | built |        |
 | AC-24 | CI step "App bundle and smoke test (window, first frame)" (macOS job) | built |        |
 
 ## Decisions
+
+- AC-11's decisions moved out of the Linux shell's event handlers into functions without a window: `resize_edge` (the 6 logical px edges, none while maximized or full screen), `resize_cursor`, `press` (edge, caption button, double click, free caption strip, the App) and `double_clicked` (the App's answer, else maximize or restore). Each test went red when the code under it was broken on purpose (the maximized check dropped, `<=` at the edge, the double click checked after the strip, `ToggleFullscreen` for `ToggleMaximize`).
+- AC-14's trash call moved into `recycle`; its test trashes a temporary file through the real freedesktop trash, finds it in `trash::os_limited::list` and purges it, so no test file stays in the developer's trash. A refusal is a file that does not exist. The test went red with `std::fs::remove_file` instead of the trash and with the list told on a refusal. Wayland's clipboard has no test (no compositor in CI); X11's is the Xvfb test.
+- AC-15: both shells' notify watchers were the same code; they are now one function, `watch::folder` (`crates/blinzel-app/src/watch.rs`), so one test covers inotify (Linux) and FSEvents (macOS job). It went red with the callback dropped and with the access filter removed.
+- AC-16 held before this spec was built: the tests of `docs/specs/browsing.md` AC-15 check exactly its clauses. The exit code 0 of the second launch went red in `tests/startup.rs` when `run` returned 3 instead.
+- AC-01's threshold moved into `os::supported` and the setup's refusal into `setup::refuse_install` (message unless silent, exit code 2), so both are tested without an old Windows. `the_build_number_is_the_real_one` reads the runner's build through `RtlGetVersion`: the unit-test executable has no manifest, so a shimmed API would say 9200. The viewer's exit code 1 is `run::fatal`'s, which every fatal start error shares; it has no test of its own (a message box would wait for a click). These tests only compile on Windows; their first Windows CI run is their proof.
+- AC-02 is checked on the built `blinzel.exe`: link.exe stores the manifest as an `RT_MANIFEST` resource in plain UTF-8, so the test looks for the five declarations in the executable's bytes (values, not formatting, since the linker may rewrite the XML). Its first Windows CI run is its proof.
+- AC-10: the Windows startup smoke step was `continue-on-error`, so it asserted nothing; it now fails the job. Its last informative run (CI run 41491320340, 2026-11-02) wrote the startup JSON and exited with 0, so the step is expected to stay green. Its first CI run without `continue-on-error` is the proof.
+- AC-03 and AC-04: the window procedure's hit test and client area moved into functions without a window, `hit_zone` (DefWindowProc's answer, the point, the window state as `Frame`, the `Chrome`) and `client_area`; `nc_hit_test` and `nc_calc_size` only gather their inputs. Their tests compile only on Windows; a Linux copy of both functions with the same assertions went red for each break tried (the maximized and full-screen checks dropped, the selection drag ignored, `<=` at the top-left corner, the side, bottom or maximized top border not taken off, DefWindowProc's border answer overridden). Their first Windows CI run is the proof.
+- AC-08: `full_screen_remembers_the_rect_from_before` enters full screen with `toggle_fullscreen` from a normal and from a maximized test window and checks what `remember_placement` saves (the rect and maximized state from before); `exit` and `hide_window` are the two callers of `remember_placement` (on close for a visible window, on hide after leaving full screen). With `placement` ignoring `SAVED_PLACEMENT` the maximized case would save `false` (the full-screen popup is not zoomed). Its first Windows CI run is the proof.
+- AC-21: the macOS trash call moved into `recycle`, which hands the image and where the Trash put it (`trashItemAtURL`'s resulting URL) to `removed`. The test checks that location is inside a `.Trash`/`.Trashes` folder rather than reading it (the Trash folder is privacy-protected on macOS) and deletes it afterwards; a file that does not exist is the refusal. Its first macOS CI run is the proof.

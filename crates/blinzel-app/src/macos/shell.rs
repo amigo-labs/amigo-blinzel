@@ -37,7 +37,7 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSApplicationTerminateReply, NSBackingStoreType, NSControlStateValueOff, NSControlStateValueOn,
     NSCursor, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSMenu,
-    NSMenuDelegate, NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard,
+    NSMenuDelegate, NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard, NSPasteboardType,
     NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSSavePanel, NSScreen, NSView, NSWindow,
     NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
@@ -56,6 +56,8 @@ pub enum UserEvent {
     Wake(Wake),
     /// Finder, the Dock or `open` handed over a file.
     Open(PathBuf),
+    /// Files and folders dropped onto the window.
+    Dropped(Vec<PathBuf>),
     /// A message for the notice toast.
     Notice(String),
     /// A copy's pixels as PNG, encoded in the background.
@@ -272,14 +274,7 @@ impl Host for MacHost {
     }
 
     fn watch_dir(&self, dir: &Path) -> Option<Box<dyn std::any::Any>> {
-        use notify::Watcher;
-        let mut w = notify::recommended_watcher(move |r: notify::Result<notify::Event>| {
-            if r.is_ok_and(|e| !e.kind.is_access()) {
-                post(UserEvent::Wake(Wake::DirChanged));
-            }
-        })
-        .ok()?;
-        w.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+        let w = crate::watch::folder(dir, || post(UserEvent::Wake(Wake::DirChanged)))?;
         Some(Box::new(w))
     }
 }
@@ -490,25 +485,12 @@ impl Shell {
                 if panel.runModal() == NSModalResponseOK
                     && let Some(path) = panel.URL().and_then(|u| url_path(&u))
                 {
-                    let mut a = self.app.open(path);
-                    a.push(Action::Wake { opened: true });
-                    a
+                    self.app.open_chosen(path)
                 } else {
                     vec![]
                 }
             }
-            Action::Recycle(path) => {
-                let url = file_url(&path);
-                match NSFileManager::defaultManager()
-                    .trashItemAtURL_resultingItemURL_error(&url, None)
-                {
-                    Ok(()) => self.app.removed(&path),
-                    Err(e) => {
-                        log(&format!("trash: {}", e.localizedDescription()));
-                        vec![]
-                    }
-                }
-            }
+            Action::Recycle(path) => recycle(&path, |p, _| self.app.removed(p)),
             Action::SaveCutout(job) => {
                 self.save(job, mtm);
                 vec![]
@@ -569,6 +551,9 @@ impl Shell {
                 self.hide();
                 vec![]
             }
+            // A measurement without an image (`docs/specs/startup.md`):
+            // `terminate` would exit with 0.
+            Action::Quit if self.app.exit_code() != 0 => std::process::exit(self.app.exit_code()),
             Action::Close | Action::Exit | Action::Quit => {
                 NSApplication::sharedApplication(mtm).terminate(None);
                 vec![]
@@ -595,12 +580,8 @@ impl Shell {
                 vec![]
             }
             Action::SetScreenshotHotkey(on) => {
-                if !hotkey::set(on) {
-                    tell(
-                        &mut self.app,
-                        &mut self.notice_until,
-                        tr(Msg::HotkeyTakenMac).into(),
-                    );
+                if let Some(text) = hotkey::notice(hotkey::set(on)) {
+                    tell(&mut self.app, &mut self.notice_until, text.into());
                 }
                 vec![]
             }
@@ -644,32 +625,26 @@ impl Shell {
     /// first frame of the file just `opened` (or at once without one). A
     /// visible window is activated.
     fn wake(&mut self, opened: bool) -> Vec<Action> {
-        if !self.app.hidden {
+        let Waking::Show { alpha, uncloak } = waking(self.app.wake(opened), opened) else {
             self.show();
             return vec![];
-        }
-        if !opened {
-            self.app.reload_settings();
-        }
-        self.app.hidden = false;
-        self.app.cloaked = true;
-        self.app.activate_on_uncloak = true;
-        timing::mark("wake");
-        blinzel_core::bufpool::global()
-            .set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
+        };
         super::resident::set_in_dock(MainThreadMarker::from(&*self.window), true);
-        self.window.setAlphaValue(0.0);
+        self.window.setAlphaValue(alpha);
         self.window.orderFront(None);
-        if opened {
-            let ns = Duration::from_millis(400).as_nanos() as i64;
-            let _ = DispatchQueue::main().after(DispatchTime::NOW.time(ns), || {
-                deliver(UserEvent::UncloakDue)
-            });
-            vec![]
-        } else {
-            let mut more = self.app.render();
-            more.push(Action::Uncloak);
-            more
+        match uncloak {
+            Uncloak::FirstFrame { at_latest } => {
+                let ns = at_latest.as_nanos() as i64;
+                let _ = DispatchQueue::main().after(DispatchTime::NOW.time(ns), || {
+                    deliver(UserEvent::UncloakDue)
+                });
+                vec![]
+            }
+            Uncloak::Now => {
+                let mut more = self.app.render();
+                more.push(Action::Uncloak);
+                more
+            }
         }
     }
 
@@ -695,13 +670,9 @@ impl Shell {
         let Some(target) = panel.URL().and_then(|u| url_path(&u)) else {
             return;
         };
-        let services = self.services.clone();
-        let _ = std::thread::Builder::new()
-            .name("blinzel-save".into())
-            .spawn(move || {
-                let text = blinzel_ui::app::save_cutout(&*services, &job, &target);
-                post(UserEvent::Notice(text));
-            });
+        let _ = blinzel_ui::app::save_in_background(self.services.clone(), job, target, |text| {
+            post(UserEvent::Notice(text))
+        });
     }
 
     /// Work that waits for the end of an event: a copy's pixels, the next
@@ -709,34 +680,9 @@ impl Shell {
     fn after_event(&mut self) {
         let copy = std::mem::take(&mut self.host.borrow_mut().copy);
         if copy && let Some(src) = self.app.clip.clone() {
-            let services = self.services.clone();
-            let _ = std::thread::Builder::new()
-                .name("blinzel-copy".into())
-                .spawn(move || {
-                    let r = (|| -> Result<_, String> {
-                        let data = services.read_file(&src.path).map_err(|e| e.to_string())?;
-                        let img = services
-                            .decode(&data, Request::Region(src.stored_rect), 1)
-                            .map_err(|e| e.to_string())?;
-                        let bgra = img.to_bgra();
-                        let (px, w, h) = blinzel_core::selection::orient_bgra(
-                            &bgra,
-                            img.width,
-                            img.height,
-                            src.orientation,
-                        );
-                        blinzel_core::batch::encode::encode(
-                            &px,
-                            w,
-                            h,
-                            blinzel_core::batch::encode::Codec::Png,
-                            &Default::default(),
-                            None,
-                            None,
-                        )
-                    })();
-                    post(UserEvent::Clipboard(r));
-                });
+            let _ = blinzel_ui::app::copy_in_background(self.services.clone(), src, |r| {
+                post(UserEvent::Clipboard(clip_png(r)))
+            });
         }
         self.schedule_tick();
     }
@@ -818,9 +764,13 @@ impl Shell {
                 self.opened = true;
                 let hidden = app.hidden;
                 let mut a = app.open(file);
-                if hidden {
-                    a.push(Action::Wake { opened: true });
-                } else if !app.cloaked {
+                a.extend(after_open(hidden, app.cloaked));
+                a
+            }
+            UserEvent::Dropped(paths) => {
+                let mut a = app.files_dropped(paths);
+                // As for a file from Finder: the window comes to the front.
+                if !app.cloaked {
                     a.push(Action::Activate);
                 }
                 a
@@ -848,9 +798,7 @@ impl Shell {
                 }
                 vec![]
             }
-            UserEvent::Hotkey => vec![Action::Capture {
-                whole_screen: false,
-            }],
+            UserEvent::Hotkey => vec![hotkey::ON_PRESS],
             UserEvent::Frozen(r, whole_screen) => {
                 let gpu = app.device.gpu.clone();
                 let r = r.and_then(|shots| {
@@ -876,18 +824,7 @@ impl Shell {
             UserEvent::Shot(r) => match r {
                 Ok(t) => {
                     let copied = put_png(&t.png);
-                    let open = app.settings.screenshot_open;
-                    let (actions, text) = match t.file {
-                        Ok(file) => (
-                            app.on_screenshot(file),
-                            match (copied, open) {
-                                (false, _) => Some(screenshot::failure("clipboard")),
-                                (true, false) => Some(screenshot::copied()),
-                                (true, true) => None,
-                            },
-                        ),
-                        Err(e) => (vec![], Some(screenshot::failure(&e))),
-                    };
+                    let (actions, text) = app.on_screenshot(copied, t.file);
                     if let Some(text) = text {
                         tell(app, &mut self.notice_until, text);
                     }
@@ -970,10 +907,7 @@ impl Shell {
             if double {
                 let actions = match self.app.double_click(p) {
                     Some(a) => a,
-                    None if !self.app.fullscreen && p.1 < chrome.caption_height() => {
-                        vec![Action::ToggleMaximize]
-                    }
-                    None => vec![Action::ToggleFullscreen],
+                    None => vec![Action::ToggleMaximize],
                 };
                 self.run(actions);
                 return;
@@ -1075,6 +1009,24 @@ fn file_url(p: &Path) -> Retained<NSURL> {
 
 fn url_path(u: &NSURL) -> Option<PathBuf> {
     u.path().map(|p| PathBuf::from(p.to_string()))
+}
+
+/// Moves `path` to the Trash; on success `removed` gets the image and
+/// where it is in the Trash now, a refused one stays where it is.
+fn recycle(path: &Path, removed: impl FnOnce(&Path, &Path) -> Vec<Action>) -> Vec<Action> {
+    let mut trashed = None;
+    match NSFileManager::defaultManager()
+        .trashItemAtURL_resultingItemURL_error(&file_url(path), Some(&mut trashed))
+    {
+        Ok(()) => removed(
+            path,
+            &trashed.and_then(|u| url_path(&u)).unwrap_or_default(),
+        ),
+        Err(e) => {
+            log(&format!("trash: {}", e.localizedDescription()));
+            vec![]
+        }
+    }
 }
 
 fn open_path(p: &Path) {
@@ -1245,33 +1197,55 @@ fn menu_bar_trees(state: &MenuState) -> (Vec<MenuItem>, Vec<MenuItem>) {
     (tidy(app_menu), tidy(rest))
 }
 
+/// A copy's pixels as the PNG the pasteboard gets (on the copy's thread).
+fn clip_png(pixels: Result<(Vec<u8>, u32, u32), String>) -> Result<Vec<u8>, String> {
+    let (px, w, h) = pixels?;
+    blinzel_core::batch::encode::encode(
+        &px,
+        w,
+        h,
+        blinzel_core::batch::encode::Codec::Png,
+        &Default::default(),
+        None,
+        None,
+    )
+}
+
 /// Puts PNG data on the general pasteboard.
 fn put_png(png: &[u8]) -> bool {
     let pb = NSPasteboard::generalPasteboard();
     pb.clearContents();
-    let data = NSData::with_bytes(png);
+    let (ty, data) = png_item(png);
+    pb.setData_forType(Some(&data), ty)
+}
+
+/// The pasteboard item of a PNG: its bytes as `public.png`.
+fn png_item(png: &[u8]) -> (&'static NSPasteboardType, Retained<NSData>) {
     // SAFETY: a constant type name.
-    pb.setData_forType(Some(&data), unsafe { NSPasteboardTypePNG })
+    (unsafe { NSPasteboardTypePNG }, NSData::with_bytes(png))
 }
 
 /// A message: the notice on the window, or next to the menu bar icon while
 /// the window is hidden.
 fn tell(app: &mut App<Mac>, notice_until: &mut Option<Instant>, text: String) {
-    if app.hidden {
-        super::resident::flash(&text);
-    } else {
-        app.show_notice(text);
-        *notice_until = Some(Instant::now() + NOTICE);
+    match app.tell(text) {
+        Some(text) => super::resident::flash(&text),
+        None => *notice_until = Some(Instant::now() + NOTICE),
     }
 }
 
 /// Resident mode on or off: the menu bar icon and the login item.
 fn set_resident(mtm: MainThreadMarker, on: bool) {
     let delegate = DELEGATE.with(|d| d.get().cloned());
-    super::resident::set_tray(mtm, on, delegate.as_deref());
-    if let Err(e) = super::resident::set_autostart(on) {
-        log(&format!("login item: {e}"));
-    }
+    super::resident::set_resident(
+        on,
+        |on| {
+            if let Err(e) = super::resident::set_autostart(on) {
+                log(&format!("login item: {e}"));
+            }
+        },
+        |change| super::resident::set_tray(mtm, change, delegate.as_deref()),
+    );
 }
 
 /// Drops leading, trailing and doubled separators.
@@ -1331,9 +1305,11 @@ define_class!(
             with_shell(|s| {
                 if s.app.settings.resident {
                     set_resident(mtm, true);
-                    if s.app.settings.screenshot_hotkey && !hotkey::set(true) {
-                        tell(&mut s.app, &mut s.notice_until, tr(Msg::HotkeyTakenMac).into());
-                    }
+                }
+                if hotkey::wanted(&s.app.settings)
+                    && let Some(text) = hotkey::notice(hotkey::set(true))
+                {
+                    tell(&mut s.app, &mut s.notice_until, text.into());
                 }
                 if s.start_hidden {
                     s.hide();
@@ -1354,7 +1330,7 @@ define_class!(
         /// The Dock icon or Finder opened the running app again.
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-            with_shell(|s| s.run(vec![Action::Wake { opened: false }]));
+            with_shell(|s| s.run(vec![REOPEN]));
             false
         }
 
@@ -1372,7 +1348,7 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, _app: &NSApplication) -> NSApplicationTerminateReply {
-            with_shell(|s| settings_store::save(&s.app.settings));
+            with_shell(|s| s.app.save_settings_on_exit());
             NSApplicationTerminateReply::TerminateNow
         }
     }
@@ -1435,7 +1411,7 @@ define_class!(
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
             if super::resident::is_tray_menu(menu) {
-                fill_menu(menu, &blinzel_ui::menu::tray_items(), self.mtm());
+                fill_menu(menu, &super::resident::tray_menu(), self.mtm());
                 return;
             }
             let Some(state) = with_shell(|s| s.app.menu_state()) else {
@@ -1549,11 +1525,8 @@ define_class!(
         #[unsafe(method(rightMouseUp:))]
         fn right_mouse_up(&self, e: &NSEvent) {
             with_shell(|s| {
-                let p = s.point(e);
-                s.run(vec![Action::ShowMenu {
-                    x: p.0 as i32,
-                    y: p.1 as i32,
-                }]);
+                let actions = s.app.right_click(s.point(e));
+                s.run(actions);
             });
         }
 
@@ -1607,16 +1580,22 @@ define_class!(
                 // SAFETY: NSURL is a valid class to read.
                 unsafe { pb.readObjectsForClasses_options(&classes, None) }
             };
-            let path = urls.and_then(|a| {
-                a.iter()
-                    .find_map(|o| o.downcast::<NSURL>().ok().and_then(|u| url_path(&u)))
-            });
-            match path {
-                Some(p) => {
-                    deliver(UserEvent::Open(p));
-                    true
-                }
-                None => false,
+            // Every file and folder, for the batch dialog's list; the
+            // App shows the first one when the dialog is closed.
+            let mut paths: Vec<PathBuf> = Vec::new();
+            if let Some(a) = urls {
+                paths.extend(
+                    a.iter()
+                        .filter_map(|o| o.downcast::<NSURL>().ok().and_then(|u| url_path(&u))),
+                );
+            }
+            // No early `return`: define_class! turns the body's `bool` into
+            // objc2's `Bool`, and a `return false` inside it does not convert.
+            if paths.is_empty() {
+                false
+            } else {
+                deliver(UserEvent::Dropped(paths));
+                true
             }
         }
     }
@@ -1757,6 +1736,88 @@ fn create_shell(mtm: MainThreadMarker) -> Result<(), String> {
     Ok(())
 }
 
+/// What waking the window does (`docs/specs/resident-mode.md` AC-09).
+#[derive(Debug, PartialEq)]
+enum Waking {
+    /// The window was visible: it is only activated.
+    Activate,
+    /// The window was hidden: back in the Dock, shown with `alpha` (0,
+    /// invisible) and without activation (`orderFront`), and visible when
+    /// `uncloak` says; `Action::Uncloak` then takes the foreground.
+    Show { alpha: f64, uncloak: Uncloak },
+}
+
+/// When a woken window becomes visible.
+#[derive(Debug, PartialEq)]
+enum Uncloak {
+    /// With the first frame of the file just opened, `at_latest` after
+    /// the wake (`UserEvent::UncloakDue`).
+    FirstFrame { at_latest: Duration },
+    /// At once, with the empty-start hint.
+    Now,
+}
+
+/// A file's first frame may take this long before a woken window shows.
+const UNCLOAK_AT_LATEST: Duration = Duration::from_millis(400);
+
+/// A window that `was_hidden` woken, with the file just `opened` or not.
+fn waking(was_hidden: bool, opened: bool) -> Waking {
+    if !was_hidden {
+        return Waking::Activate;
+    }
+    let uncloak = if opened {
+        Uncloak::FirstFrame {
+            at_latest: UNCLOAK_AT_LATEST,
+        }
+    } else {
+        Uncloak::Now
+    };
+    Waking::Show {
+        alpha: 0.0,
+        uncloak,
+    }
+}
+
+/// The Dock icon clicked (`applicationShouldHandleReopen:`): the window
+/// wakes without a file (`docs/specs/resident-mode.md` AC-14).
+const REOPEN: Action = Action::Wake { opened: false };
+
+/// After a file from the Finder opened in a window that was `hidden`: it
+/// wakes with the file; a visible one comes to the front unless it is
+/// still `cloaked` for its first frame (`docs/specs/resident-mode.md`
+/// AC-14).
+fn after_open(hidden: bool, cloaked: bool) -> Option<Action> {
+    if hidden {
+        Some(Action::Wake { opened: true })
+    } else if !cloaked {
+        Some(Action::Activate)
+    } else {
+        None
+    }
+}
+
+/// What a `--resident` start (the login item) does before AppKit starts
+/// (`docs/specs/resident-mode.md` AC-19).
+#[derive(Debug, PartialEq)]
+enum ResidentStart {
+    /// Start hidden in the menu bar.
+    Run,
+    /// Exit with code 0; `remove_sign_in` when resident mode was turned
+    /// off since, so the LaunchAgent goes too.
+    Exit { remove_sign_in: bool },
+}
+
+/// Resident mode `on` in the settings.
+fn resident_start(on: bool) -> ResidentStart {
+    if on {
+        ResidentStart::Run
+    } else {
+        ResidentStart::Exit {
+            remove_sign_in: true,
+        }
+    }
+}
+
 /// Runs the viewer; returns the process exit code.
 pub fn run() -> i32 {
     timing::init(0);
@@ -1768,29 +1829,29 @@ pub fn run() -> i32 {
     let args = parse_args();
     if let Some(out) = &args.capture_test {
         NSApplication::sharedApplication(mtm);
-        return match screenshot::capture_test(mtm, out) {
-            Ok((w, h)) => {
-                println!("{}: {w}x{h}", out.display());
-                0
-            }
-            Err(e) => {
-                eprintln!("amigo-blinzel: {e}");
-                1
-            }
-        };
+        let (code, line) = screenshot::capture_test_exit(out, &screenshot::capture_test(mtm, out));
+        if code == 0 {
+            println!("{line}");
+        } else {
+            eprintln!("{line}");
+        }
+        return code;
     }
     let settings = settings_store::load();
     // The login item of a copy whose resident mode was turned off since.
-    if args.resident && !settings.resident {
+    if args.resident
+        && let ResidentStart::Exit { remove_sign_in } = resident_start(settings.resident)
+    {
+        if remove_sign_in && let Err(e) = super::resident::set_autostart(false) {
+            log(&format!("login item: {e}"));
+        }
         return 0;
     }
     let resident_start = args.resident;
-    let lang = settings
-        .language
-        .as_deref()
-        .and_then(blinzel_i18n::lang_from_code)
-        .unwrap_or_else(system_language);
-    blinzel_i18n::set_lang(lang);
+    blinzel_i18n::set_lang(blinzel_i18n::choose(
+        settings.language.as_deref(),
+        system_language,
+    ));
     if super::update::on_start() {
         return 0;
     }
@@ -1843,4 +1904,233 @@ pub fn run() -> i32 {
     });
     app.run();
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinzel_core::geom::{Orientation, PixelRect};
+    use blinzel_ui::app::ClipSource;
+
+    /// `docs/specs/updates.md` AC-15: "Check for updates" is in the
+    /// application menu, out of the image menus.
+    #[test]
+    fn check_for_updates_is_in_the_application_menu() {
+        let state = MenuState {
+            mode: blinzel_core::layout::ViewMode::FitWindowToImage,
+            no_upscale: false,
+            fullscreen: false,
+            has_image: false,
+            has_selection: false,
+            is_cropped: false,
+            has_neighbours: false,
+            has_images: false,
+            language: None,
+            resident: false,
+            auto_update: false,
+            single_instance: false,
+            color_management: false,
+            filmstrip: false,
+            grid: false,
+            screenshot_hotkey: false,
+            screenshot_save: false,
+            screenshot_open: false,
+            screenshot_edit: false,
+        };
+        let has = |items: &[MenuItem]| {
+            items.iter().any(|i| {
+                matches!(
+                    i,
+                    MenuItem::Item {
+                        cmd: Cmd::CheckUpdates,
+                        ..
+                    }
+                )
+            })
+        };
+        let (app, rest) = menu_bar_trees(&state);
+        assert!(has(&app));
+        assert!(!has(&rest));
+    }
+    /// `docs/specs/resident-mode.md` AC-19: a `--resident` start with
+    /// resident mode off removes the LaunchAgent and exits, like the
+    /// Windows shell removes its Run value.
+    #[test]
+    fn a_resident_start_with_the_setting_off_removes_the_launch_agent_and_exits() {
+        assert_eq!(
+            resident_start(false),
+            ResidentStart::Exit {
+                remove_sign_in: true
+            }
+        );
+        assert_eq!(resident_start(true), ResidentStart::Run);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-09 (the macOS shell): a hidden
+    /// window wakes invisible (alpha 0, shown without activation) and
+    /// becomes visible with its file's first frame, after 400 ms at the
+    /// latest, or at once without a file; a visible one is only activated.
+    #[test]
+    fn a_woken_window_is_shown_transparent_until_its_image_or_400_ms() {
+        assert_eq!(
+            waking(true, true),
+            Waking::Show {
+                alpha: 0.0,
+                uncloak: Uncloak::FirstFrame {
+                    at_latest: Duration::from_millis(400)
+                }
+            }
+        );
+        assert_eq!(
+            waking(true, false),
+            Waking::Show {
+                alpha: 0.0,
+                uncloak: Uncloak::Now
+            }
+        );
+        assert_eq!(waking(false, true), Waking::Activate);
+        assert_eq!(waking(false, false), Waking::Activate);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-14: the Dock icon wakes the hidden
+    /// window without a file, a file from the Finder wakes it with the
+    /// file, and brings a visible window to the front once it shows.
+    #[test]
+    fn the_dock_icon_and_a_file_from_the_finder_wake_the_window() {
+        assert_eq!(REOPEN, Action::Wake { opened: false });
+        for cloaked in [false, true] {
+            assert_eq!(
+                after_open(true, cloaked),
+                Some(Action::Wake { opened: true })
+            );
+        }
+        assert_eq!(after_open(false, false), Some(Action::Activate));
+        assert_eq!(after_open(false, true), None);
+    }
+
+    /// AC-21 (`docs/specs/platform-shells.md`): a deleted image goes to the
+    /// Trash (the system names where it is now) and leaves the list; one
+    /// the Trash refuses (here: a file that does not exist) stays listed.
+    #[test]
+    fn a_deleted_image_goes_to_the_trash_and_a_refused_one_stays_listed() {
+        let dir = std::env::temp_dir().join(format!("blinzel-trash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.png");
+        std::fs::write(&file, b"png").unwrap();
+        let mut removed = vec![];
+        let a = recycle(&file, |p, trashed| {
+            removed.push((p.to_path_buf(), trashed.to_path_buf()));
+            vec![Action::Uncloak]
+        });
+        assert_eq!(a, [Action::Uncloak]);
+        assert_eq!(removed.len(), 1);
+        let (gone, trashed) = &removed[0];
+        assert_eq!(gone, &file);
+        assert!(!file.exists());
+        assert!(
+            trashed
+                .components()
+                .any(|c| c.as_os_str() == ".Trash" || c.as_os_str() == ".Trashes"),
+            "in the Trash: {trashed:?}"
+        );
+        // Not left in the Trash of whoever runs the tests.
+        let _ = std::fs::remove_file(trashed);
+
+        let missing = dir.join("b.png");
+        let a = recycle(&missing, |_, _| panic!("the list keeps it"));
+        assert!(a.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `docs/specs/selection-and-export.md` AC-11: a copy is decoded and
+    /// encoded as PNG on its own thread, then lands on the general
+    /// pasteboard as `public.png`.
+    #[test]
+    fn a_copy_lands_on_the_general_pasteboard_as_png() {
+        let dir = std::env::temp_dir().join(format!("blinzel-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (w, h) = (16u32, 12u32);
+        let bgra: Vec<u8> = blinzel_core::testimg::rgb(w, h)
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let path = dir.join("a.png");
+        let file = blinzel_core::export::encode_png_bgra(&bgra, w, h).unwrap();
+        std::fs::write(&path, file).unwrap();
+        // A region of an EXIF-rotated (90° clockwise) image.
+        let clip = ClipSource {
+            path,
+            stored_rect: PixelRect::new(2, 1, 9, 7),
+            orientation: Orientation::from_exif(6),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        blinzel_ui::app::copy_in_background(Arc::new(MacServices), clip.clone(), move |r| {
+            let name = std::thread::current().name().map(str::to_string);
+            tx.send((name, clip_png(r))).unwrap();
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+        let (name, encoded) = rx.recv().unwrap();
+        assert_eq!(name.as_deref(), Some("blinzel-copy"));
+        let encoded = encoded.unwrap();
+        assert!(put_png(&encoded));
+
+        // SAFETY: a constant type name.
+        let ty = unsafe { NSPasteboardTypePNG };
+        assert_eq!(ty.to_string(), "public.png");
+        let got = NSPasteboard::generalPasteboard()
+            .dataForType(ty)
+            .expect("a PNG on the general pasteboard")
+            .to_vec();
+        assert_eq!(got, encoded);
+        let mut reader = png::Decoder::new(std::io::Cursor::new(got))
+            .read_info()
+            .expect("a PNG");
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        let (px, pw, ph) = clip.pixels(&MacServices).unwrap();
+        assert_eq!((pw, ph), (7, 9), "turned upright");
+        assert_eq!((info.width, info.height), (pw, ph));
+        assert_eq!(info.color_type, png::ColorType::Rgb, "opaque");
+        let rgb: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect();
+        assert_eq!(&buf[..info.buffer_size()], &rgb[..]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `docs/specs/screenshots.md` AC-15: a screenshot goes on the
+    /// pasteboard as its PNG (`public.png`).
+    #[test]
+    fn a_screenshot_goes_on_the_pasteboard_as_png() {
+        let (w, h) = (5u32, 3u32);
+        let bgra: Vec<u8> = (0..w * h)
+            .flat_map(|i| [i as u8, (i * 3) as u8, (i * 7) as u8, 255])
+            .collect();
+        let encoded = blinzel_core::export::encode_png_bgra(&bgra, w, h).unwrap();
+        let (ty, data) = png_item(&encoded);
+        assert_eq!(ty.to_string(), "public.png");
+        let data = data.to_vec();
+        assert_eq!(data, encoded, "the shot's own PNG");
+        let mut reader = png::Decoder::new(std::io::Cursor::new(data))
+            .read_info()
+            .expect("a PNG");
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height), (w, h));
+        let rgb: Vec<u8> = bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect();
+        assert_eq!(&buf[..info.buffer_size()], &rgb[..]);
+    }
 }

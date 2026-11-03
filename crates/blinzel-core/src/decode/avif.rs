@@ -432,7 +432,11 @@ fn property(kind: [u8; 4], body: &[u8]) -> Result<Prop> {
             let end = urn.iter().position(|&b| b == 0).unwrap_or(urn.len());
             Prop::AuxC(String::from_utf8_lossy(&urn[..end]).into_owned())
         }
-        b"av1C" | b"pixi" | b"pasp" | b"clli" | b"mdcv" | b"cclv" | b"amve" => Prop::Ignored,
+        // `hvcC`: HEIC's decoder configuration, essential in every HEIC;
+        // the container is read there only for the profile and EXIF.
+        b"av1C" | b"hvcC" | b"pixi" | b"pasp" | b"clli" | b"mdcv" | b"cclv" | b"amve" => {
+            Prop::Ignored
+        }
         _ => Prop::Unknown,
     })
 }
@@ -1182,6 +1186,19 @@ mod tests {
         }
     }
 
+    /// An AVIF that names `avif` only as a compatible brand (major brand
+    /// `mif1`) is still an AVIF, not a HEIC (docs/specs/image-formats.md).
+    #[test]
+    fn mif1_major_brand_with_avif_compatible_is_avif() {
+        let mut data = RGB420.to_vec();
+        data[8..12].copy_from_slice(b"mif1");
+        let probe = crate::decode::probe(&data).unwrap();
+        assert_eq!(probe.format, Format::Avif);
+        assert_eq!((probe.width, probe.height), (64, 48));
+        let img = crate::decode::decode(&data, crate::decode::Request::Full).unwrap();
+        assert_close(pixel(&img, 20, 40), source(20, 40));
+    }
+
     #[test]
     fn alpha_plane() {
         let img = decode(RGBA, 2).unwrap();
@@ -1189,6 +1206,35 @@ mod tests {
         assert_eq!(pixel(&img, 10, 5)[3], 255);
         assert_eq!(pixel(&img, 10, 40)[3], 0);
         assert_close(pixel(&img, 10, 5), source(10, 5));
+    }
+
+    /// AC-13 (note): the alpha plane is full range, as AVIF requires and
+    /// rav1e writes it, so partial alpha keeps its values: read as limited
+    /// range, 20 would come out as 5 and 236 as 255. The fixture's alpha
+    /// is only 0 and 255, so this file is encoded here (`batch` encoder).
+    #[cfg(feature = "batch")]
+    #[test]
+    fn partial_alpha_is_read_at_full_range() {
+        use crate::batch::encode::{Codec, Quality, encode};
+        let levels = [20u8, 40, 80, 128, 176, 216, 236, 255];
+        let (w, h) = (8 * levels.len() as u32, 16);
+        let mut bgra = Vec::new();
+        for _ in 0..h {
+            for x in 0..w {
+                bgra.extend([200, 60, 100, levels[x as usize / 8]]);
+            }
+        }
+        let q = Quality {
+            avif: 90,
+            ..Default::default()
+        };
+        let file = encode(&bgra, w, h, Codec::Avif, &q, None, None).unwrap();
+        let img = decode(&file, 1).unwrap();
+        assert!(img.has_alpha());
+        for (i, &a) in levels.iter().enumerate() {
+            let x = 8 * i as u32 + 4;
+            assert_close(pixel(&img, x, 8), [100, 60, 200, a]);
+        }
     }
 
     #[test]
@@ -1225,9 +1271,35 @@ mod tests {
     #[test]
     fn display_p3_gets_a_profile() {
         let probe = crate::decode::probe(P3).unwrap();
-        assert!(probe.icc.is_some());
-        assert!(container_profile(P3).is_some());
+        // Display P3's colorants with the sRGB curve, nothing else.
+        let p3 = icc::matrix_profile(
+            icc::colorants::DISPLAY_P3,
+            Trc::Srgb,
+            "Display P3 (AVIF nclx)",
+        );
+        assert_eq!(&probe.icc.expect("profile").bytes[..], &p3[..]);
+        assert_eq!(&container_profile(P3).expect("profile").bytes[..], &p3[..]);
+        // BT.709 is sRGB; other primaries are not converted (like WIC).
+        for primaries in [1, 2, 9] {
+            let nclx = Some(Colour::Nclx {
+                primaries,
+                transfer: 13,
+                matrix: 1,
+                full_range: true,
+            });
+            assert!(matches!(profile(&nclx), Ok(None)), "{primaries}");
+        }
         assert!(container_profile(RGB420).is_none());
+    }
+
+    /// AC-03: the HEIC `colr` profile is read from the container (what WIC
+    /// and ImageIO probes use), past the HEVC item's essential `hvcC`.
+    #[test]
+    fn heic_profile_comes_from_the_container() {
+        let tagged = include_bytes!("../../testdata/p3-64x48.heic");
+        let p = container_profile(tagged).expect("profile");
+        assert!(!p.srgb);
+        assert!(container_profile(include_bytes!("../../testdata/rgb-64x48.heic")).is_none());
     }
 
     #[test]
@@ -1242,17 +1314,53 @@ mod tests {
             profile(&pq),
             Err(DecodeError::Unsupported(Format::Avif))
         ));
-        for data in [RGB420, RGBA, GRID, CLAP] {
+        let hlg = Some(Colour::Nclx {
+            primaries: 9,
+            transfer: 18,
+            matrix: 9,
+            full_range: false,
+        });
+        assert!(matches!(
+            profile(&hlg),
+            Err(DecodeError::Unsupported(Format::Avif))
+        ));
+        // A file whose nclx says PQ: probe and decode refuse it.
+        let mut pq_file = RGB420.to_vec();
+        let at = pq_file.windows(4).position(|w| w == b"nclx").unwrap();
+        pq_file[at + 6..at + 8].copy_from_slice(&16u16.to_be_bytes());
+        for r in [info(&pq_file).map(|_| ()), decode(&pq_file, 1).map(|_| ())] {
+            assert!(matches!(r, Err(DecodeError::Unsupported(Format::Avif))));
+        }
+        // Cut or corrupted anywhere: decode fails. The probe reads only the
+        // container, so it fails where the cut lands in front of `mdat`.
+        for (name, data) in [
+            ("RGB420", RGB420),
+            ("RGBA", RGBA),
+            ("GRID", GRID),
+            ("CLAP", CLAP),
+        ] {
+            let mdat = data.windows(4).position(|w| w == b"mdat").unwrap() - 4;
             for len in (0..data.len()).step_by(37) {
-                let _ = info(&data[..len]);
-                let _ = decode(&data[..len], 1);
+                let cut = &data[..len];
+                assert!(decode(cut, 1).is_err(), "{name} cut at {len}");
+                assert!(info(cut).is_err() || len >= mdat, "{name} cut at {len}");
             }
             let mut bad = data.to_vec();
             for i in (0..bad.len()).step_by(13) {
                 bad[i] ^= 0xa5;
             }
             let _ = info(&bad);
-            let _ = decode(&bad, 1);
+            assert!(decode(&bad, 1).is_err(), "{name} corrupted");
+            // The container intact, every tile's AV1 data damaged: the
+            // probe reads it, decode fails instead of skipping the tiles.
+            // The grid's descriptor (8 bytes) comes first in its `mdat`.
+            let av1 = mdat + 8 + if name == "GRID" { 8 } else { 0 };
+            let mut bad = data.to_vec();
+            for b in &mut bad[av1..] {
+                *b ^= 0xa5;
+            }
+            assert!(info(&bad).is_ok(), "{name} image data damaged");
+            assert!(decode(&bad, 1).is_err(), "{name} image data damaged");
         }
     }
 }

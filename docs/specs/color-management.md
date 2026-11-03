@@ -87,22 +87,33 @@ This spec records what the code does today.
 | ----- | ---- | ------ | ------ |
 | AC-01 | `reads_profiles_from_jpeg`, `reads_profiles_from_png` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
 | AC-02 | `display_p3_gets_a_profile`, `decodes_8_and_10_bit` (`crates/blinzel-core/src/decode/avif.rs`), CI: Linux | built | |
-| AC-03 | — (WebP, TIFF and JPEG XL tests check only files without a profile; no HEIC or ImageIO profile test) | open | |
-| AC-04 | `recognises_srgb_by_primaries_and_curve`, `parametric_srgb_curve_counts` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
+| AC-03 | `probe_reads_the_icc_chunk` (`crates/blinzel-core/src/decode/webp.rs`), `probe_reads_the_icc_profile_tag` (`decode/tiff.rs`), `probe_reads_the_colour_profile` (`decode/heif.rs`), `heic_profile_comes_from_the_container` (`decode/avif.rs`), `probe_yields_the_rendered_colour_space` (`decode/jxl.rs`), CI: Linux; the macOS ImageIO clause: `probe_yields_the_profile_imageio_reports` (`crates/blinzel-app/src/macos/imageio.rs`), CI: macOS, macOS job ok (CI run 41504896644, `0acbc36`) | built | |
+| AC-04 | `recognises_srgb_by_primaries_and_curve` (colorants 0.002 off are sRGB, 0.004 off are not: red with a 0.03 tolerance), `parametric_srgb_curve_counts` (`crates/blinzel-core/src/icc.rs`), CI: Linux | built | |
 | AC-05 | `caches_per_profile_and_skips_srgb` (`crates/blinzel-ui/src/color.rs`), CI: Linux | built | |
 | AC-06 | `caches_per_profile_and_skips_srgb` (`crates/blinzel-ui/src/color.rs`), CI: Linux | built | |
 | AC-07 | `srgb_to_srgb_is_identity_and_p3_red_clips` (`crates/blinzel-app/src/lcms.rs`), CI: Linux, macOS | built | |
 | AC-08 | `srgb_to_srgb_is_identity`, `wide_gamut_to_srgb` (`crates/blinzel-app/src/color.rs`), CI: Windows | built | |
 | AC-09 | `colour_transform_lut` (`crates/blinzel-app/tests/wgpu_golden.rs` CI: Linux; `warp_golden.rs` CI: Windows; `metal_golden.rs` CI: macOS), `applies_the_colour_transform_to_the_image_only` (`crates/blinzel-core/src/preview.rs`), CI: Linux | built | |
 | AC-10 | `integer_lookup_follows_the_float_one`, `identity_maps_to_itself` (`crates/blinzel-core/src/lut.rs`), CI: Linux | built | |
-| AC-11 | — | open | |
+| AC-11 | `the_start_draws_with_the_remembered_target_and_asks_after_the_first_frame` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux; `remembers_the_target_per_monitor_for_the_next_start` (`crates/blinzel-app/src/color.rs`), CI: Windows, Windows job ok (CI run 41504896644, `0acbc36`) | built | |
 | AC-12 | — | open | |
 | AC-13 | `reads_the_x11_display_profile` (`crates/blinzel-app/src/linux/color.rs`), CI: Linux, step with `BLINZEL_X11_TEST` (returns early without it) | built | |
-| AC-14 | — | open | |
+| AC-14 | `reads_the_x11_display_profile` (`crates/blinzel-app/src/linux/color.rs`), CI: Linux, step with `BLINZEL_X11_TEST` (returns early without it) | built | |
 | AC-15 | — | open | |
-| AC-16 | — | open | |
-| AC-17 | — (`caches_per_profile_and_skips_srgb` covers only `ColorManager::set_enabled(false)`, not the setting or the menu) | open | |
-| AC-18 | — | open | |
-| AC-19 | — | open | |
+| AC-16 | `a_new_monitor_retargets_and_redraws` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux | built | |
+| AC-17 | `the_setting_switches_conversion_on_the_next_frame` (`crates/blinzel-ui/src/app_color_tests.rs`), `menu_settings_offers_each_platforms_entries`, `each_check_item_is_checked_when_its_setting_is_on` (`crates/blinzel-ui/src/app_settings_tests.rs`), CI: Linux | built | |
+| AC-18 | `a_failed_build_is_not_retried_until_the_target_changes` (`crates/blinzel-ui/src/color.rs`), `no_transform_for_grey_cmyk_or_broken_profiles` (`crates/blinzel-app/src/lcms.rs`), CI: Linux, macOS | built | |
+| AC-19 | `the_warm_up_builds_one_display_p3_transform` (`crates/blinzel-ui/src/app_color_tests.rs`), CI: Linux, built; `a_resident_start_warms_up_once_before_the_hint_frame` (`crates/blinzel-app/src/run.rs`, `warm_resident`: the `--resident` branch's warm-up runs once, before the hint frame), CI: Windows, Windows job ok (CI run 41532658575, `51202b8`) | built | |
 
 ## Decisions
+
+- AC-14, AC-16, AC-17, AC-18 describe behavior the code already had (the spec was extracted), so their tests were green at once; each was proven by breaking the code once (Wayland check, the forced re-check, `set_enabled` in the toggle, caching a failed build, Little CMS falling back to sRGB) and seeing the test go red.
+- The harness's colour engine builds an identity LUT instead of none, and the fake canvas records whether a frame drew an image through a LUT: App tests can see conversion without a real colour engine; the engine's own output is proven by AC-07, AC-08.
+- AC-14 is checked inside the X11 test: both change the process environment, and the X11 one needs a published profile for the Wayland check to mean anything (without an X server the target is sRGB anyway).
+- AC-18 proves the "cannot build" cases against Little CMS; the Windows Color System's refusal of such profiles has no test of its own (AC-08's test file covers only RGB profiles).
+- AC-03 found a defect: the container reader treated HEIC's `hvcC` as an unknown essential property and refused the primary item, so the profile WIC and ImageIO probes take from the container was always lost for HEIC. `hvcC` is now ignored like `av1C`; `heic_profile_comes_from_the_container` was red before the fix.
+- AC-03's fixtures: `testdata/p3-64x48.heic` is `rgb-64x48.heic` with a Display P3 `colr prof` box added by the batch engine's `avif_with_icc`; `testdata/p3-8x6.jxl` is `cjxl -d 0` of an 8 × 6 PNG tagged with `matrix_profile(DISPLAY_P3, Trc::Srgb, "Display P3 test")`.
+- AC-03's macOS clause is tested with PNGs handed to ImageIO's `probe` directly (the native decoders would take them first in `probe_any`): a Display P3 profile comes back, an sRGB profile, no profile and a grey image yield none; the HEIC fixture `p3-64x48.heic` proves the container path. Only the macOS CI job runs it; its first run is the proof.
+- AC-11 is split where the code is: the remembered-target file (`remembered`, `remember_in` in Windows `color.rs`, now taking the file so a test can use a temp folder) and the App's check after the first frame. The App test is green at once (the behavior existed); breaking it once each way turned it red: without `color_verified` it asked four times, without the redraw in `on_color_target` and without `verify_color_target` it failed. The Windows test was run once as a Linux copy of the two functions, green, and red when an answer no longer replaced the monitor's line and when an empty path (sRGB) was read as a file; its first Windows CI run is the proof.
+- The harness counts colour-target questions (`FakeServices::target_queries`), can hold the answers back (`target_gate`), counts delivered answers (`Harness::color_answers`) and records each transform's source profile (`LUT_SOURCES`): the AC-11 test needs the first frames drawn before the answer arrives, the AC-19 test the warm-up's profile.
+- AC-19 is proven at the App level: `App::warm_up` builds exactly one transform from a profile with Display P3's colorants while nothing is open, and none with colour management off (red with the warm-up call removed, with an Adobe RGB profile, and with the setting ignored). The `--resident` branch of Windows `run.rs` calls it before the message loop through `warm_resident(warm_up, render)`, whose Windows test checks that the warm-up runs once and before the hint frame (a copy of the function and test, compiled on Linux, goes red with the `warm_up()` call removed); no test starts `--resident`, because that registers the viewer to start at sign-in on the machine running the test.

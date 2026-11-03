@@ -406,6 +406,12 @@ mod tests {
         let rows = [1, 2, 3, 99, 4, 5, 6, 99];
         let img = decode(&bmp(2, -1, 32, BI_RGB, &[], &rows)).unwrap();
         assert_eq!(px(&img, 0, 0), [1, 2, 3, 255]);
+        assert!(!img.has_alpha(), "no alpha mask");
+        // A 40-byte header has no alpha mask, whatever follows it.
+        let rows = [1, 2, 3, 99, 4, 5, 6, 99, 7, 8, 9, 99, 10, 11, 12, 99];
+        let img = decode(&bmp(2, 2, 32, BI_RGB, &[], &rows)).unwrap();
+        assert!(!img.has_alpha());
+        assert_eq!(px(&img, 1, 0), [10, 11, 12, 255]);
         // RGB565 via bit fields: pure red, pure green.
         let masks: Vec<u8> = [0xF800u32, 0x07E0, 0x001F]
             .iter()
@@ -415,6 +421,7 @@ mod tests {
         let img = decode(&bmp(2, 1, 16, BI_BITFIELDS, &masks, &rows)).unwrap();
         assert_eq!(px(&img, 0, 0), [0, 0, 255, 255]);
         assert_eq!(px(&img, 1, 0), [0, 255, 0, 255]);
+        assert!(!img.has_alpha(), "no alpha mask");
         // ARGB with alpha mask.
         let masks: Vec<u8> = [0x00FF_0000u32, 0x0000_FF00, 0x0000_00FF, 0xFF00_0000]
             .iter()
@@ -454,12 +461,179 @@ mod tests {
         assert_eq!(px(&img, 1, 0), [10, 10, 10, 255]);
     }
 
+    /// Every pixel of `img`, top row first.
+    fn all(img: &Image) -> Vec<[u8; 4]> {
+        img.to_bgra().as_chunks::<4>().0.to_vec()
+    }
+
+    /// A gray palette: index `i` is `[i, i, i]` times ten.
+    fn gray_palette(n: usize) -> Vec<u8> {
+        (0..n)
+            .flat_map(|i| [(10 * i) as u8; 3].into_iter().chain([0]))
+            .collect()
+    }
+
+    #[test]
+    fn rle_absolute_runs_are_padded_and_deltas_move() {
+        let g = |i: u8| [10 * i, 10 * i, 10 * i, 255];
+        let none = [0; 4];
+        // Bottom row: an absolute run of three (one pad byte), then a run of
+        // two, EOL; top row: a delta of (1, 0), a run of one, EOF.
+        let data = [0, 3, 1, 2, 3, 0, 2, 4, 0, 0, 0, 2, 1, 0, 1, 5, 0, 1];
+        let img = decode(&bmp(5, 2, 8, BI_RLE8, &gray_palette(256), &data)).unwrap();
+        assert_eq!(
+            all(&img),
+            [none, g(5), none, none, none, g(1), g(2), g(3), g(4), g(4)]
+        );
+        // A delta down a row: (2, 1) from the bottom row's start.
+        let data = [1, 1, 0, 2, 2, 1, 1, 2, 0, 1];
+        let img = decode(&bmp(4, 2, 8, BI_RLE8, &gray_palette(256), &data)).unwrap();
+        assert_eq!(all(&img), [none, none, none, g(2), g(1), none, none, none]);
+        // RLE4: high nibble first; an absolute run of five takes three bytes
+        // and one pad byte.
+        let data = [0, 5, 0x12, 0x34, 0x50, 0, 3, 0x67, 0, 1];
+        let img = decode(&bmp(8, 1, 4, BI_RLE4, &gray_palette(16), &data)).unwrap();
+        assert_eq!(all(&img), [g(1), g(2), g(3), g(4), g(5), g(6), g(7), g(6)]);
+    }
+
+    /// AC-08: palette rows are padded to 4 bytes, so a row of 3 pixels at
+    /// 1, 2, 4 or 8 bits takes 4 bytes, not 1, 1, 2 or 3. Pad bytes are 9s.
+    #[test]
+    fn palette_rows_are_padded_to_four_bytes() {
+        let g = |i: u8| [10 * i, 10 * i, 10 * i, 255];
+        let cases: [(u16, [u8; 8]); 4] = [
+            (1, [0b1010_0000, 9, 9, 9, 0b0100_0000, 9, 9, 9]),
+            (2, [0b0110_1100, 9, 9, 9, 0b1001_0000, 9, 9, 9]),
+            (4, [0x12, 0x30, 9, 9, 0x45, 0x60, 9, 9]),
+            (8, [1, 2, 3, 9, 4, 5, 6, 9]),
+        ];
+        let want = [
+            // Top row (stored second), then the bottom row.
+            [g(0), g(1), g(0), g(1), g(0), g(1)],
+            [g(2), g(1), g(0), g(1), g(2), g(3)],
+            [g(4), g(5), g(6), g(1), g(2), g(3)],
+            [g(4), g(5), g(6), g(1), g(2), g(3)],
+        ];
+        for ((bpp, rows), want) in cases.into_iter().zip(want) {
+            let pal = gray_palette(1 << bpp);
+            let img = decode(&bmp(3, 2, bpp, BI_RGB, &pal, &rows)).unwrap();
+            assert_eq!(all(&img), want, "{bpp} bits");
+        }
+    }
+
+    /// AC-08: 16-bit rows are padded to 4 bytes too: 3 pixels take 8 bytes.
+    #[test]
+    fn sixteen_bit_rows_are_padded_to_four_bytes() {
+        let v = |r: u16, g: u16, b: u16| (r << 10 | g << 5 | b).to_le_bytes();
+        let mut rows = Vec::new();
+        for px in [v(31, 0, 0), v(0, 31, 0), v(0, 0, 31)] {
+            rows.extend(px);
+        }
+        rows.extend([9, 9]);
+        for px in [v(0, 0, 0), v(31, 31, 31), v(16, 0, 0)] {
+            rows.extend(px);
+        }
+        rows.extend([9, 9]);
+        let img = decode(&bmp(3, 2, 16, BI_RGB, &[], &rows)).unwrap();
+        assert_eq!(
+            all(&img),
+            [
+                [0, 0, 0, 255],
+                [255, 255, 255, 255],
+                [0, 0, 132, 255],
+                [0, 0, 255, 255],
+                [0, 255, 0, 255],
+                [255, 0, 0, 255],
+            ]
+        );
+    }
+
+    /// A top-down RLE8 file (negative height) fills its first row at the
+    /// top, as the uncompressed ones do.
+    #[test]
+    fn top_down_rle_starts_at_the_top() {
+        let g = |i: u8| [10 * i, 10 * i, 10 * i, 255];
+        let data = [2, 1, 0, 0, 2, 3, 0, 1];
+        let img = decode(&bmp(2, -2, 8, BI_RLE8, &gray_palette(256), &data)).unwrap();
+        assert_eq!(all(&img), [g(1), g(1), g(3), g(3)]);
+    }
+
+    #[test]
+    fn bit_fields_round_and_16_bit_defaults_to_555() {
+        // RGB565: 5-bit 16 is 131.6 (132), 6-bit 32 is 129.5 (130), 5-bit
+        // 15 is 123.4 (123).
+        let masks: Vec<u8> = [0xF800u32, 0x07E0, 0x001F]
+            .iter()
+            .flat_map(|m| m.to_le_bytes())
+            .collect();
+        let v = (16u16 << 11 | 32 << 5 | 15).to_le_bytes();
+        let img = decode(&bmp(1, 1, 16, BI_BITFIELDS, &masks, &[v[0], v[1], 0, 0])).unwrap();
+        assert_eq!(px(&img, 0, 0), [123, 130, 132, 255]);
+        // Without bit fields 16 bits are X1R5G5B5.
+        let v = (0x7C00u16 | 16).to_le_bytes();
+        let img = decode(&bmp(1, 1, 16, BI_RGB, &[], &[v[0], v[1], 0, 0])).unwrap();
+        assert_eq!(px(&img, 0, 0), [132, 0, 255, 255]);
+    }
+
+    #[test]
+    fn os2_core_header_has_three_byte_palette_entries() {
+        // 12-byte header: width, height, planes, bit count as u16.
+        let mut d = b"BM".to_vec();
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&[0; 4]);
+        d.extend_from_slice(&(14u32 + 12 + 6).to_le_bytes());
+        d.extend_from_slice(&12u32.to_le_bytes());
+        for v in [3u16, 1, 1, 1] {
+            d.extend_from_slice(&v.to_le_bytes());
+        }
+        d.extend_from_slice(&[1, 2, 3, 4, 5, 6]);
+        d.extend_from_slice(&[0b0100_0000, 0, 0, 0]);
+        let img = decode(&d).unwrap();
+        assert_eq!(all(&img), [[1, 2, 3, 255], [4, 5, 6, 255], [1, 2, 3, 255]]);
+    }
+
+    #[test]
+    fn v4_header_alpha_mask_counts_for_bi_rgb() {
+        // A 108-byte header (BITMAPV4HEADER) whose alpha mask is set.
+        let off = 14 + 108;
+        let mut d = b"BM".to_vec();
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&[0; 4]);
+        d.extend_from_slice(&(off as u32).to_le_bytes());
+        d.extend_from_slice(&108u32.to_le_bytes());
+        d.extend_from_slice(&1i32.to_le_bytes());
+        d.extend_from_slice(&1i32.to_le_bytes());
+        d.extend_from_slice(&1u16.to_le_bytes());
+        d.extend_from_slice(&32u16.to_le_bytes());
+        d.extend_from_slice(&BI_RGB.to_le_bytes());
+        d.resize(54, 0);
+        for m in [0x00FF_0000u32, 0x0000_FF00, 0x0000_00FF, 0xFF00_0000] {
+            d.extend_from_slice(&m.to_le_bytes());
+        }
+        d.resize(off, 0);
+        d.extend_from_slice(&[10, 20, 30, 40]);
+        let img = decode(&d).unwrap();
+        assert_eq!(px(&img, 0, 0), [10, 20, 30, 40]);
+        assert!(img.has_alpha());
+    }
+
     #[test]
     fn rejects_bad_files() {
         assert!(decode(b"BM").is_err());
+        // A valid file whose signature is not `BM`.
+        let mut unsigned = bmp(1, 1, 24, BI_RGB, &[], &[1, 2, 3, 0]);
+        assert!(decode(&unsigned).is_ok());
+        unsigned[..2].copy_from_slice(b"BA");
+        assert!(decode(&unsigned).is_err());
+        assert!(Header::parse(&unsigned).is_err());
         assert!(decode(&bmp(0, 1, 24, BI_RGB, &[], &[])).is_err());
         assert!(decode(&bmp(4, 4, 24, BI_RGB, &[], &[0; 10])).is_err());
         assert!(decode(&bmp(1, 1, 24, 4 /* JPEG */, &[], &[0; 4])).is_err());
+        assert!(decode(&bmp(1, 1, 32, 4 /* JPEG */, &[], &[0; 4])).is_err());
+        assert!(decode(&bmp(1, 1, 16, 5 /* PNG */, &[], &[0; 4])).is_err());
+        // Bit-field pixels cut short: the second row is missing.
+        assert!(decode(&bmp(2, 2, 32, BI_RGB, &[], &[0; 12])).is_err());
+        assert!(decode(&bmp(2, 2, 16, BI_RGB, &[], &[0; 6])).is_err());
         let h = Header::parse(&bmp(5, -3, 24, BI_RGB, &[], &[])).unwrap();
         assert_eq!((h.width, h.height, h.top_down), (5, 3, true));
     }

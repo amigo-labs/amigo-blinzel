@@ -236,6 +236,7 @@ pub fn stream_animation(
     if count < 2 || anim.tps_numerator == 0 {
         return Ok(still);
     }
+    let plays = (anim.num_loops > 0).then_some(anim.num_loops);
     let mut done = 0;
     while done < count && (done + 1) * frame_bytes <= budget {
         let render = img.render_frame(done).map_err(err)?;
@@ -245,6 +246,7 @@ pub fn stream_animation(
         let more = sink(AnimFrame {
             image: image(&img, &render)?,
             delay_ms: super::min_delay_ms(ms.min(u32::MAX as u64) as u32),
+            plays,
         });
         if !more {
             break;
@@ -252,7 +254,7 @@ pub fn stream_animation(
     }
     Ok(super::AnimInfo {
         frames: done,
-        plays: (anim.num_loops > 0).then_some(anim.num_loops),
+        plays,
     })
 }
 
@@ -358,6 +360,41 @@ mod tests {
         }
     }
 
+    /// 16-bit samples round to the nearest 8-bit value, like jxl-oxide's
+    /// stream: k × 257 + 128 is just below k + ½ and stays k, one more is
+    /// just above and becomes k + 1.
+    #[test]
+    fn sixteen_bit_samples_round_to_nearest() {
+        let below: Vec<u16> = (0..255u16).map(|k| k * 257 + 128).collect();
+        let above: Vec<u16> = below.iter().map(|v| v + 1).collect();
+        let samples: Vec<u8> = below
+            .iter()
+            .chain(&above)
+            .flat_map(|v| v.to_ne_bytes())
+            .collect();
+        let opts = EncoderOptions::new(255, 2, ColorSpace::Luma, ZBitDepth::Sixteen);
+        let mut data = Vec::new();
+        JxlSimpleEncoder::new(&samples, opts)
+            .encode(&mut data)
+            .unwrap();
+        let want: Vec<u8> = (0..255u8)
+            .chain(1..=255)
+            .flat_map(|g| [g, g, g, 255])
+            .collect();
+        assert_eq!(rgba_of(&decode(&data, 1).unwrap()), want);
+        assert_eq!(via_stream(&data), want, "stream");
+    }
+
+    /// AC-03: the probe yields the profile of the colour space the image is
+    /// rendered into (cjxl -d 0 from a PNG tagged Display P3), none for sRGB.
+    #[test]
+    fn probe_yields_the_rendered_colour_space() {
+        let p3 = include_bytes!("../../testdata/p3-8x6.jxl");
+        let icc = crate::decode::probe(p3).unwrap().icc.expect("profile");
+        assert!(!icc.srgb);
+        assert!(crate::decode::probe(&LOSSY).unwrap().icc.is_none());
+    }
+
     #[test]
     fn lossy_matches_the_generic_stream() {
         let (size, o, icc) = info(&LOSSY).unwrap();
@@ -373,10 +410,75 @@ mod tests {
         );
     }
 
+    /// Three 8×6 keyframes, red, green and blue, of 15, 21 and 9 ticks at
+    /// 500/3 ticks per second, playing twice. Made from a hand-written APNG
+    /// (delays 5, 7 and 3 ms) with `cjxl -d 0 -e 7` (libjxl 0.7), whose
+    /// animation header (1000/1 ticks per second, no loop count) was then
+    /// rewritten bit by bit: libjxl 0.7 writes no loop count and only
+    /// 1000/1 for APNG input.
+    const ANIM_LOOP2: &[u8] = include_bytes!("../../testdata/anim-8x6-loop2.jxl");
+    /// The same three keyframes as cjxl wrote them: 5, 7 and 3 ticks at
+    /// 1000/1 ticks per second, looping for ever.
+    const ANIM_FOREVER: &[u8] = include_bytes!("../../testdata/anim-8x6-forever.jxl");
+
+    #[test]
+    fn plays_keyframe_animations_at_their_ticks_and_loops() {
+        let anim = decode_animation(ANIM_LOOP2, usize::MAX).unwrap().unwrap();
+        assert_eq!(anim.plays, Some(2));
+        // ticks × 1000 × 3 / 500 ms; 18 ms is under 20 and plays as 100.
+        let delays: Vec<u32> = anim.frames.iter().map(|f| f.delay_ms).collect();
+        assert_eq!(delays, [30, 42, 100]);
+        let first: Vec<[u8; 4]> = anim
+            .frames
+            .iter()
+            .map(|f| rgba_of(&f.image)[..4].try_into().unwrap())
+            .collect();
+        assert_eq!(
+            first,
+            [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]]
+        );
+        assert!(
+            anim.frames.iter().all(|f| f.plays == Some(2)),
+            "every frame carries the loop count"
+        );
+        assert_eq!(
+            rgba_of(&decode(ANIM_LOOP2, 1).unwrap()),
+            rgba_of(&anim.frames[0].image)
+        );
+
+        let forever = decode_animation(ANIM_FOREVER, usize::MAX).unwrap().unwrap();
+        assert_eq!(forever.plays, None);
+        let delays: Vec<u32> = forever.frames.iter().map(|f| f.delay_ms).collect();
+        assert_eq!(delays, [100, 100, 100]);
+    }
+
+    #[test]
+    fn keyframes_beyond_the_budget_are_not_decoded() {
+        let frame = 8 * 6 * 4;
+        let mut seen = 0;
+        let info = stream_animation(ANIM_LOOP2, 3 * frame - 1, &mut |_| {
+            seen += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!((seen, info.frames, info.plays), (2, 2, Some(2)));
+        let two = decode_animation(ANIM_LOOP2, 2 * frame).unwrap().unwrap();
+        assert_eq!(two.frames.len(), 2);
+        // A single keyframe that fits is no animation.
+        assert!(
+            decode_animation(ANIM_LOOP2, 2 * frame - 1)
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn rejects_broken_files() {
-        assert!(info(&LOSSY[..3]).is_err());
-        assert!(decode(&LOSSY[..30], 1).is_err());
-        assert!(info(b"\xff\x0a").is_err());
+        // Corrupt, not "not decoded natively": no other decoder does better.
+        let corrupt = |r: Result<_>| matches!(r, Err(DecodeError::Corrupt(_)));
+        for len in [2, 3] {
+            assert!(corrupt(info(&LOSSY[..len]).map(|_| ())), "{len} bytes");
+        }
+        assert!(corrupt(decode(&LOSSY[..30], 1).map(|_| ())));
     }
 }

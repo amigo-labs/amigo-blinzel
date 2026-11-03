@@ -171,7 +171,7 @@ Behavior: [jpeg-decoder.md](jpeg-decoder.md). Measurements: [section 15](#jpeg-d
 
 ## 7. Selection, copy, cut, save
 
-Principle: the viewer never writes to an image file by itself. A cutout is saved only through "Save as", where the user picks the target in the system dialog; an existing target (the source file included) is replaced only after the system's overwrite confirmation. Whether that confirmation suffices is an open question in [selection-and-export.md](selection-and-export.md).
+Principle: the viewer never writes to an image file by itself. A cutout is saved only through "Save as", where the user picks the target in the system dialog; the source itself is never replaced; any other existing target only after the system's overwrite confirmation ([selection-and-export.md](selection-and-export.md) AC-22).
 
 - **Selection** in full-resolution coordinates; the size label is drawn by the shared UI text on every platform.
 - **Ctrl+C:** on Windows with delayed clipboard rendering (`CF_DIBV5` + `PNG`): only the region is decoded, at full resolution and only when pasting, so copying itself costs nothing. Linux and macOS decode the region on a background thread right after the copy and offer PNG.
@@ -191,7 +191,7 @@ Principle as above: source files stay unchanged. Every output is a new file; a n
   - Names are planned in advance from header and EXIF, in list order, with numbers for identical names.
   - Writing: temporary file, then via hard link to the free name, which fails instead of replacing; without hard links, rename after checking the name is free.
   - Parallel across files (one decode thread per file), limited by a memory budget.
-- **Dialog in the app** (Ctrl+B): modal panel over the viewer, the same code on all platforms (`blinzel-ui/src/batch_dialog.rs`). The file list is filled by drag and drop (Windows and Linux; on macOS a drop opens the first file, so the list cannot be filled there). The grid's multi-selection is not connected to the dialog.
+- **Dialog in the app** (Ctrl+B): modal panel over the viewer, the same code on all platforms (`blinzel-ui/src/batch_dialog.rs`). The file list is filled by dropping images and folders onto the window, on all three platforms: each shell hands the whole drop to `App::files_dropped`, which fills the open dialog's list or, without one, opens the first dropped file (fixed for macOS on 2026-11-02, where a drop always opened the first file). Decided 2026-11-02: the files marked in the grid fill the dialog when it opens ([thumbnails.md](thumbnails.md) AC-23).
 - Behavior: [batch-resize.md](batch-resize.md). Measurements: [section 15](#batch-m9).
 
 ## 8. Localization

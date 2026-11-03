@@ -89,8 +89,11 @@ mod tests {
         // A dark desktop or another window shows nothing.
         assert_eq!(classify(&[[30, 30, 30]; 100]), None);
         // Too few matching samples (a thumbnail somewhere) do not count.
+        // Exactly 12 matching samples classify, 11 do not.
         let mut few = vec![[0u8, 0, 0]; 100];
-        few[..MIN_MATCHES - 1].fill(COLORS[2]);
+        few[..12].fill(COLORS[2]);
+        assert_eq!(classify(&few), Some(2));
+        few[11] = [0, 0, 0];
         assert_eq!(classify(&few), None);
     }
 }

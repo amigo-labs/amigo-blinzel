@@ -5,6 +5,8 @@
 //! blinzel-release sign <file> <out.sig>      signs with $RELEASE_SIGNING_KEY (hex seed)
 //! blinzel-release verify <file> <sig> <public-key-hex>
 //! blinzel-release notices [--check]          writes (or checks) THIRD-PARTY-NOTICES*.txt
+//! blinzel-release check-release <dir>        the release files are complete, their
+//!                                            architectures and SHA256SUMS right
 //! blinzel-release macos-bundle <out.app> <blinzel>...
 //!                                            the macOS app bundle (universal with
 //!                                            one executable per architecture)
@@ -15,6 +17,7 @@
 //! repository secret `RELEASE_SIGNING_KEY` and nowhere in the repository;
 //! the public key goes into `blinzel-core/src/update.rs` (`RELEASE_KEY`).
 
+mod assets;
 mod macos;
 mod notices;
 
@@ -38,6 +41,7 @@ fn main() {
         ["verify", file, sig, key] => verify(file, sig, key),
         ["notices"] => notices(false),
         ["notices", "--check"] => notices(true),
+        ["check-release", dir] => assets::check_dir(Path::new(dir)),
         ["macos-bundle", out, exes @ ..] => {
             let exes: Vec<&Path> = exes.iter().map(Path::new).collect();
             macos::bundle(Path::new(out), &exes, env!("CARGO_PKG_VERSION"))
@@ -55,6 +59,7 @@ fn usage() -> String {
     "usage:\n  blinzel-release keygen <secret-key-file>\n  blinzel-release sign <file> <out.sig>   \
      (secret from $RELEASE_SIGNING_KEY)\n  blinzel-release verify <file> <sig> <public-key-hex>\n  \
      blinzel-release notices [--check]\n  \
+     blinzel-release check-release <dir>\n  \
      blinzel-release macos-bundle <out.app> <blinzel>...\n  \
      blinzel-release macos-dmg <app> <out.dmg>"
         .into()
@@ -96,20 +101,30 @@ fn rust_bytes(b: &[u8]) -> String {
 
 fn sign(file: &str, out: &str) -> Result<(), String> {
     let hex = std::env::var("RELEASE_SIGNING_KEY").map_err(|_| "RELEASE_SIGNING_KEY is not set")?;
-    let seed = parse_hex::<32>(&hex).ok_or("RELEASE_SIGNING_KEY is not a 64-digit hex seed")?;
-    let kp = KeyPair::from_seed(Seed::new(seed));
     let msg = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
-    let sig = kp.sk.sign(&msg, None);
-    // Check before publishing anything.
-    if !verify_signature(&msg, sig.as_ref(), &kp.pk) {
+    let (sig, pk) = signature_file(&msg, &hex, verify_signature)?;
+    fs::write(out, sig).map_err(|e| format!("{out}: {e}"))?;
+    println!("signed {file} -> {out} (public key {pk})");
+    Ok(())
+}
+
+/// The `.sig` file for `msg` (the Ed25519 signature with the hex seed
+/// `seed_hex`, as hex plus a newline) and the public key as hex. Only a
+/// signature that `verifies` accepts is returned, so nothing unverified is
+/// published.
+fn signature_file(
+    msg: &[u8],
+    seed_hex: &str,
+    verifies: fn(&[u8], &[u8], &[u8; 32]) -> bool,
+) -> Result<(String, String), String> {
+    let seed = parse_hex::<32>(seed_hex).ok_or("RELEASE_SIGNING_KEY is not a 64-digit hex seed")?;
+    let kp = KeyPair::try_from_seed(Seed::new(seed))
+        .map_err(|_| "RELEASE_SIGNING_KEY is not a valid seed (all zeros)")?;
+    let sig = format!("{}\n", to_hex(kp.sk.sign(msg, None).as_ref()));
+    if !verifies(msg, sig.as_bytes(), &kp.pk) {
         return Err("signature does not verify".into());
     }
-    fs::write(out, format!("{}\n", to_hex(sig.as_ref()))).map_err(|e| format!("{out}: {e}"))?;
-    println!(
-        "signed {file} -> {out} (public key {})",
-        to_hex(kp.pk.as_ref())
-    );
-    Ok(())
+    Ok((sig, to_hex(kp.pk.as_ref())))
 }
 
 fn verify(file: &str, sig: &str, key: &str) -> Result<(), String> {
@@ -122,5 +137,26 @@ fn verify(file: &str, sig: &str, key: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("INVALID signature".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+
+    #[test]
+    fn signature_file_is_hex_and_checked_before_it_is_returned() {
+        let (sig, pk) = signature_file(b"sums", SEED, verify_signature).unwrap();
+        assert_eq!(sig.len(), 129);
+        assert!(sig.ends_with('\n'));
+        let pk = parse_hex::<32>(&pk).unwrap();
+        assert!(verify_signature(b"sums", sig.as_bytes(), &pk));
+        // A check that fails stops the signing.
+        assert_eq!(
+            signature_file(b"sums", SEED, |_, _, _| false),
+            Err("signature does not verify".to_string())
+        );
     }
 }

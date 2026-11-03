@@ -200,6 +200,11 @@ mod tests {
         assert_eq!(g(Size::LongEdge(9000), false).out, (6000, 4000));
         assert_eq!(g(Size::LongEdge(9000), true).out, (9000, 6000));
         assert_eq!(g(Size::LongEdge(1500), false).crop, full(6000, 4000));
+        // Whole pixels, at least one: 10 % of a 1-px side stays 1 px.
+        let thin = geometry((1000, 1), n, Size::Percent(10.0), false);
+        assert_eq!(thin.out, (100, 1));
+        let thin = geometry((1, 1000), n, Size::Height(99), false);
+        assert_eq!(thin.out, (1, 99));
 
         // Portrait by EXIF: stored 6000×4000, shown 4000×6000.
         let r = Orientation::from_exif(6);
@@ -263,6 +268,16 @@ mod tests {
 
     #[test]
     fn same_format_where_we_can_write_it() {
+        for (format, codec) in [
+            (Format::Jpeg, Codec::Jpeg),
+            (Format::Png, Codec::Png),
+            (Format::WebP, Codec::Webp),
+            (Format::Avif, Codec::Avif),
+        ] {
+            for alpha in [false, true] {
+                assert_eq!(codec_for(Output::Same, format, alpha), codec, "{format:?}");
+            }
+        }
         assert_eq!(codec_for(Output::Same, Format::WebP, true), Codec::Webp);
         assert_eq!(codec_for(Output::Same, Format::Heif, false), Codec::Jpeg);
         assert_eq!(codec_for(Output::Same, Format::Gif, true), Codec::Png);

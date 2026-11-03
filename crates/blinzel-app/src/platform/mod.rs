@@ -38,8 +38,12 @@ pub fn process_created() -> Option<i64> {
 /// Message box flags for the UI language: right-aligned, right-to-left
 /// reading for right-to-left languages.
 pub fn message_box_direction() -> windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE {
+    message_box_style(blinzel_i18n::is_rtl())
+}
+
+fn message_box_style(rtl: bool) -> windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE {
     use windows::Win32::UI::WindowsAndMessaging::{MB_RIGHT, MB_RTLREADING};
-    if blinzel_i18n::is_rtl() {
+    if rtl {
         MB_RIGHT | MB_RTLREADING
     } else {
         Default::default()
@@ -54,4 +58,18 @@ pub fn debug_log(msg: &str) {
             w.as_ptr(),
         ))
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_box_style;
+    use windows::Win32::UI::WindowsAndMessaging::{MB_RIGHT, MB_RTLREADING, MESSAGEBOX_STYLE};
+
+    /// `docs/specs/localization.md` AC-16: message boxes are right-aligned
+    /// with right-to-left reading while the language is right to left.
+    #[test]
+    fn right_to_left_message_boxes_are_right_aligned_and_read_right_to_left() {
+        assert_eq!(message_box_style(true), MB_RIGHT | MB_RTLREADING);
+        assert_eq!(message_box_style(false), MESSAGEBOX_STYLE::default());
+    }
 }

@@ -14,33 +14,34 @@ use blinzel_core::geom::{Orientation, Rect};
 use blinzel_core::pixel::{Alpha, Image, PackedFormat, Pixels, Plane};
 use blinzel_core::screenshot as core_shot;
 use blinzel_core::settings::Settings;
-use blinzel_i18n::{Msg, tr, trf};
+use blinzel_i18n::{Lang, Msg, fill, tr, tr_in, trf};
+use blinzel_ui::app::Action;
 use blinzel_ui::backend::{Canvas, Device};
 use blinzel_ui::gfx::Rgba;
-use blinzel_ui::snip::{Outcome, Snip};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use blinzel_ui::snip::{self, Outcome, Snip};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SYSTEMTIME, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmFlush, DwmGetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleDC, CreateDIBSection,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, EnumDisplayMonitors, GetDC, GetMonitorInfoW, HDC,
-    HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ReleaseDC, SRCCOPY,
-    SelectObject, ValidateRect,
+    HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ROP_CODE, ReleaseDC,
+    SRCCOPY, SelectObject, ValidateRect,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, ReleaseCapture, SetCapture,
-    SetFocus, UnregisterHotKey, VK_SHIFT, VK_SNAPSHOT,
+    GetKeyState, HOT_KEY_MODIFIERS, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
+    ReleaseCapture, SetCapture, SetFocus, UnregisterHotKey, VK_SHIFT, VK_SNAPSHOT,
 };
 use windows::Win32::UI::Shell::{
     FOLDERID_Pictures, FOLDERID_Screenshots, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{BOOL, PCWSTR, w};
+use windows::core::{BOOL, GUID, PCWSTR, w};
 
 use crate::backend::{D3dCanvas, D3dDevice};
 use crate::gfx::{Renderer, SwapChain};
@@ -78,13 +79,89 @@ pub fn set_hotkey(hwnd: HWND, on: bool) -> bool {
         if !on {
             return true;
         }
+        let [(ctrl_shift, ctrl_shift_mods), (print, print_mods)] = hotkeys();
         let _ = RegisterHotKey(
             Some(hwnd),
-            HOTKEY_CTRL_SHIFT_PRINT,
-            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+            ctrl_shift,
+            ctrl_shift_mods,
             VK_SNAPSHOT.0 as u32,
         );
-        RegisterHotKey(Some(hwnd), HOTKEY_PRINT, MOD_NOREPEAT, VK_SNAPSHOT.0 as u32).is_ok()
+        RegisterHotKey(Some(hwnd), print, print_mods, VK_SNAPSHOT.0 as u32).is_ok()
+    }
+}
+
+/// The screenshot keys on `VK_SNAPSHOT`, by id: Ctrl+Shift+Print, then
+/// Print.
+fn hotkeys() -> [(i32, HOT_KEY_MODIFIERS); 2] {
+    [
+        (
+            HOTKEY_CTRL_SHIFT_PRINT,
+            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+        ),
+        (HOTKEY_PRINT, MOD_NOREPEAT),
+    ]
+}
+
+/// Whether the screenshot keys belong registered: resident mode and the
+/// key setting both on.
+pub fn hotkey_wanted(settings: &Settings) -> bool {
+    settings.resident && settings.screenshot_hotkey
+}
+
+/// What one of our keys does, with the window shown or hidden.
+pub const ON_HOTKEY: Action = Action::Capture {
+    whole_screen: false,
+};
+
+/// How often, and how far apart, Print is tried again at start (a minute).
+pub const RETRY_TRIES: u32 = 12;
+pub const RETRY_MS: u32 = 5000;
+
+/// What the retry timer does after a try.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Retry {
+    /// Print is still taken; try again.
+    Again,
+    /// Print is ours, or no longer wanted.
+    Stop,
+    /// The last try failed: say that Windows keeps the key.
+    GiveUp,
+}
+
+/// One retry of the Print key with `left` tries left after it; `free`
+/// registers it and says whether that worked.
+pub fn retry(wanted: bool, free: impl FnOnce() -> bool, left: u32) -> Retry {
+    if !wanted || free() {
+        Retry::Stop
+    } else if left == 0 {
+        Retry::GiveUp
+    } else {
+        Retry::Again
+    }
+}
+
+/// How long the [`hotkey_taken`] notice stays in the window.
+pub const HINT_MS: u32 = 9000;
+
+/// Where the [`hotkey_taken`] notice goes after [`Retry::GiveUp`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum HintRoute {
+    /// The window is hidden: a tray balloon with this text, and the notice
+    /// again in the window at the next wake (a notification may be off).
+    Balloon(String),
+    /// In the window for this many milliseconds.
+    Window(u32),
+}
+
+/// Routes the notice from `told`, `App::tell`'s answer (the text back
+/// while the window is hidden); a balloon also marks it for the next wake.
+pub fn route_hint(told: Option<String>) -> HintRoute {
+    match told {
+        Some(text) => {
+            hint_pending(true);
+            HintRoute::Balloon(text)
+        }
+        None => HintRoute::Window(HINT_MS),
     }
 }
 
@@ -169,6 +246,11 @@ fn to_rect(r: &RECT, origin: (i32, i32)) -> Rect {
     )
 }
 
+/// A plain copy that includes layered windows.
+fn capture_rop() -> ROP_CODE {
+    SRCCOPY | CAPTUREBLT
+}
+
 /// Copies the whole virtual screen (layered windows included).
 fn grab() -> Result<Shot, String> {
     let vs = virtual_screen();
@@ -210,7 +292,7 @@ fn grab() -> Result<Shot, String> {
                     Some(screen),
                     vs.left,
                     vs.top,
-                    SRCCOPY | CAPTUREBLT,
+                    capture_rop(),
                 )
                 .map_err(|e| e.message());
                 if r.is_ok() {
@@ -320,13 +402,10 @@ pub fn start(main: HWND, whole_screen: bool) {
         Err(e) => return post(main, Err(e)),
     };
     if whole_screen {
-        let c = shot.cursor();
-        let r = shot
-            .monitors
-            .iter()
-            .find(|m| m.contains(c))
-            .copied()
-            .unwrap_or(Rect::new(0.0, 0.0, shot.size.0 as f64, shot.size.1 as f64));
+        let r = snip::monitor_under(&shot.monitors, shot.cursor()).map_or(
+            Rect::new(0.0, 0.0, shot.size.0 as f64, shot.size.1 as f64),
+            |i| shot.monitors[i],
+        );
         return save(main, &shot, r);
     }
     if let Err(e) = open_overlay(main, shot) {
@@ -362,11 +441,6 @@ pub fn failure(reason: &str) -> String {
     trf(Msg::ScreenshotFailed, &[("reason", &reason)])
 }
 
-/// Text for a screenshot that only went to the clipboard.
-pub fn copied() -> String {
-    tr(Msg::ScreenshotCopied).to_string()
-}
-
 /// Encodes part `r` of the picture and writes the file the settings ask
 /// for in the background, then tells `main`.
 fn save(main: HWND, shot: &Shot, r: Rect) {
@@ -374,18 +448,13 @@ fn save(main: HWND, shot: &Shot, r: Rect) {
     let settings = with_app(|a| a.settings.clone()).unwrap_or_default();
     let cache =
         core_shot::cache_folder(&blinzel_ui::dirs::cache().unwrap_or_else(std::env::temp_dir));
-    let dest = core_shot::destination(&settings, &folder(&settings), &cache);
+    let folder = folder(&settings);
     let raw = main.0 as isize;
     let _ = std::thread::Builder::new()
         .name("blinzel-screenshot".into())
         .spawn(move || {
             let result = blinzel_core::export::encode_png_bgra(&bgra, w, h).map(|png| {
-                if dest.as_ref() == Some(&cache) {
-                    core_shot::sweep(&cache, core_shot::CACHE_MAX_AGE);
-                }
-                let file = dest
-                    .map(|d| core_shot::write(&d, &file_stem(), &png))
-                    .transpose();
+                let file = core_shot::store(&settings, &folder, &cache, &file_stem(), &png);
                 Taken {
                     bgra,
                     width: w,
@@ -398,31 +467,38 @@ fn save(main: HWND, shot: &Shot, r: Rect) {
         });
 }
 
-/// The folder from the settings, else Windows' screenshot folder
-/// (Pictures\Screenshots).
+/// The folder from the settings, else Windows' screenshot folder.
 fn folder(settings: &Settings) -> PathBuf {
-    if let Some(d) = &settings.screenshot_dir {
-        return PathBuf::from(d);
-    }
-    let known = |id| unsafe {
+    folder_in(settings, |id| unsafe {
         let p = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
         let s = p.to_string().ok();
         CoTaskMemFree(Some(p.0 as *const _));
         s.map(PathBuf::from)
-    };
+    })
+}
+
+/// The folder from the settings, else the Screenshots known folder, else
+/// Pictures\Screenshots, as `known` finds them.
+fn folder_in(settings: &Settings, known: impl Fn(&GUID) -> Option<PathBuf>) -> PathBuf {
+    if let Some(d) = &settings.screenshot_dir {
+        return PathBuf::from(d);
+    }
     known(&FOLDERID_Screenshots)
         .or_else(|| known(&FOLDERID_Pictures).map(|p| p.join("Screenshots")))
         .unwrap_or_else(|| std::env::temp_dir().join("Screenshots"))
 }
 
-/// "Screenshot 2026-10-26 071530" in the UI language.
 fn file_stem() -> String {
-    let t = unsafe { GetLocalTime() };
+    file_stem_at(blinzel_i18n::lang(), &unsafe { GetLocalTime() })
+}
+
+/// "Screenshot 2026-10-26 071530" in `lang`, for the local time `t`.
+fn file_stem_at(lang: Lang, t: &SYSTEMTIME) -> String {
     let date = format!(
         "{:04}-{:02}-{:02} {:02}{:02}{:02}",
         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
     );
-    trf(Msg::ScreenshotName, &[("date", &date)])
+    fill(tr_in(lang, Msg::ScreenshotName), &[("date", &date)])
 }
 
 // ------------------------------------------------------------------ overlay
@@ -470,7 +546,6 @@ fn register_class() -> Result<(), String> {
 /// its first frame is on screen, so nothing flickers.
 fn open_overlay(main: HWND, shot: Shot) -> Result<(), String> {
     close_overlay();
-    register_class()?;
     let (gfx, device) =
         with_app(|a| (a.canvas.gfx.clone(), Arc::clone(&a.device))).ok_or("viewer busy")?;
     let (w, h) = shot.size;
@@ -503,25 +578,7 @@ fn open_overlay(main: HWND, shot: Shot) -> Result<(), String> {
         let _ = GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
         dx.max(96) as f64 / 96.0
     };
-    let hwnd = unsafe {
-        let instance = GetModuleHandleW(None).map_err(|e| e.message())?;
-        CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
-            CLASS,
-            w!("amigo-blinzel"),
-            WS_POPUP,
-            shot.origin.0,
-            shot.origin.1,
-            w as i32,
-            h as i32,
-            None,
-            None,
-            Some(instance.into()),
-            None,
-        )
-        .map_err(|e| e.message())?
-    };
-    set_cloak(hwnd, true);
+    let hwnd = overlay_window(shot.origin, shot.size)?;
     let swap = match SwapChain::new(&gfx, hwnd, (w, h)) {
         Ok(s) => s,
         Err(e) => {
@@ -558,6 +615,32 @@ fn open_overlay(main: HWND, shot: Shot) -> Result<(), String> {
     }
     set_cloak(hwnd, false);
     Ok(())
+}
+
+/// The overlay's window over the virtual screen at `origin`, 1:1:
+/// topmost, without a taskbar button, cloaked until its first frame.
+fn overlay_window(origin: (i32, i32), (w, h): (u32, u32)) -> Result<HWND, String> {
+    register_class()?;
+    let hwnd = unsafe {
+        let instance = GetModuleHandleW(None).map_err(|e| e.message())?;
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
+            CLASS,
+            w!("amigo-blinzel"),
+            WS_POPUP,
+            origin.0,
+            origin.1,
+            w as i32,
+            h as i32,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .map_err(|e| e.message())?
+    };
+    set_cloak(hwnd, true);
+    Ok(hwnd)
 }
 
 fn render() {
@@ -613,6 +696,12 @@ fn point(lp: LPARAM) -> (f64, f64) {
     )
 }
 
+/// Whether `msg` closes the overlay without a shot: a right click, or
+/// losing the foreground (Alt+Tab, the Win key, another app).
+fn cancels(msg: u32, wp: WPARAM) -> bool {
+    msg == WM_RBUTTONUP || (msg == WM_ACTIVATE && (wp.0 & 0xFFFF) as u32 == WA_INACTIVE)
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let o = match msg {
         WM_PAINT => {
@@ -632,7 +721,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             with_snip(|s| s.mouse_up(point(lp)))
         }
-        WM_RBUTTONUP => Some(Outcome::Cancel),
+        m if cancels(m, wp) => Some(Outcome::Cancel),
         WM_KEYDOWN => {
             let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
             match crate::window::key_of(wp.0 as u16) {
@@ -640,8 +729,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 None => None,
             }
         }
-        // Switching away (Alt+Tab, Win key) cancels.
-        WM_ACTIVATE if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE => Some(Outcome::Cancel),
         // It spans monitors with different scaling: stay as created.
         WM_DPICHANGED => return LRESULT(0),
         _ => return unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
@@ -689,4 +776,167 @@ pub fn notice(hwnd: HWND, text: String) {
 /// The notice when Windows keeps the Print key.
 pub fn hotkey_taken() -> String {
     tr(Msg::HotkeyTaken).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-02: Print and Ctrl+Shift+Print (never repeating) open the
+    /// overlay, shown or hidden, where resident mode and the key are on.
+    #[test]
+    fn print_and_ctrl_shift_print_open_the_overlay_in_resident_mode() {
+        assert_eq!(
+            hotkeys(),
+            [
+                (2, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT),
+                (1, MOD_NOREPEAT)
+            ]
+        );
+        for (id, _) in hotkeys() {
+            assert!(is_hotkey(WPARAM(id as usize)));
+        }
+        assert!(!is_hotkey(WPARAM(3)));
+        assert_eq!(
+            ON_HOTKEY,
+            Action::Capture {
+                whole_screen: false
+            }
+        );
+        for (resident, key) in [(true, true), (true, false), (false, true), (false, false)] {
+            let s = Settings {
+                resident,
+                screenshot_hotkey: key,
+                ..Settings::default()
+            };
+            assert_eq!(hotkey_wanted(&s), resident && key);
+        }
+    }
+
+    /// AC-03: Print is tried every 5 s for a minute, then the notice is
+    /// due once; a try that gets it, or the setting turned off, stops.
+    #[test]
+    fn a_taken_print_key_is_retried_for_a_minute_then_reported() {
+        assert_eq!(RETRY_TRIES * RETRY_MS, 60_000);
+        assert_eq!(RETRY_MS, 5000);
+        let mut left = RETRY_TRIES;
+        let mut tries = vec![];
+        loop {
+            left -= 1;
+            let r = retry(true, || false, left);
+            tries.push(left);
+            if r != Retry::Again {
+                assert_eq!(r, Retry::GiveUp);
+                break;
+            }
+        }
+        assert_eq!(tries.len() as u32, RETRY_TRIES);
+        assert_eq!(retry(true, || true, 0), Retry::Stop, "the last try got it");
+        assert_eq!(retry(true, || true, 5), Retry::Stop);
+        assert_eq!(retry(false, || panic!("not tried"), 0), Retry::Stop);
+    }
+
+    /// AC-03: while hidden the notice is a balloon and due once at the
+    /// next wake; otherwise it shows 9 s in the window.
+    #[test]
+    fn the_print_key_notice_is_a_balloon_while_hidden_and_9_s_in_the_window() {
+        hint_pending(false);
+        assert_eq!(route_hint(None), HintRoute::Window(9000));
+        assert!(!take_hint(), "nothing due for the next wake");
+        let text = hotkey_taken();
+        assert_eq!(route_hint(Some(text.clone())), HintRoute::Balloon(text));
+        assert!(take_hint(), "due at the next wake");
+        assert!(!take_hint(), "once");
+    }
+
+    /// AC-07: the whole virtual desktop is frozen (layered windows
+    /// included) and the overlay covers it 1:1, topmost, without a taskbar
+    /// button, cloaked until its first frame.
+    #[test]
+    fn a_screenshot_freezes_the_virtual_desktop_under_a_cloaked_overlay() {
+        assert_eq!(capture_rop(), SRCCOPY | CAPTUREBLT);
+        let vs = virtual_screen();
+        let shot = grab().expect("the CI machine has a desktop");
+        let size = ((vs.right - vs.left) as u32, (vs.bottom - vs.top) as u32);
+        assert_eq!((shot.size, shot.origin), (size, (vs.left, vs.top)));
+        assert_eq!(shot.bgra.len(), size.0 as usize * size.1 as usize * 4);
+        assert!(!shot.monitors.is_empty());
+        let hwnd = overlay_window(shot.origin, shot.size).unwrap();
+        let mut r = RECT::default();
+        let mut cloaked = 0u32;
+        unsafe {
+            GetWindowRect(hwnd, &mut r).unwrap();
+            DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), 4).unwrap();
+        }
+        assert_eq!(
+            (r.left, r.top, r.right, r.bottom),
+            (vs.left, vs.top, vs.right, vs.bottom)
+        );
+        assert_ne!(cloaked, 0, "cloaked");
+        let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        let want = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+        assert_eq!(ex & want.0, want.0);
+        unsafe { DestroyWindow(hwnd).unwrap() };
+    }
+
+    /// AC-14: a right click or losing the foreground closes the overlay
+    /// without a shot; becoming active or a left click does not.
+    #[test]
+    fn a_right_click_or_losing_the_foreground_cancels_the_overlay() {
+        assert!(cancels(WM_RBUTTONUP, WPARAM(0)));
+        assert!(cancels(WM_ACTIVATE, WPARAM(WA_INACTIVE as usize)));
+        // Minimized while losing it: the high word is set.
+        assert!(cancels(WM_ACTIVATE, WPARAM(0x1_0000)));
+        assert!(!cancels(WM_ACTIVATE, WPARAM(WA_ACTIVE as usize)));
+        assert!(!cancels(WM_ACTIVATE, WPARAM(WA_CLICKACTIVE as usize)));
+        assert!(!cancels(WM_LBUTTONUP, WPARAM(0)));
+    }
+
+    /// AC-18: the folder chosen in the menu, else the Screenshots known
+    /// folder, else Pictures\Screenshots; this machine's folder is a real
+    /// one.
+    #[test]
+    fn the_folder_is_the_chosen_one_else_the_systems() {
+        let chosen = Settings {
+            screenshot_dir: Some("D:\\Shots".into()),
+            ..Settings::default()
+        };
+        assert_eq!(
+            folder_in(&chosen, |_| panic!("not asked")),
+            Path::new("D:\\Shots")
+        );
+        let both = |id: &GUID| {
+            Some(PathBuf::from(if *id == FOLDERID_Screenshots {
+                "C:\\S"
+            } else {
+                "C:\\P"
+            }))
+        };
+        let none = Settings::default();
+        assert_eq!(folder_in(&none, both), Path::new("C:\\S"));
+        let pictures = |id: &GUID| (*id == FOLDERID_Pictures).then(|| PathBuf::from("C:\\P"));
+        assert_eq!(folder_in(&none, pictures), Path::new("C:\\P\\Screenshots"));
+        let real = folder(&none);
+        assert!(real.is_absolute(), "{real:?}");
+        assert!(real.ends_with("Screenshots"), "{real:?}");
+    }
+
+    /// AC-18: the file is named after the local time in the UI language.
+    #[test]
+    fn the_file_is_named_after_the_time_in_the_ui_language() {
+        let t = SYSTEMTIME {
+            wYear: 2026,
+            wMonth: 1,
+            wDay: 9,
+            wHour: 7,
+            wMinute: 5,
+            wSecond: 3,
+            ..Default::default()
+        };
+        assert_eq!(file_stem_at(Lang::En, &t), "Screenshot 2026-01-09 070503");
+        assert_eq!(
+            file_stem_at(Lang::De, &t),
+            "Bildschirmfoto 2026-01-09 070503"
+        );
+    }
 }

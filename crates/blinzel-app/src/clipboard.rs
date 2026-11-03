@@ -5,13 +5,16 @@
 
 use blinzel_core::decode::Request;
 use blinzel_core::selection::orient_bgra;
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, WPARAM};
 use windows::Win32::Graphics::Gdi::{BI_BITFIELDS, BITMAPV5HEADER};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::CF_DIBV5;
+use windows::Win32::UI::WindowsAndMessaging::{
+    WM_DESTROYCLIPBOARD, WM_RENDERALLFORMATS, WM_RENDERFORMAT,
+};
 use windows::core::w;
 
 use crate::platform::{debug_log, io};
@@ -37,6 +40,29 @@ pub fn announce(hwnd: HWND) -> bool {
         let _ = CloseClipboard();
         ok
     }
+}
+
+/// The clipboard's messages to the window that owns it, with the copy it
+/// announced: `WM_RENDERFORMAT` (a program pastes: decode the region now),
+/// `WM_RENDERALLFORMATS` (the window goes away: render both formats) and
+/// `WM_DESTROYCLIPBOARD` (another copy replaced ours: forget it). `false`
+/// for every other message.
+pub fn on_message(hwnd: HWND, msg: u32, wp: WPARAM, clip: &mut Option<Source>) -> bool {
+    match msg {
+        WM_RENDERFORMAT => {
+            if let Some(src) = clip {
+                render(src, wp.0 as u32);
+            }
+        }
+        WM_RENDERALLFORMATS => {
+            if let Some(src) = clip {
+                render_all(hwnd, src);
+            }
+        }
+        WM_DESTROYCLIPBOARD => *clip = None,
+        _ => return false,
+    }
+    true
 }
 
 /// Decodes the region and places `format` on the clipboard. Called from
@@ -107,11 +133,20 @@ pub fn put_shot(hwnd: HWND, bgra: &[u8], w: u32, h: u32, png: &[u8]) -> bool {
     }
     unsafe {
         let ok = EmptyClipboard().is_ok()
-            && set(CF_DIBV5.0 as u32, &dibv5(bgra, w, h))
-            && set(png_format(), png);
+            && shot_formats(bgra, w, h, png)
+                .iter()
+                .all(|(format, bytes)| set(*format, bytes));
         let _ = CloseClipboard();
         ok
     }
+}
+
+/// A screenshot's clipboard formats: DIBV5 of its pixels, and its PNG.
+fn shot_formats(bgra: &[u8], w: u32, h: u32, png: &[u8]) -> [(u32, Vec<u8>); 2] {
+    [
+        (CF_DIBV5.0 as u32, dibv5(bgra, w, h)),
+        (png_format(), png.to_vec()),
+    ]
 }
 
 /// Renders all formats before we lose the data (window closing).
@@ -189,4 +224,215 @@ fn png(bgra: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
         enc.write_header().ok()?.write_image_data(&rgba).ok()?;
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinzel_core::geom::{Orientation, PixelRect};
+    use std::cell::RefCell;
+    use windows::Win32::Foundation::{LPARAM, LRESULT};
+    use windows::Win32::System::DataExchange::{
+        GetClipboardData, GetClipboardOwner, IsClipboardFormatAvailable,
+    };
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::System::Memory::GlobalSize;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, HWND_MESSAGE, RegisterClassW,
+        WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
+    };
+
+    thread_local! {
+        /// The test window's copy, as `App::clip` is the viewer window's.
+        static CLIP: RefCell<Option<Source>> = const { RefCell::new(None) };
+    }
+
+    /// Hands the clipboard's messages to [`on_message`], as the viewer's
+    /// window procedure does.
+    extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        let handled = CLIP.with(|c| {
+            c.try_borrow_mut()
+                .is_ok_and(|mut c| on_message(hwnd, msg, wp, &mut c))
+        });
+        if handled {
+            LRESULT(0)
+        } else {
+            // SAFETY: the arguments are the ones the system passed.
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+        }
+    }
+
+    /// A message-only window that owns the clipboard.
+    fn window() -> HWND {
+        let class = w!("BlinzelClipboardTest");
+        // SAFETY: the class lives in this module's image; the window is
+        // destroyed by the test that made it.
+        unsafe {
+            let instance = GetModuleHandleW(None).unwrap().into();
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(wndproc),
+                hInstance: instance,
+                lpszClassName: class,
+                ..Default::default()
+            };
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!(""),
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(instance),
+                None,
+            )
+            .unwrap()
+        }
+    }
+
+    /// Opens the clipboard as a program that pastes; another program may
+    /// hold it for a moment.
+    fn open() {
+        let opened = (0..50).any(|i| {
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            // SAFETY: closed again by the caller.
+            unsafe { OpenClipboard(None).is_ok() }
+        });
+        assert!(opened, "the clipboard opens");
+    }
+
+    /// Pastes `format` from the open clipboard (the owner renders it now
+    /// if it has not yet). `GlobalSize` may round up: the bytes can end
+    /// with padding.
+    fn paste(format: u32) -> Vec<u8> {
+        // SAFETY: the handle belongs to the open clipboard and stays valid
+        // until it closes; it is locked while it is read.
+        unsafe {
+            let h = GetClipboardData(format).expect("the format is on the clipboard");
+            let mem = HGLOBAL(h.0);
+            let p = GlobalLock(mem);
+            assert!(!p.is_null());
+            let bytes = std::slice::from_raw_parts(p.cast::<u8>(), GlobalSize(mem)).to_vec();
+            let _ = GlobalUnlock(mem);
+            bytes
+        }
+    }
+
+    /// Checks a pasted DIBV5 and PNG against the region's pixels.
+    fn check(dib: &[u8], encoded: &[u8], bgra: &[u8], w: u32, h: u32) {
+        let hsize = std::mem::size_of::<BITMAPV5HEADER>();
+        assert!(dib.len() >= hsize + bgra.len());
+        // SAFETY: at least `hsize` bytes (checked above); the header may be
+        // unaligned in the vector.
+        let header = unsafe { std::ptr::read_unaligned(dib.as_ptr().cast::<BITMAPV5HEADER>()) };
+        assert_eq!((header.bV5Width, header.bV5Height), (w as i32, h as i32));
+        assert_eq!(header.bV5BitCount, 32);
+        assert_eq!(header.bV5AlphaMask, 0xFF00_0000, "with alpha");
+        assert_eq!(header.bV5CSType, 0x7352_4742, "sRGB");
+        let row = w as usize * 4;
+        for y in 0..h as usize {
+            let bottom_up = hsize + (h as usize - 1 - y) * row;
+            assert_eq!(
+                &dib[bottom_up..bottom_up + row],
+                &bgra[y * row..(y + 1) * row]
+            );
+        }
+        let mut reader = png::Decoder::new(std::io::Cursor::new(encoded))
+            .read_info()
+            .expect("a PNG");
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height), (w, h));
+        assert_eq!(info.color_type, png::ColorType::Rgba);
+        let rgba: Vec<u8> = bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], p[3]])
+            .collect();
+        assert_eq!(&buf[..info.buffer_size()], &rgba[..]);
+    }
+
+    /// `docs/specs/selection-and-export.md` AC-09: a copy announces
+    /// `CF_DIBV5` and `PNG` without pixels, decodes the region when a
+    /// program pastes, and renders both before the viewer exits.
+    #[test]
+    fn a_copy_is_decoded_when_pasted_and_kept_after_exit() {
+        let dir = std::env::temp_dir().join(format!("blinzel-clip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (w, h) = (16u32, 12u32);
+        let file: Vec<u8> = blinzel_core::testimg::rgb(w, h)
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let file = blinzel_core::export::encode_png_bgra(&file, w, h).unwrap();
+        // A region, turned 90° clockwise by the user.
+        let src = Source {
+            path: dir.join("a.png"),
+            stored_rect: PixelRect::new(2, 1, 9, 7),
+            orientation: Orientation::from_exif(6),
+        };
+        let hwnd = window();
+
+        // The copy: the file does not even exist yet, nothing is decoded.
+        assert!(announce(hwnd), "the clipboard is ours");
+        CLIP.with(|c| *c.borrow_mut() = Some(src.clone()));
+        // SAFETY: plain queries.
+        unsafe {
+            assert_eq!(GetClipboardOwner().ok(), Some(hwnd));
+            assert!(IsClipboardFormatAvailable(CF_DIBV5.0 as u32).is_ok());
+            assert!(IsClipboardFormatAvailable(png_format()).is_ok());
+        }
+        // A program pastes: now the region is decoded from the file.
+        std::fs::write(&src.path, file).unwrap();
+        let (px, pw, ph) = src.pixels(&crate::backend::WinServices::default()).unwrap();
+        assert_eq!((pw, ph), (7, 9), "turned upright");
+        open();
+        let (dib, encoded) = (paste(CF_DIBV5.0 as u32), paste(png_format()));
+        // SAFETY: opened above.
+        unsafe {
+            let _ = CloseClipboard();
+        }
+        check(&dib, &encoded, &px, pw, ph);
+
+        // Copied again, then the viewer exits while it owns the clipboard
+        // (`window::exit`): both formats are rendered first, so a paste
+        // after the exit needs neither the window nor the file.
+        assert!(announce(hwnd));
+        CLIP.with(|c| *c.borrow_mut() = Some(src.clone()));
+        let clip = CLIP.with(|c| c.borrow_mut().take()).unwrap();
+        render_all(hwnd, &clip);
+        // SAFETY: the test's own window.
+        unsafe { DestroyWindow(hwnd).unwrap() };
+        std::fs::remove_dir_all(&dir).unwrap();
+        open();
+        let (dib, encoded) = (paste(CF_DIBV5.0 as u32), paste(png_format()));
+        // SAFETY: opened above.
+        unsafe {
+            let _ = CloseClipboard();
+        }
+        check(&dib, &encoded, &px, pw, ph);
+    }
+
+    /// `docs/specs/screenshots.md` AC-15: a screenshot goes on the
+    /// clipboard as DIBV5 (bottom-up, with alpha, sRGB) and as its PNG.
+    #[test]
+    fn a_screenshot_goes_on_the_clipboard_as_dibv5_and_png() {
+        let (w, h) = (5u32, 3u32);
+        let bgra: Vec<u8> = (0..w * h * 4).map(|i| (i * 7) as u8).collect();
+        let encoded = png(&bgra, w, h).unwrap();
+        let [(dib_format, dib), (png_id, png_bytes)] = shot_formats(&bgra, w, h, &encoded);
+        assert_eq!(dib_format, CF_DIBV5.0 as u32);
+        assert_eq!(png_id, png_format());
+        assert_eq!(png_bytes, encoded, "the shot's own PNG");
+        check(&dib, &png_bytes, &bgra, w, h);
+    }
 }

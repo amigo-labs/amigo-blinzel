@@ -127,9 +127,26 @@ pub fn remove_tray(hwnd: HWND) {
     }
 }
 
+/// Explorer restarted: the icon again, if it was shown.
 pub fn on_taskbar_created(hwnd: HWND) {
-    if TRAY_SHOWN.load(Ordering::Relaxed) {
+    readd_tray(TRAY_SHOWN.load(Ordering::Relaxed), hwnd, add_tray);
+}
+
+/// After `TaskbarCreated`, `add` the icon again where it was `shown`.
+fn readd_tray(shown: bool, hwnd: HWND, add: impl FnOnce(HWND)) {
+    if shown {
+        add(hwnd);
+    }
+}
+
+/// Resident mode on or off, at once: the tray icon and the sign-in entry
+/// (`sign_in`: [`set_autostart`]; a test passes its own).
+pub fn set_resident(hwnd: HWND, on: bool, sign_in: impl FnOnce(bool)) {
+    sign_in(on);
+    if on {
         add_tray(hwnd);
+    } else {
+        remove_tray(hwnd);
     }
 }
 
@@ -169,7 +186,72 @@ pub fn refresh_autostart() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    if install::autostart(&layout).as_deref() != Some(&install::autostart_command(&exe)) {
-        set_autostart(true);
+    if let Err(e) = install::refresh_autostart(&layout, &exe) {
+        debug_log(&format!("autostart: {e}"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::WM_MOUSEMOVE;
+
+    /// `docs/specs/resident-mode.md` AC-02 (the Windows shell): turning
+    /// resident mode on adds the tray icon and writes the sign-in entry,
+    /// off removes both (the entry here is a fake, never the real value).
+    #[test]
+    fn toggling_resident_mode_adds_or_removes_the_icon_and_the_sign_in_entry() {
+        let mut sign_in = vec![];
+        set_resident(HWND::default(), true, |on| sign_in.push(on));
+        assert!(TRAY_SHOWN.load(Ordering::Relaxed), "icon shown");
+        set_resident(HWND::default(), false, |on| sign_in.push(on));
+        assert!(!TRAY_SHOWN.load(Ordering::Relaxed), "icon removed");
+        assert_eq!(sign_in, [true, false]);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-13: Explorer's `TaskbarCreated`
+    /// broadcast adds a shown icon again, and only a shown one.
+    #[test]
+    fn the_icon_is_added_again_after_explorer_restarts() {
+        let id = taskbar_created();
+        assert!(
+            (0xC000..=0xFFFF).contains(&id),
+            "a registered message: {id:#x}"
+        );
+        // SAFETY: a static wide string; registering again returns the same id.
+        assert_eq!(id, unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) });
+        let mut added = 0;
+        readd_tray(false, HWND::default(), |_| added += 1);
+        assert_eq!(added, 0, "no icon while not resident");
+        readd_tray(true, HWND::default(), |_| added += 1);
+        assert_eq!(added, 1);
+    }
+
+    /// `docs/specs/resident-mode.md` AC-13: the icon has the app name as
+    /// tooltip and reports to `WM_TRAY` in the version 4 format; a click,
+    /// the keyboard or its balloon show the window, a right click opens
+    /// the tray menu where it happened.
+    #[test]
+    fn the_tray_icon_shows_the_window_or_opens_its_menu() {
+        let d = tray_data(HWND::default());
+        let end = d.szTip.iter().position(|&c| c == 0).unwrap();
+        assert_eq!(String::from_utf16_lossy(&d.szTip[..end]), tr(Msg::AppName));
+        assert_eq!(d.uCallbackMessage, WM_TRAY);
+        assert!(
+            d.uFlags
+                .contains(NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP)
+        );
+        // SAFETY: `tray_data` wrote the union's `uVersion` field.
+        assert_eq!(unsafe { d.Anonymous.uVersion }, NOTIFYICON_VERSION_4);
+
+        let at = |x: i16, y: i16| WPARAM(x as u16 as usize | (y as u16 as usize) << 16);
+        let event = |e: u32| LPARAM(e as isize);
+        for e in [NIN_SELECT, NIN_KEYSELECT, NIN_BALLOONUSERCLICK] {
+            let a = on_tray(at(5, 5), event(e));
+            assert_eq!(a, Some(Action::Wake { opened: false }), "{e:#x}");
+        }
+        let menu = on_tray(at(-20, 1060), event(WM_CONTEXTMENU));
+        assert_eq!(menu, Some(Action::TrayMenu { x: -20, y: 1060 }));
+        assert_eq!(on_tray(at(5, 5), event(WM_MOUSEMOVE)), None);
     }
 }

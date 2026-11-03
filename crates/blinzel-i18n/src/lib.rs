@@ -5,6 +5,9 @@
 
 mod plural;
 
+#[cfg(test)]
+mod build_tests;
+
 pub use plural::Category;
 
 use std::fmt::Display;
@@ -141,6 +144,13 @@ fn is_traditional_chinese(tag: &str) -> bool {
     parts.next() == Some("zh") && parts.any(|p| matches!(p, "hant" | "tw" | "hk" | "mo"))
 }
 
+/// The UI language for the `language` setting: the shipped language it
+/// names, otherwise (no setting, `auto`, or a language that is not
+/// shipped) `system()`, which is only asked then.
+pub fn choose(setting: Option<&str>, system: impl FnOnce() -> Lang) -> Lang {
+    setting.and_then(lang_from_code).unwrap_or_else(system)
+}
+
 /// Looks up a language by its code (`"de"`), case-insensitively.
 pub fn lang_from_code(code: &str) -> Option<Lang> {
     Lang::ALL
@@ -179,6 +189,42 @@ mod tests {
         assert_eq!(FALLBACK.code(), "en");
         assert!(lang_from_code("de").is_some());
         assert_eq!(Lang::ALL.len(), LANG_COUNT);
+    }
+
+    #[test]
+    fn exactly_nine_languages_ship_with_english_first_and_as_fallback() {
+        let codes: Vec<&str> = Lang::ALL.iter().map(|l| l.code()).collect();
+        assert_eq!(
+            codes,
+            ["en", "de", "es", "fr", "it", "ja", "pt-br", "ru", "zh-cn"]
+        );
+        assert_eq!(FALLBACK, Lang::ALL[0]);
+        assert_eq!(FALLBACK.code(), "en");
+        assert_eq!(negotiate(["xx"]), FALLBACK);
+    }
+
+    #[test]
+    fn no_shipped_language_falls_back_to_english() {
+        assert!(MISSING.is_empty(), "untranslated: {MISSING:?}");
+    }
+
+    #[test]
+    fn shipped_languages_use_their_plural_rule_family() {
+        use plural::Rule;
+        let expected = [
+            ("en", Rule::OneOther),
+            ("de", Rule::OneOther),
+            ("es", Rule::OneOther),
+            ("it", Rule::OneOther),
+            ("fr", Rule::ZeroOneOther),
+            ("pt-br", Rule::ZeroOneOther),
+            ("ru", Rule::EastSlavic),
+            ("ja", Rule::None),
+            ("zh-cn", Rule::None),
+        ];
+        for (code, rule) in expected {
+            assert_eq!(lang_from_code(code).unwrap().plural_rule(), rule, "{code}");
+        }
     }
 
     #[test]
@@ -254,6 +300,8 @@ mod tests {
         assert_eq!(code(&["zh-TW"]), "en");
         assert_eq!(code(&["zh-Hant-HK", "ja-JP"]), "ja");
         assert_eq!(code(&["zh-HK"]), "en");
+        assert_eq!(code(&["zh-MO"]), "en");
+        assert_eq!(code(&["zh_MO", "it"]), "it");
     }
 
     #[test]
@@ -279,6 +327,17 @@ mod tests {
     fn tr_n(lang: Lang, cat: Category, n: u64) -> String {
         let text = PLURAL_TABLE[lang as usize][PluralMsg::ImagesCount as usize][cat as usize];
         fill(text, &[("n", &n)])
+    }
+
+    #[test]
+    fn a_setting_without_a_shipped_language_asks_the_system() {
+        let (de, ja) = (lang_from_code("de").unwrap(), lang_from_code("ja").unwrap());
+        let unasked = || -> Lang { panic!("the system is not asked") };
+        assert_eq!(choose(Some("de"), unasked), de);
+        assert_eq!(choose(Some("DE"), unasked), de);
+        for setting in [None, Some("auto"), Some(""), Some("xx")] {
+            assert_eq!(choose(setting, || ja), ja, "{setting:?}");
+        }
     }
 
     #[test]

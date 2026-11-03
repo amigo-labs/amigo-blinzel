@@ -53,6 +53,7 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 - [ ] AC-19 (event): When a re-encoded cutout is written, JPEG uses quality 95, the chroma subsampling of a JPEG source (4:2:0 for other sources) and a JPEG source's ICC profile; PNG is 8-bit RGB when every pixel is opaque, else RGBA, without ICC profile; WebP (lossy, quality 90) and AVIF (quality 85) embed the source's ICC profile. No re-encoded cutout carries EXIF.
 - [ ] AC-20 (event): When saving finishes, a notice shows `Saved “{name}” losslessly` (no re-encoding) or `Saved “{name}”`; when reading, decoding, encoding or writing fails, the notice names the file and the reason. The save runs off the UI thread.
 - [ ] AC-21 (always): Selecting, copying and cutting never write a file; saving a cutout writes only the target chosen in the save dialog, first to a temporary file next to it (`{target stem}.blinzel-tmp`), then renamed onto the target.
+- [ ] AC-22 (error): If the target chosen in the save dialog is the image the cutout comes from (the same file, also under another spelling of its path), then nothing is written and a notice says that the source cannot be replaced; any other existing target is replaced after the dialog's overwrite confirmation.
 
 ## Technical notes
 
@@ -72,13 +73,14 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 | Selection dragged out of the image | Clamped to the image edge; moving stops at the edge without shrinking |
 | EXIF-rotated JPEG saved as JPEG without user rotation, aligned | Lossless; the file keeps its EXIF orientation, so it shows as the viewer showed it |
 | User-rotated view saved as JPEG | Re-encoded upright (AC-18), never lossless |
-| Target chosen is an existing file (even the source itself) | The system dialog asks; on confirmation the file is replaced by rename (see Open questions) |
+| Target chosen is an existing file other than the source | The system dialog asks; on confirmation the file is replaced by rename |
+| Target chosen is the source itself, under any spelling of its path | The system dialog asks; then nothing is written and a notice says the source is not replaced (AC-22) |
 | A file named `{target stem}.blinzel-tmp` exists next to the target | It is overwritten by the temporary file and then renamed away |
 | Ctrl+X on a crop | Crops again within the cropped region (the new crop replaces the old) |
 
 ## Open questions
 
-- Saving a cutout replaces an existing target after the system dialog's confirmation, which includes choosing the source image itself. AGENTS.md §9 says every result is a new file and an existing name gets a number; `blinzel.md` §7 says saving happens only via "Save as" with the overwrite confirmation. Which rule applies to "Save cutout as" — refuse the source path, number an existing name, or keep the confirmation?
+<!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
 ## Evidence
 
@@ -88,24 +90,36 @@ This spec was reverse-engineered from the code on 2026-11-02 (selection geometry
 | AC-02 | `new_drag_snaps_and_clamps` (`blinzel-core/src/selection.rs`, Linux) | built | |
 | AC-03 | `move_and_resize`, `hit_testing` (`blinzel-core/src/selection.rs`, Linux) | built | |
 | AC-04 | manual | open | |
-| AC-05 | | open | |
-| AC-06 | | open | |
-| AC-07 | | open | |
-| AC-08 | partial: `stored_mapping_roundtrips_all_orientations`, `orient_pixels` (`blinzel-core/src/selection.rs`) cover the region mapping only, not the app | open | |
-| AC-09 | | open | |
-| AC-10 | | open | |
-| AC-11 | | open | |
-| AC-12 | partial: `crop_restricts_content` (`blinzel-core/src/layout.rs`) covers the cropped layout only | open | |
-| AC-13 | | open | |
-| AC-14 | | open | |
+| AC-05 | `a_short_click_outside_the_selection_clears_it`, `a_short_click_clears_the_selection_while_left_drag_pans` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-06 | `select_all_takes_the_whole_image_or_the_cropped_region` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-07 | `escape_ends_a_drag_then_clears_then_uncrops_then_leaves_full_screen_then_closes` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-08 | `copy_announces_the_selection_else_the_crop_else_the_whole_image`, `copy_maps_a_rotated_view_back_to_the_file_at_full_resolution`, `clip_pixels_are_the_files_region_in_the_orientation_shown` (`blinzel-ui/src/app_selection_tests.rs`, Linux); `stored_mapping_roundtrips_all_orientations` (`blinzel-core/src/selection.rs`) | built | |
+| AC-09 | `a_copy_is_decoded_when_pasted_and_kept_after_exit` (`crates/blinzel-app/src/clipboard.rs`), CI: windows (`cargo test --workspace --release`), Windows job ok (CI run 41504896644, `0acbc36`) | built | |
+| AC-10 | `a_copy_is_decoded_right_away_on_its_own_thread` (`blinzel-ui/src/app_selection_tests.rs`, Linux); `a_copy_is_offered_to_other_programs_as_png` (`blinzel-app/src/linux/clipboard.rs`, Linux CI step on Xvfb with `BLINZEL_X11_TEST`) | built | |
+| AC-11 | `a_copy_lands_on_the_general_pasteboard_as_png` (`crates/blinzel-app/src/macos/shell.rs`), CI: macos (`cargo test -p blinzel-app`), macOS job ok (CI run 41504896644, `0acbc36`); `a_copy_is_decoded_right_away_on_its_own_thread` (`blinzel-ui/src/app_selection_tests.rs`), Linux | built | |
+| AC-12 | `cut_crops_the_view_to_the_selection_and_needs_one` (`blinzel-ui/src/app_selection_tests.rs`, Linux); `crop_restricts_content` (`blinzel-core/src/layout.rs`) | built | |
+| AC-13 | `show_original_navigation_and_rotation_drop_the_crop` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-14 | `save_asks_with_a_name_by_source_type_and_prefers_the_selection`, `nothing_happens_before_the_header_is_known` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
 | AC-15 | manual | open | |
 | AC-16 | `png_output_and_format_from_path`, `webp_and_avif_cutouts` (`blinzel-core/src/export.rs`, Linux) | built | |
 | AC-17 | `aligned_jpeg_crop_is_lossless`, `lossless_crop_keeps_exif_but_drops_mpf_and_thumbnail_link` (`blinzel-core/src/export.rs`, Linux) | built | |
 | AC-18 | `unaligned_or_rotated_crops_are_reencoded`, `webp_and_avif_cutouts` (`blinzel-core/src/export.rs`, Linux) | built | |
-| AC-19 | partial: `png_output_and_format_from_path` checks the PNG size only | open | |
-| AC-20 | | open | |
-| AC-21 | | open | |
+| AC-19 | `reencoded_jpeg_uses_quality_95_the_source_subsampling_and_icc`, `png_cutouts_are_rgb_when_opaque_else_rgba_without_icc_or_exif`, `webp_and_avif_cutouts_embed_the_icc_profile_but_no_exif` (`blinzel-core/src/export.rs`, Linux) | built | |
+| AC-20 | `saving_tells_how_it_went_and_names_the_file`, `saving_runs_on_its_own_thread_and_reports_there` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-21 | `only_the_chosen_target_is_written_through_a_temporary_file` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
+| AC-22 | `the_source_is_never_replaced_other_files_are` (`blinzel-ui/src/app_selection_tests.rs`, Linux) | built | |
 
 ## Decisions
 
+- 2026-11-02: "Save cutout as" never replaces its own source; other existing files may be replaced after the system dialog's confirmation (AC-22). Because the viewer never modifies the image it shows (`blinzel.md` §2, AGENTS.md §9), while numbering an existing name would break the save dialog people know.
+- 2026-11-02 (spec-build): the AC-05 test went red for a larger image: a left click there started a pan, and releasing it kept the selection. A left-button pan now remembers its start until the pointer moves more than 3 logical px, and a release before that clears the selection like a click on a fitting image (a middle-button pan never does). Because the AC says "on the image", not "on an image that fits".
+- 2026-11-02 (spec-build): the App-level tests of AC-06, AC-07, AC-08 (the clip's region), AC-12, AC-13 and AC-14 were green at once: the behavior was extracted from the code. The cut tests do not apply the `FitWindow` a cut returns, because the test harness has no minimum window size and the window would shrink under the menu button; they check that the action is returned.
+- 2026-11-02 (spec-build): decoding a copied region moved into `blinzel-ui` as `ClipSource::pixels` (read the file, decode the region at full resolution, orient it), which the Linux and macOS shells call on their `blinzel-copy` thread. Windows keeps decoding in `clipboard.rs` through `wic::decode_any` (the native decoders plus WIC). Because the behavior belongs in the shared crate (AGENTS.md §5.4) and a test there proves AC-08 for both shells.
+- 2026-11-02 (spec-build): the AC-19 tests were green at once (the behavior existed). JPEG quality 95 is proven by the quantisation tables, which equal those of a quality-95 encode; the WebP and AVIF settings are the new constant `blinzel_core::export::CUTOUT_QUALITY` (public, `batch` feature), checked by value next to a check that the WebP is lossy (`VP8 `, not `VP8L`). Because the encoded bitstreams do not carry their quality setting.
+- 2026-11-02 (spec-build): saving runs through the new `blinzel_ui::app::save_in_background` (a `blinzel-save` thread that hands the notice text to a callback), which all three shells call instead of spawning the thread themselves. Because "off the UI thread" (AC-20) is then shared behavior a test can prove; the Windows and macOS shells only pass the callback that posts the notice.
+- 2026-11-02 (spec-build): AC-22 is checked in `save_cutout` before anything is read or written: on Unix the source and the target are the same file when device and inode match (this covers `.`/`..`, symbolic links, hard links and letter case on a case-insensitive APFS volume); on Windows when `std::fs::canonicalize` resolves both to the same final path (it normalises case, short names and links). The notice is the new key `error_save_source` in every `i18n/*.toml`. The test proves `.`, `..` and a symbolic link on Linux; the letter-case spelling needs a case-insensitive volume (Windows, macOS) and is covered by the same check there. The edge-case row that still said the source is replaced after confirmation was split to match AC-22.
+- 2026-11-02 (spec-build): the edge case "image still loading (no header yet)" is tested with a file whose header cannot be read: both leave the App without a probe for the current image, which is what Ctrl+C and Ctrl+S check.
+- 2026-11-02 (spec-build): copying on Linux and macOS runs through the new `blinzel_ui::app::copy_in_background` (a `blinzel-copy` thread that decodes the clip at once and hands the pixels to a callback); the Linux shell's arboard call moved into `linux/clipboard.rs` (`put_image`, `rgba`). Because the threading is then shared behavior a headless test proves, like `save_in_background`. The clipboard itself needs a display: `a_copy_is_offered_to_other_programs_as_png` runs only with `BLINZEL_X11_TEST` (the Linux CI job's Xvfb step, now `--test-threads=1` since it sets `DISPLAY`), where a second X client asks for `image/png` and decodes the copied pixels; locally it is a no-op without that variable. Not covered by a test: the Wayland path (arboard's data-control protocol; CI has no compositor) and the shell's two lines that call `copy_in_background` after the event in which `offer_clipboard` was called (they need a winit event loop). Both tests were red first: the helper did not exist, and `put_image` stubbed to `Ok(())` left the selection without an owner.
+- 2026-11-02 (spec-build): the macOS shell now calls `copy_in_background` too, and its PNG step is the function `clip_png` (on the copy thread), so `a_copy_lands_on_the_general_pasteboard_as_png` runs the shell's own steps: decode on `blinzel-copy`, encode, `put_png`, then reads `public.png` back from the general pasteboard and compares the pixels with the region turned upright. It builds and runs only in the macOS CI job, which cannot go red locally: its first CI run is the proof. It overwrites the pasteboard of whoever runs the tests on a Mac.
+- 2026-11-02 (spec-build): the window procedure's three clipboard messages (`WM_RENDERFORMAT`, `WM_RENDERALLFORMATS`, `WM_DESTROYCLIPBOARD`) moved into `clipboard::on_message`, so `a_copy_is_decoded_when_pasted_and_kept_after_exit` drives the viewer's own handling from a message-only test window: it announces a copy of a file that does not exist yet (nothing is decoded), checks that `CF_DIBV5` and `PNG` are offered, writes the file, pastes both (the 32-bit sRGB header with alpha mask, the bottom-up rows and the PNG equal the region turned upright), then copies again, renders as `window::exit` does, destroys the window, deletes the file and pastes both once more. It builds and runs only in the Windows CI job: its first CI run is the proof (locally the Windows target does not build: `libwebp-sys` needs an MSVC C toolchain). It overwrites the clipboard of whoever runs the tests on Windows.
 - 2026-11-02: extracted from the code (reverse engineering); the design spec's 🟡 markers for §7 were not taken as evidence.

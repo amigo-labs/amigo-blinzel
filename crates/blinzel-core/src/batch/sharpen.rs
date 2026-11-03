@@ -109,6 +109,46 @@ mod tests {
         );
     }
 
+    /// `docs/specs/batch-resize.md` AC-06: the default is amount 0.5 with
+    /// a Gaussian of sigma 0.8, checked against the mask written out here.
+    #[test]
+    fn the_default_mask_is_amount_half_at_sigma_0_8() {
+        let w = 20usize;
+        let v = |x: i64| {
+            if x.clamp(0, w as i64 - 1) < 10 {
+                60.0
+            } else {
+                200.0
+            }
+        };
+        let sigma = 0.8f64;
+        let g: Vec<f64> = (-3..=3i64)
+            .map(|i| (-(i * i) as f64 / (2.0 * sigma * sigma)).exp())
+            .collect();
+        let sum: f64 = g.iter().sum();
+        let want: Vec<u8> = (0..w as i64)
+            .map(|x| {
+                let blur: f64 = (-3..=3i64).zip(&g).map(|(i, k)| v(x + i) * k / sum).sum();
+                (v(x) + 0.5 * (v(x) - blur)).round().clamp(0.0, 255.0) as u8
+            })
+            .collect();
+        let mut px = Vec::new();
+        for _ in 0..3 {
+            for x in 0..w as i64 {
+                let c = v(x) as u8;
+                px.extend([c, c, c, 255]);
+            }
+        }
+        apply(&mut px, w as u32, 3, Sharpen::default());
+        for x in 0..w {
+            for c in 0..3 {
+                let got = px[(w + x) * 4 + c];
+                assert!(got.abs_diff(want[x]) <= 1, "x {x}: {got} vs {}", want[x]);
+            }
+        }
+        assert_eq!(want[9], 42, "the dark side of the edge");
+    }
+
     #[test]
     fn zero_amount_is_a_no_op() {
         let mut px = vec![1, 2, 3, 4, 200, 100, 50, 255];

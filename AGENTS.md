@@ -204,12 +204,12 @@ Locally (Linux) runs everything platform-independent plus the Linux shell. The W
 
 ## 9. Forbidden patterns
 
-- **Modifying an image file.** The viewer never writes to an image it shows. Batch output and screenshots are new files: an existing name gets a number instead of being replaced. "Save cutout as" goes through the system's save dialog and its overwrite confirmation (whether that may replace the source is an open question in `docs/specs/selection-and-export.md`).
+- **Modifying an image file.** The viewer never writes to an image it shows. Batch output and screenshots are new files: an existing name gets a number instead of being replaced. "Save cutout as" goes through the system's save dialog and its overwrite confirmation, and never replaces its own source.
 - **Rotating pixels for the EXIF orientation.** Orientation is a transform for the GPU and the CPU reference.
 - **Work on the startup or browsing critical path that can wait.** Loading a DLL, reading settings that are not needed for the first frame, synchronous I/O on the UI thread: move it after the first frame or onto a worker (`docs/specs/blinzel.md` §5).
 - **A decode outside `catch_unwind`.** A broken file must never take the viewer down.
 - **Platform types in `blinzel-core` or `blinzel-ui`.**
-- **A user-visible string outside `i18n/`.**
+- **A user-visible string outside `i18n/`.** Technical reasons that come from a decoder, an encoder or the OS (`DecodeError`, `io::Error`) may stay English inside a translated message.
 - **A new dependency without the benchmark gate (§4) or a decision in the design spec.**
 - **New suppressions** (`#[allow(…)]`, `#[expect(…)]`) instead of fixing the cause. Where one is truly justified (e.g. `#[allow(deprecated)]` for an AppKit API without a replacement on macOS 14), the reason is a comment next to it, and the user adds it.
 - **Disabling a test instead of fixing it.** A test that cannot run in CI says why next to its `#[ignore]`.
@@ -318,10 +318,22 @@ packaging/                    winget manifests, Linux icon, macOS signing certif
 
 Pitfalls that code and git history don't show. Short entries; `/spec-build` adds to this list when a loop surprised it.
 
+- **No early `return` in an objc2 `define_class!` method that returns `bool`.** The macro turns the declared `bool` into objc2's `Bool`, and a `return false;` inside the body does not convert (E0308, only the macOS CI job sees it). Write the body as an expression (`if … { false } else { …; true }`).
 - **Windows developer machine: the rustup host is `windows-gnu`.** Build the app with `cargo +1.99.1-x86_64-pc-windows-msvc …`. NASM (`%LOCALAPPDATA%\bin\NASM`) and the CMake that comes with Visual Studio (`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`) must be in the `PATH`.
 - **Laptop measurements vary by up to 30 %** between consecutive runs (throttling). Measure the candidates alternately and run libjpeg-turbo alongside as a control (§4).
 - **Git Bash rewrites arguments that look like paths** (`/CN=…` becomes a Windows path). Scripts that pass such arguments set `MSYS_NO_PATHCONV=1`.
 - **Shell scripts under `packaging/` are run, not sourced.** Their `set -e` and `exit` would close the terminal; `create-signing-cert.sh` refuses to be sourced.
+- **A re-requested thumbnail comes from the disk cache, not the file.** In App tests, counting file reads (`Harness::thumb_reads`) shows only the first request of a thumbnail; whether an evicted one was asked for again shows in the atlas (`Browse::has_thumb`).
+- **`App` commands write the settings file, and the UI language is a process global.** In `blinzel-ui` tests, `settings_store` only writes to the thread's `TEST_CONFIG_DIR` (the harness's temp folder), never `~/.config`; App-level tests use `testkit::Harness`, which holds a lock so tests that switch the language cannot race. The harness auto-applies only `Uncloak` (each render returns it until the shell clears `cloaked`); other window feedback goes through `Harness::shell`.
+- **`blinzel-core`'s batch tests need its `batch` feature.** `cargo test -p blinzel-core --lib batch::run` alone runs 0 tests and says ok; add `--features batch` (the workspace run gets it through `blinzel-ui`).
+- **Two `Harness`es alive in one test deadlock.** Each holds the process-wide harness lock, and shadowing (`let mut h = …` again) does not drop the first: `drop(h)` before making the next one. The symptom is a test that hangs at 0 % CPU, not a failure.
+- **`Harness::pump` lets the App cancel a job before it is done.** The App cancels a loader job once the stage it was for arrives, so whatever the job would wrongly do after that (decode again, ask the system decoder) is usually cut short and an assertion that it did not happen passes anyway. Tests that assert what a job did *not* do use `Harness::settle` / `open_settled`, which hold every result back until the loader is idle.
+- **Only JPEG decodes smaller for the screen.** A PNG's Screen stage is already full resolution, so zooming never asks for a Full stage; an App test that needs a sharper second result of the same image uses a JPEG larger than the harness's 1920 × 1080 screen box.
+- **The harness's window fits its small test images.** App tests that read the batch dialog's drawn rows call `Harness::resize` first; in the tiny window every name is elided to `…name`.
+- **Display-bound Linux tests run only on Xvfb.** A test that needs an X server returns early without `BLINZEL_X11_TEST` (so `cargo test --workspace` stays headless) and sets `DISPLAY` itself; the Linux CI job's xvfb-run step lists it by module filter and runs with `--test-threads=1`. Locally: `xvfb-run -a sh -c 'BLINZEL_X11_TEST=$DISPLAY cargo test -p blinzel-app --lib --test startup -- linux::color linux::clipboard startup_order window_class --test-threads=1'`. The Windows target does not `cargo check` here as is (C dependencies such as `libwebp-sys` need MSVC); a type-check and clippy of `blinzel-app` work with `--no-default-features --tests --target x86_64-pc-windows-msvc`, `AR_x86_64_pc_windows_msvc=llvm-lib` and `CC_x86_64_pc_windows_msvc` set to a stand-in `clang-cl` script that runs `clang --driver-mode=cl --target=x86_64-pc-windows-msvc "$@"` and, where that fails for lack of MSVC headers, compiles an empty C file to the `-Fo` output instead.
+- **`blinzel-race` needs `turbojpeg-sys` for the cross-target type-check.** Its vendored CMake build fails with the stand-in compilers; for `cargo clippy -p blinzel-race --all-targets --target …` set `<TARGET>_TURBOJPEG_SOURCE=explicit` and `<TARGET>_TURBOJPEG_LIB_DIR` to any existing folder (e.g. `AARCH64_APPLE_DARWIN_…`, `X86_64_PC_WINDOWS_MSVC_…`): a check does not link, and the bindings are pregenerated.
+- **Animated JPEG XL fixtures: Ubuntu's `cjxl` (libjxl 0.7) drops the loop count** and writes 1000/1 ticks per second for APNG input (100/1 for GIF). A fixture that needs either is rewritten in its animation header afterwards; the header is not entropy coded, but the bits after it shift, so rebuild up to the end of the image header and pad to the byte where the first frame starts (`docs/specs/animations.md`, Decisions).
+- **`profile.test.package."*"` does not cover workspace members.** `blinzel-core` and `blinzel-bench` run unoptimized in `cargo test` (only `blinzel-jpeg` has its own override), so a test that runs `blinzel-bench run` on a small folder still spends about 75 s on the 12 MP own-kernel cases. Keep benchmark tests on small input and test the output logic as pure functions.
 
 ---
 

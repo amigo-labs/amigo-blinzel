@@ -221,3 +221,147 @@ fn paint(hwnd: HWND) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinzel_core::pixel::{Alpha, PackedFormat, Pixels, Plane};
+    use windows::Win32::Foundation::WPARAM;
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GetForegroundWindow, IsWindowVisible, RegisterClassW,
+        SW_SHOW, SendMessageW, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    };
+    use windows::core::{PCWSTR, w};
+
+    /// A window with the viewer's window procedure and no App yet.
+    fn window(class: PCWSTR) -> HWND {
+        unsafe {
+            let instance = GetModuleHandleW(None).unwrap().into();
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(crate::window::wndproc),
+                hInstance: instance,
+                lpszClassName: class,
+                ..Default::default()
+            };
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("test"),
+                WS_OVERLAPPEDWINDOW,
+                100,
+                100,
+                480,
+                360,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+            .unwrap()
+        }
+    }
+
+    fn cloaked(hwnd: HWND) -> bool {
+        let mut c = 0u32;
+        // SAFETY: `c` is a live u32, the size passed.
+        unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut c).cast(), 4) }.unwrap();
+        c != 0
+    }
+
+    /// A 64 × 48 opaque test image.
+    fn image() -> Image {
+        let mut plane = Plane::new(64, 48, 4);
+        for (i, p) in plane.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            *p = [(i * 7) as u8, (i * 3) as u8, (i / 13) as u8, 255];
+        }
+        Image {
+            pixels: Pixels::Packed {
+                plane,
+                format: PackedFormat::Bgra8,
+                alpha: Alpha::Opaque,
+            },
+            width: 64,
+            height: 48,
+            full_width: 64,
+            full_height: 48,
+            region: None,
+        }
+    }
+
+    /// `docs/specs/startup.md` AC-04: a first image decoded before the
+    /// Direct3D device is drawn on the CPU, painted through GDI into the
+    /// cloaked window, which becomes visible and takes the foreground;
+    /// once Direct3D owns the window, its paint replaces the GDI one.
+    #[test]
+    fn a_first_image_before_the_device_is_drawn_on_the_cpu_and_shown() {
+        // Another window of this process first: whether this session lets
+        // a process take the foreground at all (a desktop without one, or
+        // a runner's restrictions), and the window the viewer takes it from.
+        let other = window(w!("BlinzelFirstFrameOther"));
+        let can_take_foreground = unsafe {
+            let _ = ShowWindow(other, SW_SHOW);
+            let _ = SetForegroundWindow(other);
+            GetForegroundWindow() == other
+        };
+        // As `run.rs` prepares it: cloaked, shown without activation.
+        let hwnd = window(w!("BlinzelFirstFrameTest"));
+        crate::window::set_cloak(hwnd, true);
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+        assert!(cloaked(hwnd));
+        let view = ViewOptions::default();
+        let background = [20, 30, 40];
+        configure(view, background);
+        let img = Arc::new(image());
+        let ff = Box::new(FirstFrame {
+            image: img.clone(),
+            orientation: Orientation::NORMAL,
+            rendered: None,
+            lut: None,
+        });
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_FIRST_FRAME,
+                Some(WPARAM(0)),
+                Some(LPARAM(Box::into_raw(ff) as isize)),
+            );
+        }
+
+        assert!(shown(), "painted through GDI");
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert!(!cloaked(hwnd), "visible with the first image");
+        if can_take_foreground {
+            assert_eq!(
+                unsafe { GetForegroundWindow() },
+                hwnd,
+                "takes the foreground"
+            );
+        }
+        let mut r = RECT::default();
+        unsafe {
+            let _ = GetClientRect(hwnd, &mut r);
+        }
+        let client = (r.right as u32, r.bottom as u32);
+        let painted = STATE.with(|s| s.borrow().bitmap.clone());
+        let cpu = render(&img, Orientation::NORMAL, client, &view, background, None);
+        assert_eq!(painted, Some((cpu, client.0, client.1)), "drawn on the CPU");
+        let marks = blinzel_core::timing::marks();
+        for name in ["first_frame_rendered", "first_gdi_frame", "uncloak"] {
+            assert!(marks.iter().any(|(k, _)| k == name), "no mark {name}");
+        }
+
+        // Direct3D is up (`run.rs`): GDI no longer paints the window.
+        assert!(on_message(hwnd, WM_PAINT, LPARAM(0)).is_some());
+        release();
+        assert!(on_message(hwnd, WM_PAINT, LPARAM(0)).is_none());
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+            let _ = DestroyWindow(other);
+        }
+    }
+}

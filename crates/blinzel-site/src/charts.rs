@@ -81,6 +81,17 @@ fn name(v: &Json) -> String {
         .to_string()
 }
 
+/// The chart and table kinds [`race`] draws, checked before the report
+/// exists so a typo fails the build right away.
+pub const KINDS: [&str; 6] = [
+    "open_warm",
+    "open_cold",
+    "next",
+    "burst",
+    "table",
+    "machine",
+];
+
 /// One chart or table: `open_warm`, `open_cold`, `next` (time, shorter
 /// is better), `burst` (share of images shown), `table`, `machine`.
 /// `raw` links the report itself; `t` translates the generator's keys,

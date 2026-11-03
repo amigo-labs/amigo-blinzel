@@ -23,13 +23,21 @@ pub enum Format {
 }
 
 impl Format {
-    /// Decoded by `blinzel-core` itself; everything else goes to the
-    /// platform fallback (WIC on Windows).
+    /// Decoded by `blinzel-core` itself (HEIF only with the `heic`
+    /// feature); everything else goes to the platform fallback (WIC on
+    /// Windows, ImageIO on macOS).
     pub fn is_native(self) -> bool {
         matches!(
             self,
-            Format::Jpeg | Format::Png | Format::Gif | Format::Bmp | Format::WebP | Format::Jxl
-        )
+            Format::Jpeg
+                | Format::Png
+                | Format::Gif
+                | Format::Bmp
+                | Format::WebP
+                | Format::Jxl
+                | Format::Tiff
+                | Format::Avif
+        ) || (self == Format::Heif && cfg!(feature = "heic"))
     }
 }
 
@@ -47,8 +55,21 @@ pub fn detect(d: &[u8]) -> Format {
     } else if starts(b"RIFF") && d.len() >= 12 && &d[8..12] == b"WEBP" {
         Format::WebP
     } else if d.len() >= 12 && &d[4..8] == b"ftyp" {
+        // A generic `mif1`/`msf1` major brand: the compatible brands after
+        // the minor version (inside the box) say whether it is AVIF.
+        let size = u32::from_be_bytes([d[0], d[1], d[2], d[3]]) as usize;
+        let compatible = d.get(16..size.min(d.len())).unwrap_or_default();
+        let has = |brands: &[&[u8; 4]]| {
+            compatible
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|b| brands.contains(&b))
+        };
+        let heic: &[&[u8; 4]] = &[b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis"];
         match &d[8..12] {
             b"avif" | b"avis" => Format::Avif,
+            b"mif1" | b"msf1" if has(&[b"avif", b"avis"]) && !has(heic) => Format::Avif,
             b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"mif1" | b"msf1" => {
                 Format::Heif
             }
@@ -108,15 +129,76 @@ mod tests {
             detect(b"BM\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0\0"),
             Format::Bmp
         );
+        // BMP needs its 14-byte file header and the 4-byte DIB header size.
+        assert_eq!(
+            detect(b"BM\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0"),
+            Format::Unknown,
+            "17 bytes"
+        );
         assert_eq!(detect(b"RIFF\0\0\0\0WEBPVP8 "), Format::WebP);
         assert_eq!(detect(b"\0\0\0\x18ftypheic\0\0\0\0"), Format::Heif);
         assert_eq!(detect(b"\0\0\0\x18ftypavif\0\0\0\0"), Format::Avif);
         assert_eq!(detect(b"\0\0\0\x18ftypcrx \0\0\0\0"), Format::Raw);
-        assert_eq!(detect(b"II*\0\x08\0\0\0"), Format::Tiff);
+        // A `mif1` major brand is decided by the compatible brands.
+        assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1avif"), Format::Avif);
+        assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1heic"), Format::Heif);
+        // Brands after the end of the `ftyp` box do not count.
+        assert_eq!(detect(b"\0\0\0\x14ftypmif1\0\0\0\0mif1avif"), Format::Heif);
+        // A file naming both AVIF and HEVC stays HEIF (Decisions), whichever
+        // HEVC brand it is.
+        for hevc in [b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis"] {
+            let d = [b"\0\0\0\x1cftypmif1\0\0\0\0mif1avif".as_slice(), hevc].concat();
+            assert_eq!(detect(&d), Format::Heif, "{hevc:?}");
+        }
+        // `avis` counts like `avif`, `msf1` like `mif1`.
+        assert_eq!(detect(b"\0\0\0\x18ftypmif1\0\0\0\0mif1avis"), Format::Avif);
+        assert_eq!(detect(b"\0\0\0\x18ftypmsf1\0\0\0\0msf1avis"), Format::Avif);
+        assert_eq!(detect(b"\0\0\0\x14ftypmsf1\0\0\0\0msf1"), Format::Heif);
+        // The minor version is no compatible brand.
+        assert_eq!(detect(b"\0\0\0\x14ftypmif1avifmif1"), Format::Heif);
+        // An `ftyp` box too short for its major brand is unknown.
+        assert_eq!(detect(b"\0\0\0\x18ftypavi"), Format::Unknown);
+        assert_eq!(detect(b"GIF87a.."), Format::Gif);
+        assert_eq!(detect(b"\0\0\0\x0cJXL \r\n\x87\n\0\0\0\0"), Format::Jxl);
+        // TIFF in either byte order, and BigTIFF.
+        for tiff in [
+            b"II*\0\x08\0\0\0",
+            b"MM\0*\0\0\0\x08",
+            b"II+\0\x08\0\0\0",
+            b"MM\0+\0\x08\0\0",
+        ] {
+            assert_eq!(detect(tiff), Format::Tiff, "{tiff:?}");
+        }
         assert_eq!(detect(&[0xFF, 0x0A, 0, 0]), Format::Jxl);
         assert_eq!(detect(b"hello"), Format::Unknown);
         assert_eq!(detect(b""), Format::Unknown);
-        assert!(Format::Jpeg.is_native() && !Format::Tiff.is_native());
+        // Near misses: each signature with one byte off, 16 bytes long.
+        for near in [
+            &b"\xFF\xD8\x00\xE0\0\0\0\0\0\0\0\0\0\0\0\0"[..],
+            b"\x89PNG\r\n\x1a\0\0\0\0\x0dIHDR",
+            b"GIF89b\0\0\0\0\0\0\0\0\0\0",
+            b"BN\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0\0",
+            b"RIFF\0\0\0\0WAVEfmt ",
+            b"\0\0\0\x18ftyqheic\0\0\0\0",
+            b"II*\x01\x08\0\0\0\0\0\0\0\0\0\0\0",
+            b"MM\x01*\0\0\0\x08\0\0\0\0\0\0\0\0",
+            b"\xFF\x0B\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+        ] {
+            assert_eq!(detect(near), Format::Unknown, "{near:?}");
+        }
+    }
+
+    /// `is_native` names exactly the formats `decode` has a decoder for.
+    #[test]
+    fn native_formats_match_the_decoders() {
+        use Format::*;
+        for f in [Jpeg, Png, Gif, Bmp, WebP, Jxl, Tiff, Avif] {
+            assert!(f.is_native(), "{f:?}");
+        }
+        assert_eq!(Heif.is_native(), cfg!(feature = "heic"));
+        for f in [Ico, Dds, Psd, Qoi, JpegXr, Raw, Unknown] {
+            assert!(!f.is_native(), "{f:?}");
+        }
     }
 
     #[test]

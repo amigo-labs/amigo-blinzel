@@ -19,7 +19,7 @@ use blinzel_core::pixel::{ChromaSub, Plane};
 use blinzel_core::testimg;
 use blinzel_core::timing::Stats;
 
-use super::{Result_, time};
+use super::{Result_, record, time};
 
 /// The JPEG libjpeg-turbo is measured on at each level.
 const JPEG_FILE: &str = "jpeg-24mp-420.jpg";
@@ -101,12 +101,9 @@ fn turbo(path: &Path, iters: usize, results: &mut Vec<Result_>) -> Result<(), St
         .map(|(case, _)| (*case, Vec::new()))
         .collect();
     for (level, var) in turbo_levels() {
-        let mut cmd = Command::new(&exe);
-        cmd.arg("simd-child").arg(path).arg(iters.to_string());
-        for v in JSIMD_VARS {
-            cmd.env_remove(v);
-        }
-        let out = cmd.env(var, "1").output().map_err(|e| e.to_string())?;
+        let out = child_command(&exe, path, iters, var)
+            .output()
+            .map_err(|e| e.to_string())?;
         if !out.status.success() {
             return Err(format!(
                 "simd-child ({var}) failed: {}",
@@ -126,6 +123,18 @@ fn turbo(path: &Path, iters: usize, results: &mut Vec<Result_>) -> Result<(), St
         report(results, case, JPEG_FILE, mp, levels);
     }
     Ok(())
+}
+
+/// `simd-child` for one level: only `var` of the `JSIMD_FORCE*` variables
+/// is set.
+fn child_command(exe: &Path, file: &Path, iters: usize, var: &str) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.arg("simd-child").arg(file).arg(iters.to_string());
+    for v in JSIMD_VARS {
+        cmd.env_remove(v);
+    }
+    cmd.env(var, "1");
+    cmd
 }
 
 fn parse_child_line(line: &str) -> Result<(&str, Stats), String> {
@@ -219,25 +228,74 @@ fn own_kernels(iters: usize, results: &mut Vec<Result_>) {
 /// Prints one case at every level with the factor against the first
 /// (lowest) level and stores the results.
 fn report(results: &mut Vec<Result_>, case: &str, file: &str, mp: f64, levels: Vec<(&str, Stats)>) {
-    let Some(base) = levels.first().map(|(_, s)| s.median) else {
+    let Some(&(base_level, base)) = levels.first() else {
         return;
     };
     for (level, stats) in levels {
-        println!(
-            "{:<14} {:<34} {:<10} median {:>8.2} ms  min {:>8.2} ms  {:>5.2}x",
-            "simd",
-            case,
-            level,
-            stats.median,
-            stats.min,
-            base / stats.median
-        );
-        results.push(Result_ {
+        let r = Result_ {
             group: "simd".into(),
             candidate: format!("{case} [{level}]"),
             file: file.into(),
             megapixels: mp,
             stats,
-        });
+        };
+        record(results, r, &factor(&base, &stats, base_level));
+    }
+}
+
+/// How many times faster than the lowest level, by median.
+fn factor(base: &Stats, stats: &Stats, base_level: &str) -> String {
+    format!("  {:.2}x vs {base_level}", base.median / stats.median)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-10: every libjpeg-turbo level runs in its own child process with
+    /// only its own `JSIMD_FORCE*` variable set.
+    #[test]
+    fn each_level_runs_in_a_child_with_only_its_variable() {
+        let levels: Vec<&str> = turbo_levels().iter().map(|(l, _)| *l).collect();
+        #[cfg(target_arch = "x86_64")]
+        let want: Vec<&str> = if std::is_x86_feature_detected!("avx2") {
+            vec!["none", "sse2", "avx2"]
+        } else {
+            vec!["none", "sse2"]
+        };
+        #[cfg(target_arch = "aarch64")]
+        let want = vec!["none", "neon"];
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let want = vec!["none"];
+        assert_eq!(levels, want);
+
+        for (_, var) in turbo_levels() {
+            let cmd = child_command(Path::new("exe"), Path::new("f.jpg"), 3, var);
+            let args: Vec<_> = cmd.get_args().collect();
+            assert_eq!(args, ["simd-child", "f.jpg", "3"]);
+            for (k, v) in cmd.get_envs() {
+                let k = k.to_str().unwrap();
+                assert!(JSIMD_VARS.contains(&k));
+                assert_eq!(v.is_some(), k == var, "{k}");
+            }
+            assert_eq!(cmd.get_envs().count(), JSIMD_VARS.len());
+        }
+    }
+
+    /// AC-10: the factor is against the lowest level, by median.
+    #[test]
+    fn the_factor_is_against_the_lowest_level() {
+        let s = |median| Stats {
+            min: median,
+            median,
+            p99: median,
+            mean: median,
+            n: 3,
+        };
+        assert_eq!(factor(&s(30.0), &s(10.0), "none"), "  3.00x vs none");
+        assert_eq!(
+            factor(&s(30.0), &s(30.0), "baseline"),
+            "  1.00x vs baseline"
+        );
     }
 }

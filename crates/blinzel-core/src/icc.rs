@@ -343,6 +343,14 @@ mod tests {
         // Same primaries, gamma 2.2: not sRGB.
         let g22 = matrix_profile(colorants::SRGB, Trc::Gamma(2.2), "sRGB 2.2");
         assert!(!is_srgb(&g22));
+        // Colorants within 0.003 of sRGB's are sRGB; 0.004 off is not.
+        let shifted = |d: f64| {
+            let mut c = colorants::SRGB;
+            c[0][0] += d;
+            matrix_profile(c, Trc::Srgb, "shifted")
+        };
+        assert!(is_srgb(&shifted(0.002)));
+        assert!(!is_srgb(&shifted(0.004)));
         let adobe = matrix_profile(colorants::ADOBE_RGB, Trc::Gamma(563.0 / 256.0), "Adobe");
         assert!(!is_srgb(&adobe));
         let p3 = matrix_profile(colorants::DISPLAY_P3, Trc::Srgb, "Display P3");

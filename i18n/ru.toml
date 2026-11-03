@@ -35,6 +35,7 @@ save_suffix = "фрагмент"
 saved = "Сохранено: «{name}»"
 saved_lossless = "Сохранено без потерь: «{name}»"
 error_save = "Не удалось сохранить «{name}»: {reason}"
+error_save_source = "«{name}» — исходное изображение фрагмента: оно не заменяется"
 show_original = "Показать оригинал"
 
 nav_next = "Следующее изображение"

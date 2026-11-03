@@ -140,6 +140,16 @@ fn encode_jpeg(
     Err("JPEG encoding needs the turbojpeg feature".into())
 }
 
+/// Encoder settings of a re-encoded WebP (lossy) or AVIF cutout.
+#[cfg(feature = "batch")]
+pub const CUTOUT_QUALITY: crate::batch::Quality = crate::batch::Quality {
+    jpeg: JPEG_QUALITY,
+    webp: 90,
+    webp_lossless: false,
+    avif: 85,
+    avif_speed: 6,
+};
+
 /// WebP and AVIF through the batch encoders, at high quality, with the
 /// source's colour profile.
 #[cfg(feature = "batch")]
@@ -150,26 +160,19 @@ fn encode_modern(
     source: &[u8],
     format: SaveFormat,
 ) -> Result<Vec<u8>, String> {
-    use crate::batch::{Codec, Quality, encode};
+    use crate::batch::{Codec, encode};
     let icc = crate::decode::probe(source).ok().and_then(|p| p.icc);
     let codec = if format == SaveFormat::Webp {
         Codec::Webp
     } else {
         Codec::Avif
     };
-    let q = Quality {
-        jpeg: JPEG_QUALITY,
-        webp: 90,
-        webp_lossless: false,
-        avif: 85,
-        avif_speed: 6,
-    };
     encode::encode(
         bgra,
         w,
         h,
         codec,
-        &q,
+        &CUTOUT_QUALITY,
         None,
         icc.as_ref().map(|p| &p.bytes[..]),
     )
@@ -405,6 +408,154 @@ mod tests {
             SaveFormat::from_path(std::path::Path::new("a.jpeg")),
             SaveFormat::Jpeg
         );
+    }
+
+    fn jpeg_with(w: u32, h: u32, subsampling: u16) -> Vec<u8> {
+        let opts = EncodeOptions {
+            subsampling,
+            ..Default::default()
+        };
+        encode_rgb(&testimg::rgb(w, h), w, h, opts).unwrap()
+    }
+
+    fn test_icc() -> Vec<u8> {
+        crate::icc::matrix_profile(
+            crate::icc::colorants::DISPLAY_P3,
+            crate::icc::Trc::Gamma(2.2),
+            "Cutout test",
+        )
+    }
+
+    /// A JPEG source with an ICC profile and an EXIF block.
+    fn tagged_jpeg(w: u32, h: u32) -> Vec<u8> {
+        let mut exif = b"Exif\0\0".to_vec();
+        exif.extend(crate::exif::tests::tiff_le(1, None));
+        with_segments(
+            crate::icc::embed_in_jpeg(&jpeg(w, h), &test_icc()),
+            &[(0xE1, exif)],
+        )
+    }
+
+    fn dqt(jpeg: &[u8]) -> Vec<Vec<u8>> {
+        blinzel_jpeg::Segments::new(jpeg)
+            .filter(|s| s.marker == 0xDB)
+            .map(|s| jpeg[s.payload].to_vec())
+            .collect()
+    }
+
+    fn has(data: &[u8], needle: &[u8]) -> bool {
+        data.windows(needle.len()).any(|w| w == needle)
+    }
+
+    /// PNG colour type (IHDR) and whether an `iCCP` or `eXIf` chunk is there.
+    fn png_meta(png: &[u8]) -> (u8, bool, bool) {
+        (png[25], has(png, b"iCCP"), has(png, b"eXIf"))
+    }
+
+    #[test]
+    fn reencoded_jpeg_uses_quality_95_the_source_subsampling_and_icc() {
+        let unaligned = PixelRect::new(3, 5, 100, 60);
+        let any = vec![0u8; 16 * 16 * 4];
+        let q95 = crate::decode::jpeg::encode_bgra(&any, 16, 16, 95, 444, None).unwrap();
+        for (sub, want) in [
+            (444, blinzel_jpeg::Subsampling::S444),
+            (422, blinzel_jpeg::Subsampling::S422),
+            (420, blinzel_jpeg::Subsampling::S420),
+        ] {
+            let src = jpeg_with(160, 120, sub);
+            let s = export(
+                &src,
+                &cut(unaligned, 1, 1),
+                SaveFormat::Jpeg,
+                &crate::decode::decode,
+            )
+            .unwrap();
+            assert!(!s.lossless);
+            let info = blinzel_jpeg::parse(&s.bytes).unwrap();
+            assert_eq!(info.subsampling(), want, "{sub}");
+            assert_eq!(dqt(&s.bytes), dqt(&q95), "quality 95");
+        }
+        // Another source: 4:2:0.
+        let png = encode_png_bgra(&testimg::rgba(64, 48), 64, 48).unwrap();
+        let s = export(
+            &png,
+            &cut(PixelRect::new(0, 0, 40, 30), 1, 1),
+            SaveFormat::Jpeg,
+            &crate::decode::decode,
+        )
+        .unwrap();
+        let info = blinzel_jpeg::parse(&s.bytes).unwrap();
+        assert_eq!(info.subsampling(), blinzel_jpeg::Subsampling::S420);
+        // A JPEG source's ICC profile is kept, its EXIF is not.
+        let src = tagged_jpeg(160, 120);
+        assert!(blinzel_jpeg::parse(&src).unwrap().exif.is_some());
+        let s = export(
+            &src,
+            &cut(unaligned, 1, 1),
+            SaveFormat::Jpeg,
+            &crate::decode::decode,
+        )
+        .unwrap();
+        let info = blinzel_jpeg::parse(&s.bytes).unwrap();
+        assert_eq!(
+            blinzel_jpeg::icc_profile(&s.bytes, &info).as_deref(),
+            Some(&test_icc()[..])
+        );
+        assert!(info.exif.is_none(), "no EXIF on a re-encoded cutout");
+    }
+
+    #[test]
+    fn png_cutouts_are_rgb_when_opaque_else_rgba_without_icc_or_exif() {
+        let src = tagged_jpeg(160, 120);
+        let r = PixelRect::new(0, 0, 32, 32);
+        let s = export(&src, &cut(r, 1, 1), SaveFormat::Png, &crate::decode::decode).unwrap();
+        assert!(!s.lossless);
+        assert_eq!(png_meta(&s.bytes), (2, false, false), "RGB, no iCCP/eXIf");
+        // Half transparent source: RGBA.
+        let mut bgra = testimg::rgba(64, 48);
+        bgra[3] = 0;
+        let png = encode_png_bgra(&bgra, 64, 48).unwrap();
+        let s = export(&png, &cut(r, 1, 1), SaveFormat::Png, &crate::decode::decode).unwrap();
+        assert_eq!(png_meta(&s.bytes).0, 6, "RGBA");
+        let px = crate::decode::decode(&s.bytes, Request::Full)
+            .unwrap()
+            .to_bgra();
+        assert_eq!(px[3], 0, "alpha kept");
+    }
+
+    #[cfg(feature = "batch")]
+    #[test]
+    fn webp_and_avif_cutouts_embed_the_icc_profile_but_no_exif() {
+        let src = tagged_jpeg(160, 120);
+        let r = PixelRect::new(3, 5, 60, 40);
+        for format in [SaveFormat::Webp, SaveFormat::Avif] {
+            let s = export(&src, &cut(r, 1, 1), format, &crate::decode::decode).unwrap();
+            assert!(!s.lossless);
+            let p = crate::decode::probe(&s.bytes).unwrap();
+            assert_eq!(
+                p.icc.map(|p| p.bytes.to_vec()),
+                Some(test_icc()),
+                "{format:?}"
+            );
+            assert!(
+                !has(&s.bytes, b"EXIF") && !has(&s.bytes, b"Exif") && !has(&s.bytes, b"II*\0"),
+                "{format:?} carries no EXIF"
+            );
+        }
+        // WebP is lossy (VP8, not VP8L) at quality 90, AVIF at 85.
+        let s = export(
+            &src,
+            &cut(r, 1, 1),
+            SaveFormat::Webp,
+            &crate::decode::decode,
+        )
+        .unwrap();
+        assert!(has(&s.bytes, b"VP8 ") && !has(&s.bytes, b"VP8L"));
+        assert_eq!(
+            (CUTOUT_QUALITY.webp, CUTOUT_QUALITY.webp_lossless),
+            (90, false)
+        );
+        assert_eq!(CUTOUT_QUALITY.avif, 85);
     }
 
     #[test]

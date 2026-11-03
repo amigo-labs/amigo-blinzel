@@ -46,10 +46,15 @@ fn main() {
 }
 
 fn usage() -> String {
-    "usage:\n  blinzel-bench corpus <dir> [--large]\n  blinzel-bench run <dir> [--json <file>] [--quick] [--check]\n  blinzel-bench compare <a.json> <b.json>
-  blinzel-bench thumbs <dir> [--count N] [--threads T]
+    "usage:
+  blinzel-bench corpus <dir> [--large]
+  blinzel-bench run <dir> [--json <file>] [--quick] [--check]
+  blinzel-bench compare <a.json> <b.json>
+  blinzel-bench jpeg-ab <file> [scale] [threads] [rounds]
+  blinzel-bench thumbs <dir> [--count N] [--threads T] [--keep-cache]
   blinzel-bench resize [--runs N] [--quick]
-  blinzel-bench batch <dir> [--count N] [--threads T] [--format jpeg|png|webp|avif] [--edge E]".into()
+  blinzel-bench batch <dir> [--count N] [--threads T] [--format jpeg|png|webp|avif] [--edge E] [--from <dir>] [--keep <dir>]"
+        .into()
 }
 
 fn flag(args: &[String], name: &str) -> bool {
@@ -63,140 +68,148 @@ fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-struct JpegCase {
+/// What a corpus file holds.
+#[derive(Clone, Copy)]
+enum Content {
+    Jpeg(EncodeOptions),
+    Png(png::ColorType),
+    /// Flat UI-like bands: compresses very differently from photos.
+    Screenshot,
+}
+
+/// One file of the corpus.
+struct CorpusFile {
     name: &'static str,
     w: u32,
     h: u32,
-    opts: EncodeOptions,
+    content: Content,
+    /// Only with `--large`.
     large: bool,
 }
 
-fn jpeg_cases() -> Vec<JpegCase> {
+fn corpus_files() -> Vec<CorpusFile> {
     let base = EncodeOptions {
         quality: 90,
         ..Default::default()
     };
-    let c = |name, w, h, opts, large| JpegCase {
+    let jpeg = |name, w, h, opts| CorpusFile {
         name,
         w,
         h,
-        opts,
-        large,
+        content: Content::Jpeg(opts),
+        large: false,
+    };
+    let at = |subsampling| EncodeOptions {
+        subsampling,
+        ..base
     };
     vec![
-        c("jpeg-12mp-420", 4000, 3000, base, false),
-        c("jpeg-24mp-420", 6000, 4000, base, false),
-        c(
-            "jpeg-24mp-422",
-            6000,
-            4000,
-            EncodeOptions {
-                subsampling: 422,
-                ..base
-            },
-            false,
-        ),
-        c(
-            "jpeg-24mp-444",
-            6000,
-            4000,
-            EncodeOptions {
-                subsampling: 444,
-                ..base
-            },
-            false,
-        ),
-        c(
-            "jpeg-24mp-420-progressive",
+        jpeg("jpeg-12mp-420.jpg", 4000, 3000, base),
+        jpeg("jpeg-24mp-420.jpg", 6000, 4000, base),
+        jpeg("jpeg-24mp-422.jpg", 6000, 4000, at(422)),
+        jpeg("jpeg-24mp-444.jpg", 6000, 4000, at(444)),
+        jpeg(
+            "jpeg-24mp-420-progressive.jpg",
             6000,
             4000,
             EncodeOptions {
                 progressive: true,
                 ..base
             },
-            false,
         ),
-        c(
-            "jpeg-24mp-420-restart",
+        jpeg(
+            "jpeg-24mp-420-restart.jpg",
             6000,
             4000,
             EncodeOptions {
                 restart_rows: 1,
                 ..base
             },
-            false,
         ),
-        c(
-            "jpeg-24mp-gray",
+        jpeg(
+            "jpeg-24mp-gray.jpg",
             6000,
             4000,
             EncodeOptions { gray: true, ..base },
-            false,
         ),
-        c("jpeg-45mp-420", 8256, 5504, base, false),
-        c("jpeg-100mp-420", 12288, 8192, base, true),
+        jpeg("jpeg-45mp-420.jpg", 8256, 5504, base),
+        CorpusFile {
+            large: true,
+            ..jpeg("jpeg-100mp-420.jpg", 12288, 8192, base)
+        },
+        CorpusFile {
+            content: Content::Png(png::ColorType::Rgb),
+            ..jpeg("png-12mp-rgb.png", 4000, 3000, base)
+        },
+        CorpusFile {
+            content: Content::Png(png::ColorType::Rgba),
+            ..jpeg("png-12mp-rgba.png", 4000, 3000, base)
+        },
+        CorpusFile {
+            content: Content::Screenshot,
+            ..jpeg("png-8mp-screenshot.png", 3840, 2160, base)
+        },
     ]
 }
 
-/// Writes the corpus. Existing files are kept (generation is slow).
 fn corpus(args: &[String]) -> Result<(), String> {
     let dir = PathBuf::from(args.first().ok_or_else(usage)?);
-    let large = flag(args, "--large");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let write = |name: &str, make: &dyn Fn() -> Vec<u8>| -> Result<(), String> {
-        let path = dir.join(name);
-        if path.exists() {
-            return Ok(());
+    write_corpus(&dir, flag(args, "--large"), 1)
+}
+
+/// Writes the corpus, every dimension divided by `shrink` (1 for the real
+/// one). Existing files are kept (generation is slow).
+fn write_corpus(dir: &Path, large: bool, shrink: u32) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    for f in corpus_files() {
+        let path = dir.join(f.name);
+        if (f.large && !large) || path.exists() {
+            continue;
         }
         let t = Instant::now();
-        let data = make();
+        let data = render(f.content, f.w / shrink, f.h / shrink);
         fs::write(&path, &data).map_err(|e| format!("{}: {e}", path.display()))?;
         println!(
-            "{name}: {} KiB in {:.1} s",
+            "{}: {} KiB in {:.1} s",
+            f.name,
             data.len() / 1024,
             t.elapsed().as_secs_f64()
         );
-        Ok(())
-    };
-    for c in jpeg_cases() {
-        if c.large && !large {
-            continue;
-        }
-        write(&format!("{}.jpg", c.name), &|| {
-            let px = if c.opts.gray {
-                testimg::gray(c.w, c.h)
-            } else {
-                testimg::rgb(c.w, c.h)
-            };
-            encode_rgb(&px, c.w, c.h, c.opts).expect("encode")
-        })?;
     }
-    write("png-12mp-rgb.png", &|| {
-        png_encode(4000, 3000, png::ColorType::Rgb, &testimg::rgb(4000, 3000))
-    })?;
-    write("png-12mp-rgba.png", &|| {
-        png_encode(4000, 3000, png::ColorType::Rgba, &testimg::rgba(4000, 3000))
-    })?;
-    write("png-8mp-screenshot.png", &|| {
-        // Flat UI-like content compresses very differently from photos.
-        let (w, h) = (3840u32, 2160u32);
-        let mut px = vec![0u8; (w * h * 3) as usize];
-        for (i, p) in px.as_chunks_mut::<3>().0.iter_mut().enumerate() {
-            let (x, y) = (i as u32 % w, i as u32 / w);
-            let band = (y / 40 + x / 300) % 5;
-            p.copy_from_slice(
-                &[
-                    [240, 240, 240],
-                    [30, 30, 30],
-                    [0, 120, 215],
-                    [255, 255, 255],
-                    [200, 60, 60],
-                ][band as usize],
-            );
-        }
-        png_encode(w, h, png::ColorType::Rgb, &px)
-    })?;
     Ok(())
+}
+
+/// The encoded bytes of one corpus file: the same on every run.
+fn render(content: Content, w: u32, h: u32) -> Vec<u8> {
+    match content {
+        Content::Jpeg(opts) => {
+            let px = if opts.gray {
+                testimg::gray(w, h)
+            } else {
+                testimg::rgb(w, h)
+            };
+            encode_rgb(&px, w, h, opts).expect("encode")
+        }
+        Content::Png(color @ png::ColorType::Rgba) => png_encode(w, h, color, &testimg::rgba(w, h)),
+        Content::Png(color) => png_encode(w, h, color, &testimg::rgb(w, h)),
+        Content::Screenshot => {
+            let mut px = vec![0u8; (w * h * 3) as usize];
+            for (i, p) in px.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                let (x, y) = (i as u32 % w, i as u32 / w);
+                let band = (y / 40 + x / 300) % 5;
+                p.copy_from_slice(
+                    &[
+                        [240, 240, 240],
+                        [30, 30, 30],
+                        [0, 120, 215],
+                        [255, 255, 255],
+                        [200, 60, 60],
+                    ][band as usize],
+                );
+            }
+            png_encode(w, h, png::ColorType::Rgb, &px)
+        }
+    }
 }
 
 fn png_encode(w: u32, h: u32, color: png::ColorType, data: &[u8]) -> Vec<u8> {
@@ -220,6 +233,40 @@ struct Result_ {
     stats: Stats,
 }
 
+/// Megapixels per second at `median_ms`; 0 without pixels or time.
+fn mp_per_s(megapixels: f64, median_ms: f64) -> f64 {
+    if megapixels > 0.0 && median_ms > 0.0 {
+        megapixels / (median_ms / 1e3)
+    } else {
+        0.0
+    }
+}
+
+/// The printed line of one result.
+fn line(r: &Result_) -> String {
+    let v = mp_per_s(r.megapixels, r.stats.median);
+    let rate = if v > 0.0 {
+        format!("{v:.1} MP/s")
+    } else {
+        "-".to_string()
+    };
+    format!(
+        "{:<14} {:<42} {:<32} median {:>8.2} ms  min {:>8.2} ms  {rate:>12}",
+        r.group, r.candidate, r.file, r.stats.median, r.stats.min
+    )
+}
+
+/// Prints one result's line (plus `extra`) and keeps the result.
+fn record(results: &mut Vec<Result_>, r: Result_, extra: &str) {
+    println!("{}{extra}", line(&r));
+    results.push(r);
+}
+
+/// Timed runs per candidate.
+fn iterations(quick: bool) -> usize {
+    if quick { 3 } else { 9 }
+}
+
 /// Times `f` `iters` times after one warm-up run.
 fn time(iters: usize, mut f: impl FnMut()) -> Stats {
     f();
@@ -236,7 +283,7 @@ fn time(iters: usize, mut f: impl FnMut()) -> Stats {
 fn run(args: &[String]) -> Result<(), String> {
     let dir = PathBuf::from(args.first().ok_or_else(usage)?);
     let quick = flag(args, "--quick");
-    let iters = if quick { 3 } else { 9 };
+    let iters = iterations(quick);
     let mut results: Vec<Result_> = Vec::new();
     let mut files: Vec<PathBuf> = fs::read_dir(&dir)
         .map_err(|e| format!("{}: {e} (run `blinzel-bench corpus` first)", dir.display()))?
@@ -253,26 +300,21 @@ fn run(args: &[String]) -> Result<(), String> {
         let data = fs::read(path).map_err(|e| e.to_string())?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mut push = |group: &str, candidate: &str, mp: f64, stats: Stats| {
-            println!(
-                "{group:<14} {candidate:<34} {name:<32} median {:>8.2} ms  min {:>8.2} ms  {:>7.1} MP/s",
-                stats.median,
-                stats.min,
-                mp / (stats.median / 1e3)
-            );
-            results.push(Result_ {
+            let r = Result_ {
                 group: group.into(),
                 candidate: candidate.into(),
                 file: name.clone(),
                 megapixels: mp,
                 stats,
-            });
+            };
+            record(&mut results, r, "");
         };
         match ext {
             "jpg" => {
                 let info = blinzel_jpeg::parse(&data).map_err(|e| format!("{name}: {e}"))?;
                 if verify
                     && blinzel_jpeg::is_supported(&info)
-                    && let Err(e) = verify_own_jpeg(&data, cpus)
+                    && let Err(e) = verify_own_jpeg(&data)
                 {
                     mismatches.push(format!("  {name}: {e}"));
                 }
@@ -282,7 +324,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     "jpeg-header",
                     "blinzel-jpeg parse",
                     mp,
-                    time(iters * 10, || {
+                    time(iters, || {
                         std::hint::black_box(blinzel_jpeg::parse(&data).unwrap());
                     }),
                 );
@@ -475,18 +517,22 @@ fn run(args: &[String]) -> Result<(), String> {
     let names: Vec<String> = (0..10_000)
         .map(|i| format!("IMG_{:05} ({}).JPG", (i * 7919) % 10_000, i % 7))
         .collect();
-    results.push(Result_ {
-        group: "natsort".into(),
-        candidate: "SortKey + sort 10k".into(),
-        file: "-".into(),
-        megapixels: 0.0,
-        stats: time(iters, || {
-            let mut keyed: Vec<(SortKey, &String)> =
-                names.iter().map(|n| (SortKey::new(n), n)).collect();
-            keyed.sort_unstable();
-            std::hint::black_box(keyed);
-        }),
-    });
+    record(
+        &mut results,
+        Result_ {
+            group: "natsort".into(),
+            candidate: "SortKey + sort 10k".into(),
+            file: "-".into(),
+            megapixels: 0.0,
+            stats: time(iters, || {
+                let mut keyed: Vec<(SortKey, &String)> =
+                    names.iter().map(|n| (SortKey::new(n), n)).collect();
+                keyed.sort_unstable();
+                std::hint::black_box(keyed);
+            }),
+        },
+        "",
+    );
 
     // Fresh 96 MB buffer (page faults) vs. a recycled one.
     let len = 6000 * 4000 * 4;
@@ -495,36 +541,38 @@ fn run(args: &[String]) -> Result<(), String> {
             b[i] = 1;
         }
     };
-    results.push(Result_ {
-        group: "alloc-96mb".into(),
-        candidate: "fresh Vec + touch".into(),
-        file: "-".into(),
-        megapixels: 24.0,
-        stats: time(iters, || {
-            let mut v = vec![0u8; len];
-            touch(&mut v);
-            std::hint::black_box(v);
-        }),
-    });
+    record(
+        &mut results,
+        Result_ {
+            group: "alloc-96mb".into(),
+            candidate: "fresh Vec + touch".into(),
+            file: "-".into(),
+            megapixels: 24.0,
+            stats: time(iters, || {
+                let mut v = vec![0u8; len];
+                touch(&mut v);
+                std::hint::black_box(v);
+            }),
+        },
+        "",
+    );
     bufpool::global().set_max_retained(1 << 30);
-    results.push(Result_ {
-        group: "alloc-96mb".into(),
-        candidate: "BufPool + touch".into(),
-        file: "-".into(),
-        megapixels: 24.0,
-        stats: time(iters, || {
-            // Dropping returns the buffer to the pool for the next round.
-            let mut b = PoolBuf::new(len);
-            touch(&mut b);
-            std::hint::black_box(&b);
-        }),
-    });
-    for r in results.iter().filter(|r| r.file == "-") {
-        println!(
-            "{:<14} {:<34} median {:>8.3} ms",
-            r.group, r.candidate, r.stats.median
-        );
-    }
+    record(
+        &mut results,
+        Result_ {
+            group: "alloc-96mb".into(),
+            candidate: "BufPool + touch".into(),
+            file: "-".into(),
+            megapixels: 24.0,
+            stats: time(iters, || {
+                // Dropping returns the buffer to the pool for the next round.
+                let mut b = PoolBuf::new(len);
+                touch(&mut b);
+                std::hint::black_box(&b);
+            }),
+        },
+        "",
+    );
 
     if let Some(out) = option(args, "--json") {
         write_json(Path::new(out), &results)?;
@@ -539,11 +587,22 @@ fn run(args: &[String]) -> Result<(), String> {
 /// blinzel-jpeg, decoding in parallel, must reproduce libjpeg-turbo's
 /// planes exactly; the corpus has the file sizes where every parallel code
 /// path (speculation, retries, restart markers) actually runs.
-fn verify_own_jpeg(data: &[u8], threads: usize) -> Result<(), String> {
+fn verify_own_jpeg(data: &[u8]) -> Result<(), String> {
+    verify_own_jpeg_with(data, own_jpeg)
+}
+
+/// [`verify_own_jpeg`] with blinzel-jpeg's decode (`ours(data, scale,
+/// threads)`) passed in, so a test sees what it is asked for: full size and
+/// 1/8, each on all logical CPUs (benchmark-gate AC-04).
+fn verify_own_jpeg_with(
+    data: &[u8],
+    mut ours: impl FnMut(&[u8], u32, usize) -> Vec<PoolBuf>,
+) -> Result<(), String> {
     let info = blinzel_jpeg::parse(data).map_err(|e| e.to_string())?;
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     for scale in [8, 1] {
         let layouts = blinzel_jpeg::plane_layouts(&info, scale);
-        let ours = own_jpeg(data, scale, threads);
+        let ours = ours(data, scale, threads);
         let req = Request::Fit {
             w: blinzel_jpeg::scaled(info.width, scale),
             h: blinzel_jpeg::scaled(info.height, scale),
@@ -552,25 +611,38 @@ fn verify_own_jpeg(data: &[u8], threads: usize) -> Result<(), String> {
             Pixels::Ycc { y, cb, cr, .. } => vec![y, cb, cr],
             Pixels::Packed { plane, .. } => vec![plane],
         };
-        for (c, ((buf, l), t)) in ours.iter().zip(&layouts).zip(&theirs).enumerate() {
-            let w = l.width.min(t.width) as usize;
-            for y in 0..l.height.min(t.height) {
-                if buf[y as usize * l.stride..][..w] != t.row(y)[..w] {
-                    return Err(format!(
-                        "blinzel-jpeg differs from libjpeg-turbo at {scale}/8, component {c}, row {y}"
-                    ));
-                }
+        compare_planes(scale, &ours, &layouts, &theirs)?;
+    }
+    Ok(())
+}
+
+/// Compares blinzel-jpeg's planes (`ours`, laid out by `layouts`) with
+/// libjpeg-turbo's row by row; the first differing row is the error.
+fn compare_planes(
+    scale: u32,
+    ours: &[PoolBuf],
+    layouts: &[blinzel_jpeg::PlaneLayout],
+    theirs: &[blinzel_core::pixel::Plane],
+) -> Result<(), String> {
+    for (c, ((buf, l), t)) in ours.iter().zip(layouts).zip(theirs).enumerate() {
+        let w = l.width.min(t.width) as usize;
+        for y in 0..l.height.min(t.height) {
+            if buf[y as usize * l.stride..][..w] != t.row(y)[..w] {
+                return Err(format!(
+                    "blinzel-jpeg differs from libjpeg-turbo at {scale}/8, component {c}, row {y}"
+                ));
             }
         }
     }
     Ok(())
 }
 
-/// Whether zune-jpeg beats libjpeg-turbo: in the median and in the best
-/// run. An unoptimized build is slower in every run; a noisy neighbour on
-/// the CI runner raises the median of one file but not its minimum.
+/// Whether zune-jpeg beats libjpeg-turbo: strictly faster in the median and
+/// in the best run, so a tie is no win. An unoptimized build is slower in
+/// every run; a noisy neighbour on the CI runner raises the median of one
+/// file but not its minimum.
 fn zune_wins(turbo: &Stats, zune: &Stats) -> bool {
-    turbo.median >= zune.median && turbo.min >= zune.min
+    turbo.median > zune.median && turbo.min > zune.min
 }
 
 /// The shipped JPEG path (libjpeg-turbo to YCbCr planes) must beat
@@ -620,6 +692,30 @@ fn check(results: &[Result_], mismatches: &[String]) -> Result<(), String> {
 /// blinzel-jpeg alternately in one process, so machine noise hits both
 /// alike. For development; not part of `run`.
 fn jpeg_ab(args: &[String]) -> Result<(), String> {
+    let (file, scale, threads, rounds) = ab_args(args)?;
+    let data = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+    let info = blinzel_jpeg::parse(&data).map_err(|e| e.to_string())?;
+    let req = Request::Fit {
+        w: blinzel_jpeg::scaled(info.width, scale),
+        h: blinzel_jpeg::scaled(info.height, scale),
+    };
+    let (a, b) = alternate(
+        rounds,
+        || {
+            std::hint::black_box(decode::decode(&data, req).unwrap());
+        },
+        || {
+            std::hint::black_box(own_jpeg(&data, scale, threads));
+        },
+    )
+    .ok_or("rounds must be at least 1")?;
+    println!("{}", ab_line(file, scale, threads, &a, &b));
+    Ok(())
+}
+
+/// `jpeg-ab`'s file, scale (default 8, full size), threads (default all
+/// logical CPUs) and rounds (default 15).
+fn ab_args(args: &[String]) -> Result<(&str, u32, usize, usize), String> {
     let file = args
         .first()
         .ok_or("usage: blinzel-bench jpeg-ab <file> [scale] [threads] [rounds]")?;
@@ -627,34 +723,32 @@ fn jpeg_ab(args: &[String]) -> Result<(), String> {
         args.get(i)
             .map_or(Ok(default), |s| s.parse().map_err(|e| format!("{s}: {e}")))
     };
-    let scale = num(1, 8)? as u32;
-    let threads = num(
-        2,
-        std::thread::available_parallelism().map_or(1, |n| n.get()),
-    )?;
-    let rounds = num(3, 15)?;
-    let data = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
-    let info = blinzel_jpeg::parse(&data).map_err(|e| e.to_string())?;
-    let req = Request::Fit {
-        w: blinzel_jpeg::scaled(info.width, scale),
-        h: blinzel_jpeg::scaled(info.height, scale),
-    };
-    let (mut a, mut b) = (Vec::new(), Vec::new());
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    Ok((file, num(1, 8)? as u32, num(2, cpus)?, num(3, 15)?))
+}
+
+/// Times `a` and `b` alternately: one round that warms caches and the pool,
+/// then `rounds` timed ones. `None` without timed rounds.
+fn alternate(rounds: usize, mut a: impl FnMut(), mut b: impl FnMut()) -> Option<(Stats, Stats)> {
+    let (mut ta, mut tb) = (Vec::new(), Vec::new());
     for i in 0..=rounds {
         let t = Instant::now();
-        std::hint::black_box(decode::decode(&data, req).unwrap());
-        let ta = t.elapsed().as_secs_f64() * 1e3;
+        a();
+        let da = t.elapsed().as_secs_f64() * 1e3;
         let t = Instant::now();
-        std::hint::black_box(own_jpeg(&data, scale, threads));
-        let tb = t.elapsed().as_secs_f64() * 1e3;
-        // The first round warms caches and the pool.
+        b();
+        let db = t.elapsed().as_secs_f64() * 1e3;
         if i > 0 {
-            a.push(ta);
-            b.push(tb);
+            ta.push(da);
+            tb.push(db);
         }
     }
-    let (a, b) = (Stats::of(&a).unwrap(), Stats::of(&b).unwrap());
-    println!(
+    Some((Stats::of(&ta)?, Stats::of(&tb)?))
+}
+
+/// Both medians and minima and the ratios libjpeg-turbo / blinzel-jpeg.
+fn ab_line(file: &str, scale: u32, threads: usize, a: &Stats, b: &Stats) -> String {
+    format!(
         "{file} {scale}/8, {threads} threads: turbojpeg median {:.2} min {:.2} | blinzel-jpeg median {:.2} min {:.2} | ratio {:.2}x (min {:.2}x)",
         a.median,
         a.min,
@@ -662,8 +756,7 @@ fn jpeg_ab(args: &[String]) -> Result<(), String> {
         b.min,
         a.median / b.median,
         a.min / b.min
-    );
-    Ok(())
+    )
 }
 
 /// blinzel-jpeg into pooled planes, like the viewer would.
@@ -714,39 +807,64 @@ fn png_crate_decode(data: &[u8], rgba: bool) -> Vec<u8> {
     buf
 }
 
+/// The machine a run measured.
+struct Host {
+    os: String,
+    arch: String,
+    logical_cpus: usize,
+    cpu: String,
+    cpu_features: Vec<&'static str>,
+    build_features: Vec<&'static str>,
+}
+
+impl Host {
+    fn this() -> Host {
+        Host {
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            logical_cpus: std::thread::available_parallelism().map_or(1, |n| n.get()),
+            cpu: blinzel_core::kernels::cpu_name(),
+            cpu_features: blinzel_core::kernels::cpu_features(),
+            build_features: blinzel_core::kernels::build_features(),
+        }
+    }
+}
+
 fn write_json(path: &Path, results: &[Result_]) -> Result<(), String> {
-    let cpus = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1);
+    fs::write(path, json(&Host::this(), results)).map_err(|e| e.to_string())
+}
+
+/// The machine, then one result object per line (`compare` reads it line
+/// by line).
+fn json(host: &Host, results: &[Result_]) -> String {
     let items: Vec<String> = results
         .iter()
         .map(|r| {
-            let mps = if r.megapixels > 0.0 { r.megapixels / (r.stats.median / 1e3) } else { 0.0 };
             format!(
                 "    {{\"group\": {}, \"candidate\": {}, \"file\": {}, \"megapixels\": {}, \"mp_per_s\": {}, \"stats\": {}}}",
                 json_str(&r.group),
                 json_str(&r.candidate),
                 json_str(&r.file),
                 json_num(r.megapixels),
-                json_num(mps),
+                json_num(mp_per_s(r.megapixels, r.stats.median)),
                 r.stats.json()
             )
         })
         .collect();
-    let list = |v: Vec<&str>| {
-        let v: Vec<String> = v.into_iter().map(json_str).collect();
+    let list = |v: &[&str]| {
+        let v: Vec<String> = v.iter().map(|s| json_str(s)).collect();
         format!("[{}]", v.join(", "))
     };
-    let json = format!(
-        "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {cpus},\n  \"cpu\": {}, \"cpu_features\": {}, \"build_features\": {},\n  \"results\": [\n{}\n  ]\n}}\n",
-        json_str(std::env::consts::OS),
-        json_str(std::env::consts::ARCH),
-        json_str(&blinzel_core::kernels::cpu_name()),
-        list(blinzel_core::kernels::cpu_features()),
-        list(blinzel_core::kernels::build_features()),
+    format!(
+        "{{\n  \"os\": {}, \"arch\": {}, \"logical_cpus\": {},\n  \"cpu\": {}, \"cpu_features\": {}, \"build_features\": {},\n  \"results\": [\n{}\n  ]\n}}\n",
+        json_str(&host.os),
+        json_str(&host.arch),
+        host.logical_cpus,
+        json_str(&host.cpu),
+        list(&host.cpu_features),
+        list(&host.build_features),
         items.join(",\n")
-    );
-    fs::write(path, json).map_err(|e| e.to_string())
+    )
 }
 
 #[cfg(test)]
@@ -763,6 +881,245 @@ mod tests {
         }
     }
 
+    /// A fresh folder under the system temp directory.
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("blinzel-bench-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// AC-01, AC-02: the files, their sizes and the JPEG quality.
+    #[test]
+    fn corpus_lists_every_file_at_its_size() {
+        let files: Vec<(&str, u32, u32, bool)> = corpus_files()
+            .iter()
+            .map(|f| (f.name, f.w, f.h, f.large))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("jpeg-12mp-420.jpg", 4000, 3000, false),
+                ("jpeg-24mp-420.jpg", 6000, 4000, false),
+                ("jpeg-24mp-422.jpg", 6000, 4000, false),
+                ("jpeg-24mp-444.jpg", 6000, 4000, false),
+                ("jpeg-24mp-420-progressive.jpg", 6000, 4000, false),
+                ("jpeg-24mp-420-restart.jpg", 6000, 4000, false),
+                ("jpeg-24mp-gray.jpg", 6000, 4000, false),
+                ("jpeg-45mp-420.jpg", 8256, 5504, false),
+                ("jpeg-100mp-420.jpg", 12288, 8192, true),
+                ("png-12mp-rgb.png", 4000, 3000, false),
+                ("png-12mp-rgba.png", 4000, 3000, false),
+                ("png-8mp-screenshot.png", 3840, 2160, false),
+            ]
+        );
+        for f in corpus_files() {
+            if let Content::Jpeg(o) = f.content {
+                assert_eq!(o.quality, 90, "{}", f.name);
+                let sub = if f.name.contains("-422") {
+                    422
+                } else if f.name.contains("-444") {
+                    444
+                } else {
+                    420
+                };
+                assert_eq!(o.subsampling, sub, "{}", f.name);
+                assert_eq!(o.progressive, f.name.contains("progressive"), "{}", f.name);
+                assert_eq!(o.restart_rows > 0, f.name.contains("restart"), "{}", f.name);
+                assert_eq!(o.gray, f.name.contains("gray"), "{}", f.name);
+            }
+        }
+    }
+
+    /// AC-01, AC-02: identical bytes on every run, existing files kept, the
+    /// 100 MP file only with `--large` (small images: every side / 40).
+    #[test]
+    fn corpus_is_identical_on_every_run_and_keeps_existing_files() {
+        let (a, b, l) = (temp("corpus-a"), temp("corpus-b"), temp("corpus-l"));
+        write_corpus(&a, false, 40).unwrap();
+        write_corpus(&b, false, 40).unwrap();
+        let small: Vec<&str> = corpus_files()
+            .iter()
+            .filter(|f| !f.large)
+            .map(|f| f.name)
+            .collect();
+        let mut sorted = small.clone();
+        sorted.sort();
+        assert_eq!(names(&a), sorted);
+        for name in &small {
+            assert_eq!(
+                fs::read(a.join(name)).unwrap(),
+                fs::read(b.join(name)).unwrap(),
+                "{name}"
+            );
+        }
+        let jpeg = fs::read(a.join("jpeg-24mp-420.jpg")).unwrap();
+        let info = blinzel_jpeg::parse(&jpeg).unwrap();
+        assert_eq!((info.width, info.height), (150, 100));
+
+        fs::write(a.join("jpeg-12mp-420.jpg"), b"kept").unwrap();
+        write_corpus(&a, false, 40).unwrap();
+        assert_eq!(fs::read(a.join("jpeg-12mp-420.jpg")).unwrap(), b"kept");
+
+        write_corpus(&l, true, 40).unwrap();
+        assert!(l.join("jpeg-100mp-420.jpg").is_file());
+        assert_eq!(names(&l).len(), small.len() + 1);
+        for d in [a, b, l] {
+            let _ = fs::remove_dir_all(d);
+        }
+    }
+
+    /// AC-03: one untimed warm-up, then 9 timed runs (3 with `--quick`).
+    #[test]
+    fn every_candidate_runs_once_untimed_then_9_or_3_times() {
+        assert_eq!((iterations(false), iterations(true)), (9, 3));
+        for iters in [3, 9] {
+            let mut calls = 0;
+            let s = time(iters, || calls += 1);
+            assert_eq!((calls, s.n), (iters + 1, iters));
+        }
+    }
+
+    fn result(group: &str, file: &str, mp: f64, s: Stats) -> Result_ {
+        Result_ {
+            group: group.into(),
+            candidate: "cand \"x\"".into(),
+            file: file.into(),
+            megapixels: mp,
+            stats: s,
+        }
+    }
+
+    /// AC-03: group, candidate, file, median, minimum, MP/s.
+    #[test]
+    fn a_result_line_shows_group_candidate_file_median_min_and_rate() {
+        let l = line(&result("jpeg-full", "a.jpg", 24.0, stats(100.0, 200.0)));
+        let words: Vec<&str> = l.split_whitespace().collect();
+        assert_eq!(
+            words,
+            [
+                "jpeg-full",
+                "cand",
+                "\"x\"",
+                "a.jpg",
+                "median",
+                "200.00",
+                "ms",
+                "min",
+                "100.00",
+                "ms",
+                "120.0",
+                "MP/s"
+            ]
+        );
+        let l = line(&result("natsort", "-", 0.0, stats(1.0, 2.0)));
+        assert!(l.ends_with("ms             -"), "{l}");
+        assert!(!l.contains("MP/s"), "{l}");
+    }
+
+    /// AC-08: the machine, then one result per line with its stats.
+    #[test]
+    fn json_has_the_machine_and_one_result_per_line() {
+        let host = Host {
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            logical_cpus: 4,
+            cpu: "Test CPU".into(),
+            cpu_features: vec!["sse4.2", "avx2"],
+            build_features: vec![],
+        };
+        let mut a = stats(1.5, 2.0);
+        a.p99 = 3.0;
+        a.mean = 2.25;
+        a.n = 9;
+        let j = json(
+            &host,
+            &[
+                result("png", "p.png", 12.0, a),
+                result("natsort", "-", 0.0, a),
+            ],
+        );
+        let lines: Vec<&str> = j.lines().collect();
+        assert_eq!(lines[0], "{");
+        assert_eq!(
+            lines[1],
+            r#"  "os": "linux", "arch": "x86_64", "logical_cpus": 4,"#
+        );
+        assert_eq!(
+            lines[2],
+            r#"  "cpu": "Test CPU", "cpu_features": ["sse4.2", "avx2"], "build_features": [],"#
+        );
+        assert_eq!(lines[3], r#"  "results": ["#);
+        assert_eq!(
+            lines[4],
+            r#"    {"group": "png", "candidate": "cand \"x\"", "file": "p.png", "megapixels": 12.000, "mp_per_s": 6000.000, "stats": {"min_ms": 1.500, "median_ms": 2.000, "p99_ms": 3.000, "mean_ms": 2.250, "n": 9}},"#
+        );
+        assert!(
+            lines[5].starts_with(r#"    {"group": "natsort", "#)
+                && lines[5].contains(r#""megapixels": 0.000, "mp_per_s": 0.000,"#),
+            "{}",
+            lines[5]
+        );
+        assert_eq!(&lines[6..], ["  ]", "}"]);
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// AC-11: scale 8, all logical CPUs and 15 rounds by default.
+    #[test]
+    fn jpeg_ab_defaults_to_full_size_on_all_cpus_for_15_rounds() {
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let args = strings(&["f.jpg"]);
+        assert_eq!(ab_args(&args).unwrap(), ("f.jpg", 8, cpus, 15));
+        let args = strings(&["f.jpg", "2", "3", "4"]);
+        assert_eq!(ab_args(&args).unwrap(), ("f.jpg", 2, 3, 4));
+        assert!(ab_args(&strings(&["f.jpg", "x"])).is_err());
+        assert!(ab_args(&[]).is_err());
+    }
+
+    /// AC-11: the two decoders take turns, and the first round is not
+    /// timed.
+    #[test]
+    fn jpeg_ab_alternates_and_discards_the_first_round() {
+        let order = std::cell::RefCell::new(String::new());
+        let (a, b) = alternate(
+            4,
+            || {
+                let first = order.borrow().is_empty();
+                order.borrow_mut().push('a');
+                if first {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            },
+            || order.borrow_mut().push('b'),
+        )
+        .unwrap();
+        assert_eq!(order.into_inner(), "ababababab");
+        assert_eq!((a.n, b.n), (4, 4));
+        assert!(a.p99 < 50.0, "the warm-up round was timed: {a:?}");
+        assert!(alternate(0, || (), || ()).is_none());
+    }
+
+    /// AC-11: both medians and minima and their ratios.
+    #[test]
+    fn jpeg_ab_prints_both_medians_minima_and_ratios() {
+        let l = ab_line("f.jpg", 8, 4, &stats(10.0, 20.0), &stats(4.0, 8.0));
+        assert_eq!(
+            l,
+            "f.jpg 8/8, 4 threads: turbojpeg median 20.00 min 10.00 | blinzel-jpeg median 8.00 min 4.00 | ratio 2.50x (min 2.50x)"
+        );
+    }
+
     #[test]
     fn a_noisy_median_alone_is_no_win() {
         // CI run 41056426295, jpeg-24mp-444.jpg: one disturbed file.
@@ -771,5 +1128,100 @@ mod tests {
         assert!(!zune_wins(&stats(118.5, 120.1), &stats(169.3, 170.7)));
         // Unoptimized C: slower in every run.
         assert!(zune_wins(&stats(230.0, 236.0), &stats(158.7, 163.4)));
+    }
+
+    /// AC-05, AC-06: a tie is no win; zune-jpeg has to be strictly faster
+    /// in both the median and the minimum.
+    #[test]
+    fn a_tie_in_the_median_or_the_minimum_is_no_win() {
+        // stats(min, median): a lower zune-jpeg median, an equal minimum.
+        assert!(!zune_wins(&stats(150.0, 170.0), &stats(150.0, 160.0)));
+        // Equal medians, a lower zune-jpeg minimum.
+        assert!(!zune_wins(&stats(160.0, 170.0), &stats(150.0, 170.0)));
+        assert!(!zune_wins(&stats(150.0, 170.0), &stats(150.0, 170.0)));
+        let results = [
+            jpeg_full("turbojpeg YCbCr planes", "a.jpg", stats(150.0, 170.0)),
+            jpeg_full("zune-jpeg RGBA", "a.jpg", stats(150.0, 160.0)),
+            jpeg_full("turbojpeg YCbCr planes", "b.jpg", stats(160.0, 170.0)),
+            jpeg_full("zune-jpeg RGBA", "b.jpg", stats(150.0, 170.0)),
+        ];
+        assert!(check(&results, &[]).is_ok());
+    }
+
+    fn jpeg_full(candidate: &str, file: &str, stats: Stats) -> Result_ {
+        Result_ {
+            group: "jpeg-full".into(),
+            candidate: candidate.into(),
+            file: file.into(),
+            megapixels: 24.0,
+            stats,
+        }
+    }
+
+    #[test]
+    fn check_fails_on_a_blinzel_jpeg_mismatch() {
+        let results = [
+            jpeg_full("turbojpeg YCbCr planes", "a.jpg", stats(118.5, 120.1)),
+            jpeg_full("zune-jpeg RGBA", "a.jpg", stats(169.3, 170.7)),
+        ];
+        assert!(check(&results, &[]).is_ok());
+        let e = check(&results, &["a.jpg: blinzel-jpeg differs".into()]).unwrap_err();
+        assert!(e.contains("a.jpg: blinzel-jpeg differs"), "{e}");
+    }
+
+    #[test]
+    fn check_fails_on_a_zune_jpeg_win_and_names_file_medians_minima_and_cause() {
+        let results = [
+            jpeg_full(
+                "turbojpeg YCbCr planes",
+                "jpeg-24mp-420.jpg",
+                stats(230.0, 236.0),
+            ),
+            jpeg_full("zune-jpeg RGBA", "jpeg-24mp-420.jpg", stats(158.7, 163.4)),
+        ];
+        let e = check(&results, &[]).unwrap_err();
+        for part in ["jpeg-24mp-420.jpg", "236.0", "230.0", "163.4", "158.7"] {
+            assert!(e.contains(part), "{part} missing from {e}");
+        }
+        assert!(e.contains("built without optimization"), "{e}");
+    }
+
+    /// AC-04: `--check` compares blinzel-jpeg at full size and at 1/8,
+    /// decoding on all logical CPUs.
+    #[test]
+    fn check_verifies_full_size_and_one_eighth_on_all_logical_cpus() {
+        let jpeg = render(Content::Jpeg(EncodeOptions::default()), 64, 48);
+        let mut asked = Vec::new();
+        let r = verify_own_jpeg_with(&jpeg, |data, scale, threads| {
+            asked.push((scale, threads));
+            own_jpeg(data, scale, threads)
+        });
+        assert_eq!(r, Ok(()));
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(asked, [(8, cpus), (1, cpus)]);
+    }
+
+    #[test]
+    fn a_differing_plane_row_fails_the_comparison() {
+        use blinzel_core::pixel::Plane;
+        let layout = blinzel_jpeg::PlaneLayout {
+            width: 4,
+            height: 3,
+            stride: 8,
+            rows: 3,
+        };
+        let mut ours = PoolBuf::new(layout.stride * layout.rows);
+        ours.fill(7);
+        let mut theirs = Plane::new(4, 3, 1);
+        theirs.data.fill(7);
+        assert!(compare_planes(1, &[ours], &[layout], &[theirs]).is_ok());
+
+        let mut ours = PoolBuf::new(layout.stride * layout.rows);
+        ours.fill(7);
+        ours[2 * layout.stride + 3] = 8;
+        let mut theirs = Plane::new(4, 3, 1);
+        theirs.data.fill(7);
+        let e = compare_planes(1, &[ours], &[layout], &[theirs]).unwrap_err();
+        assert!(e.contains("1/8, component 0, row 2"), "{e}");
     }
 }

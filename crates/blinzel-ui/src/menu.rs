@@ -69,6 +69,24 @@ pub const SCREENSHOTS: bool = cfg!(any(windows, target_os = "macos"));
 /// not on Linux).
 pub const RESIDENT: bool = cfg!(any(windows, target_os = "macos"));
 
+/// What a platform's menu offers beyond the entries every platform has.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Platform {
+    /// Resident mode ([`RESIDENT`]).
+    pub resident: bool,
+    /// Screenshots ([`SCREENSHOTS`]).
+    pub screenshots: bool,
+    /// macOS names its screenshot key differently.
+    pub mac: bool,
+}
+
+/// The platform this build is for.
+pub(crate) const THIS_PLATFORM: Platform = Platform {
+    resident: RESIDENT,
+    screenshots: SCREENSHOTS,
+    mac: cfg!(target_os = "macos"),
+};
+
 const LANG_BASE: u32 = 1000;
 
 impl Cmd {
@@ -250,6 +268,11 @@ fn accel(keys: &[&str]) -> String {
 
 /// The hamburger menu (the menu bar on macOS) for `s`.
 pub fn items(s: &MenuState) -> Vec<MenuItem> {
+    items_for(s, THIS_PLATFORM)
+}
+
+/// The menu as platform `p` shows it.
+pub(crate) fn items_for(s: &MenuState, p: Platform) -> Vec<MenuItem> {
     let ctrl = tr(Msg::KeyCtrl);
     let mut m = Vec::new();
     m.push(MenuItem::item(
@@ -474,7 +497,7 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
     }
     m.push(MenuItem::Sub(tr(Msg::MenuLanguage).into(), lang));
     let mut settings = Vec::new();
-    if RESIDENT {
+    if p.resident {
         settings.push(MenuItem::item(
             Cmd::ToggleResident,
             tr(Msg::SettingResident),
@@ -513,12 +536,12 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
             true,
         ),
     ]);
-    if SCREENSHOTS {
+    if p.screenshots {
         settings.extend([
             MenuItem::Separator,
             MenuItem::item(
                 Cmd::ToggleScreenshotHotkey,
-                tr(if cfg!(target_os = "macos") {
+                tr(if p.mac {
                     Msg::SettingScreenshotHotkeyMac
                 } else {
                     Msg::SettingScreenshotHotkey
@@ -593,11 +616,16 @@ pub fn items(s: &MenuState) -> Vec<MenuItem> {
 
 /// The tray icon's menu (resident mode).
 pub fn tray_items() -> Vec<MenuItem> {
+    tray_items_with(SCREENSHOTS)
+}
+
+/// The tray menu, with the screenshot entries where the platform has them.
+pub(crate) fn tray_items_with(screenshots: bool) -> Vec<MenuItem> {
     let mut m = vec![
         MenuItem::item(Cmd::ShowWindow, tr(Msg::TrayShow), None, false, true),
         MenuItem::item(Cmd::Open, tr(Msg::MenuOpen), None, false, true),
     ];
-    if SCREENSHOTS {
+    if screenshots {
         m.extend([
             MenuItem::Separator,
             MenuItem::item(Cmd::Capture, tr(Msg::TrayCapture), None, false, true),

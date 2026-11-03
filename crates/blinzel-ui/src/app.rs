@@ -20,6 +20,7 @@ use blinzel_core::layout::{
     self, Layout, ViewMode, ViewState, compute, content_in_stage, stage_to_client, zoom_at,
     zoom_step,
 };
+use blinzel_core::natsort;
 use blinzel_core::selection::{self, Drag, Hit, LeftDrag, hit_test, left_drag_action};
 use blinzel_core::settings::Settings;
 use blinzel_core::timing;
@@ -41,7 +42,7 @@ type Img<B> = <<B as Backend>::Device as Device>::Image;
 type Lut<B> = <<B as Backend>::Device as Device>::Lut;
 
 /// Deferred work that may re-enter the window procedure.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     ShowMenu {
         x: i32,
@@ -114,6 +115,23 @@ pub enum Action {
     PickScreenshotFolder,
 }
 
+/// Whether a hidden resident instance leaves the settings file alone when
+/// it exits (Windows).
+const HIDDEN_EXIT_KEEPS_FILE: bool = cfg!(windows);
+
+/// Whether an exiting instance writes its settings: not when it is hidden
+/// on a platform where `hidden_keeps_file`.
+fn writes_settings_on_exit(hidden: bool, hidden_keeps_file: bool) -> bool {
+    !(hidden && hidden_keeps_file)
+}
+
+/// Where the menu opens below its `button`: the button's outer corner,
+/// the right one in right-to-left languages (the menu opens leftwards).
+fn menu_corner(button: Rect, rtl: bool) -> (f64, f64) {
+    let x = if rtl { button.right() } else { button.x };
+    (x, button.bottom())
+}
+
 /// `file` in the configured editor, or the question for one first.
 fn edit_action(editor: Option<&str>, file: PathBuf) -> Action {
     match editor {
@@ -126,7 +144,7 @@ fn edit_action(editor: Option<&str>, file: PathBuf) -> Action {
 }
 
 /// A cutout to save (selection, otherwise the view crop).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SaveJob {
     pub source: PathBuf,
     pub cut: blinzel_core::export::Cutout,
@@ -144,6 +162,29 @@ pub struct ClipSource {
     pub orientation: Orientation,
 }
 
+impl ClipSource {
+    /// The region's pixels in the orientation shown, decoded from the file
+    /// at full resolution (not taken from the screen): straight-alpha BGRA
+    /// (tight rows), width, height.
+    pub fn pixels(&self, services: &impl Services) -> Result<(Vec<u8>, u32, u32), String> {
+        let data = services.read_file(&self.path).map_err(|e| e.to_string())?;
+        let img = services
+            .decode(
+                &data,
+                blinzel_core::decode::Request::Region(self.stored_rect),
+                1,
+            )
+            .map_err(|e| e.to_string())?;
+        let bgra = img.to_bgra();
+        Ok(selection::orient_bgra(
+            &bgra,
+            img.width,
+            img.height,
+            self.orientation,
+        ))
+    }
+}
+
 pub struct Current {
     pub path: PathBuf,
     pub entry: Entry,
@@ -154,6 +195,9 @@ pub struct Current {
 enum DragState {
     Pan {
         last: (f64, f64),
+        /// Where a left-button press started, until it moves more than
+        /// 3 logical px: released before that, it was a click.
+        click: Option<(f64, f64)>,
     },
     /// Pressed on the image; becomes a new selection once it moves.
     Pending {
@@ -172,6 +216,11 @@ pub struct App<B: Backend> {
     pub loader: Loader<B::Device, B::Services>,
     list: FileList,
     list_rx: Option<Receiver<(PathBuf, std::io::Result<Vec<Entry>>)>>,
+    /// The folder changed while it was being listed: list it once more.
+    relist: bool,
+    /// The current image left the folder after it was listed (deleted or
+    /// renamed outside the viewer): Next and Previous go on from its place.
+    current_left: bool,
     /// The watched folder and the platform's watch on it.
     watcher: Option<(PathBuf, Box<dyn Any>)>,
     pub current: Option<Current>,
@@ -221,7 +270,11 @@ pub struct App<B: Backend> {
     pub clip: Option<ClipSource>,
     first_image_shown: bool,
     sized_for: Option<u64>,
+    /// Measurement mode: the startup report goes here after the first frame,
+    /// then the App quits (`docs/specs/startup.md` AC-09).
     pub exit_after_first_frame: Option<PathBuf>,
+    /// The process exit code once the App has quit.
+    exit_code: i32,
     /// Short message shown at the bottom (saved, errors), cleared by timer.
     pub notice: Option<String>,
     /// The menu drawn by the UI itself (platforms without native popup
@@ -256,6 +309,8 @@ impl<B: Backend> App<B> {
             loader,
             list: FileList::default(),
             list_rx: None,
+            relist: false,
+            current_left: false,
             watcher: None,
             current: None,
             textures: ByteLru::new(),
@@ -291,6 +346,7 @@ impl<B: Backend> App<B> {
             first_image_shown: false,
             sized_for: None,
             exit_after_first_frame: None,
+            exit_code: 0,
             notice: None,
             popup: None,
             dialog: None,
@@ -313,6 +369,12 @@ impl<B: Backend> App<B> {
 
     pub fn invalidate(&self) {
         self.host.invalidate();
+    }
+
+    /// The exit code for the process after [`Action::Quit`]: 1 when the
+    /// measurement mode found no image to show, else 0.
+    pub fn exit_code(&self) -> i32 {
+        self.exit_code
     }
 
     // ------------------------------------------------------------- resident
@@ -347,17 +409,54 @@ impl<B: Backend> App<B> {
         blinzel_core::bufpool::global().set_max_retained(0);
     }
 
+    /// Shows the window again (`Action::Wake`): a hidden instance reloads
+    /// the settings unless the file just `opened` did, stays cloaked until
+    /// its first frame and then takes the foreground, and gets its buffer
+    /// pool back. Returns whether it was hidden; a visible window is only
+    /// activated by the shell (`docs/specs/resident-mode.md` AC-09, AC-10).
+    pub fn wake(&mut self, opened: bool) -> bool {
+        if !self.hidden {
+            return false;
+        }
+        if !opened {
+            self.reload_settings();
+        }
+        self.hidden = false;
+        self.cloaked = true;
+        self.activate_on_uncloak = true;
+        timing::mark("wake");
+        blinzel_core::bufpool::global()
+            .set_max_retained(blinzel_core::bufpool::DEFAULT_MAX_RETAINED);
+        true
+    }
+
+    /// A file chosen in the open dialog: opened, and the window woken, as
+    /// the dialog may come from the tray menu of a hidden instance
+    /// (`docs/specs/resident-mode.md` AC-12).
+    pub fn open_chosen(&mut self, path: PathBuf) -> Vec<Action> {
+        let mut actions = self.open(path);
+        actions.push(Action::Wake { opened: true });
+        actions
+    }
+
     /// A hidden instance waking up: another window may have changed the
     /// settings meanwhile.
     pub fn reload_settings(&mut self) {
         self.settings = settings_store::load();
         self.color.set_enabled(self.settings.color_management);
-        let lang = self
-            .settings
-            .language
-            .as_deref()
-            .and_then(blinzel_i18n::lang_from_code);
-        blinzel_i18n::set_lang(lang.unwrap_or_else(|| self.services.system_language()));
+        blinzel_i18n::set_lang(blinzel_i18n::choose(
+            self.settings.language.as_deref(),
+            || self.services.system_language(),
+        ));
+    }
+
+    /// The viewer exits normally: writes the settings file once more,
+    /// unless it is a hidden resident instance on Windows, whose copy may
+    /// be older than what another window saved meanwhile.
+    pub fn save_settings_on_exit(&self) {
+        if writes_settings_on_exit(self.hidden, HIDDEN_EXIT_KEEPS_FILE) {
+            settings_store::save(&self.settings);
+        }
     }
 
     /// Resident start: decodes, uploads and draws a generated JPEG once
@@ -431,6 +530,7 @@ impl<B: Backend> App<B> {
         }
         let cache_id = entry.cache_id();
         let index = self.list.index_of(&entry.name);
+        self.current_left = false;
         self.current = Some(Current {
             path,
             entry,
@@ -445,6 +545,7 @@ impl<B: Backend> App<B> {
     pub fn start_listing(&mut self, dir: PathBuf) {
         let (tx, rx) = std::sync::mpsc::channel();
         self.list_rx = Some(rx);
+        self.relist = false;
         let services = self.services.clone();
         let _ = std::thread::Builder::new()
             .name("blinzel-list".into())
@@ -467,11 +568,31 @@ impl<B: Backend> App<B> {
         self.list_rx = None;
         let entries = result.unwrap_or_default();
         self.list = FileList::new(dir.clone(), entries);
+        let mut rewritten = None;
         if let Some(cur) = &mut self.current {
+            let was_listed = cur.index.is_some();
             cur.index = self.list.index_of(&cur.entry.name);
+            self.current_left = cur.index.is_none() && (was_listed || self.current_left);
+            // Rewritten in place: load the new version (the old one stays
+            // on screen until it is there).
+            if let Some(e) = cur.index.and_then(|i| self.list.get(i))
+                && e.cache_id() != cur.cache_id
+            {
+                cur.entry = e.clone();
+                cur.cache_id = e.cache_id();
+                rewritten = Some(cur.cache_id);
+            }
+        }
+        if rewritten.is_some() {
+            self.stop_animation();
+            self.drop_animations(rewritten);
         }
         if self.watcher.as_ref().is_none_or(|w| w.0 != dir) {
             self.watcher = self.host.watch_dir(&dir).map(|w| (dir.clone(), w));
+        }
+        if self.relist {
+            // What changed during this listing.
+            self.start_listing(dir);
         }
         self.update_wanted();
         self.invalidate();
@@ -480,7 +601,12 @@ impl<B: Backend> App<B> {
 
     pub fn on_dir_changed(&mut self) {
         let dir = self.list.dir().to_path_buf();
-        if !dir.as_os_str().is_empty() && self.list_rx.is_none() {
+        if dir.as_os_str().is_empty() {
+            return;
+        }
+        if self.list_rx.is_some() {
+            self.relist = true;
+        } else {
             self.start_listing(dir);
         }
     }
@@ -491,6 +617,7 @@ impl<B: Backend> App<B> {
         };
         let path = self.list.dir().join(&entry.name);
         let cache_id = entry.cache_id();
+        self.current_left = false;
         self.current = Some(Current {
             path,
             entry,
@@ -502,13 +629,27 @@ impl<B: Backend> App<B> {
     }
 
     fn step(&mut self, steps: isize) -> Vec<Action> {
-        let Some(i) = self.current.as_ref().and_then(|c| c.index) else {
+        let Some(cur) = &self.current else {
             return vec![];
         };
+        let to = match cur.index {
+            Some(i) => self.list.offset(i, steps).filter(|&j| j != i),
+            // Gone from the folder: on from the place its name sorts at.
+            None if self.current_left => {
+                let name = cur.entry.name.as_str();
+                let gap = self
+                    .list
+                    .entries()
+                    .partition_point(|e| natsort::compare(&e.name, name).is_lt());
+                self.list
+                    .offset(gap, if steps > 0 { steps - 1 } else { steps })
+            }
+            None => return vec![],
+        };
         self.direction = if steps < 0 { -1 } else { 1 };
-        match self.list.offset(i, steps) {
-            Some(j) if j != i => self.go_to_index(j),
-            _ => vec![],
+        match to {
+            Some(j) => self.go_to_index(j),
+            None => vec![],
         }
     }
 
@@ -621,10 +762,16 @@ impl<B: Backend> App<B> {
     /// Tells the loader what to prepare: the current image first, then
     /// neighbours in browsing direction.
     pub fn update_wanted(&mut self) {
+        let jobs = self.wanted_jobs();
+        self.loader.set_wanted(jobs);
+    }
+
+    /// What to prepare, most urgent first: the current image, then its
+    /// neighbours in browsing direction that are not prepared or failed.
+    fn wanted_jobs(&self) -> Vec<Job> {
         let mut jobs = Vec::new();
         let Some(cur) = &self.current else {
-            self.loader.set_wanted(jobs);
-            return;
+            return jobs;
         };
         let stage = self.current_stage_needed();
         if !self.has_texture(cur.cache_id, stage) && !self.failed.contains_key(&cur.cache_id) {
@@ -704,7 +851,7 @@ impl<B: Backend> App<B> {
                 }
             }
         }
-        self.loader.set_wanted(jobs);
+        jobs
     }
 
     /// Drains finished loads into the texture cache.
@@ -1069,28 +1216,49 @@ impl<B: Backend> App<B> {
         // After the first frame: checking the remembered colour target
         // loads the ICM subsystem.
         self.verify_color_target();
+        // No image will come (nothing open, or it failed): the hint or the
+        // error is what there is to show (`docs/specs/startup.md`).
+        let nothing_to_wait_for = !self.hidden
+            && !showed_image
+            && self
+                .current
+                .as_ref()
+                .is_none_or(|c| self.failed.contains_key(&c.cache_id));
         let mut actions = Vec::new();
-        if showed_image && self.cloaked {
+        if (showed_image || nothing_to_wait_for) && self.cloaked {
             actions.push(Action::Uncloak);
         }
         if showed_image && !self.first_image_shown {
             self.first_image_shown = true;
             timing::mark("first_present");
             self.host.first_frame_shown();
-            if let Some(out) = &self.exit_after_first_frame {
-                // The adapter tells a real GPU from WARP / Basic Render
-                // Driver, which costs hundreds of ms per frame.
-                let json = format!(
-                    "{{\"adapter\": {}, \"warp\": {}, \"marks\": {}}}",
-                    timing::json_str(&self.device.adapter_name()),
-                    self.device.is_software(),
-                    timing::marks_json()
-                );
-                let _ = std::fs::write(out, json);
+            if self.write_startup_report() {
                 actions.push(Action::Quit);
             }
+        } else if nothing_to_wait_for && !self.first_image_shown && self.write_startup_report() {
+            // A measurement without an image fails instead of waiting.
+            self.exit_code = 1;
+            actions.push(Action::Quit);
         }
         actions
+    }
+
+    /// In measurement mode writes the startup report; returns whether it is
+    /// on.
+    fn write_startup_report(&self) -> bool {
+        let Some(out) = &self.exit_after_first_frame else {
+            return false;
+        };
+        // The adapter tells a real GPU from WARP / Basic Render Driver,
+        // which costs hundreds of ms per frame.
+        let json = format!(
+            "{{\"adapter\": {}, \"warp\": {}, \"marks\": {}}}",
+            timing::json_str(&self.device.adapter_name()),
+            self.device.is_software(),
+            timing::marks_json()
+        );
+        let _ = std::fs::write(out, json);
+        true
     }
 
     fn selection_shapes(&self, l: &Layout, sel: &Rect, out: &mut Vec<Shape>) {
@@ -1221,17 +1389,17 @@ impl<B: Backend> App<B> {
         Rect::new(l.crop_origin.0, l.crop_origin.1, l.content.0, l.content.1)
     }
 
-    /// The menu below its button: from the button's outer corner, which is
-    /// the right one in right-to-left languages (the menu opens leftwards).
+    /// The menu below its button.
     fn menu_at_button(&self) -> Action {
         let r = self.chrome().rect(Button::Menu);
-        let x = if blinzel_i18n::is_rtl() {
-            r.right()
-        } else {
-            r.x
-        };
-        let (x, y) = self.host.to_screen((x, r.bottom()));
+        let (x, y) = self.host.to_screen(menu_corner(r, blinzel_i18n::is_rtl()));
         Action::ShowMenu { x, y }
+    }
+
+    /// A right click at client point `p`: the menu opens there.
+    pub fn right_click(&self, p: (f64, f64)) -> Vec<Action> {
+        let (x, y) = self.host.to_screen(p);
+        vec![Action::ShowMenu { x, y }]
     }
 
     /// Opens the menu drawn by the UI at client point `at` (see
@@ -1296,7 +1464,10 @@ impl<B: Backend> App<B> {
             return vec![];
         };
         if middle {
-            self.drag = Some(DragState::Pan { last: p });
+            self.drag = Some(DragState::Pan {
+                last: p,
+                click: None,
+            });
             return vec![];
         }
         let pi = self.image_point(&l, p);
@@ -1309,7 +1480,10 @@ impl<B: Backend> App<B> {
             }
         }
         self.drag = Some(match left_drag_action(&l, shift) {
-            LeftDrag::Pan => DragState::Pan { last: p },
+            LeftDrag::Pan => DragState::Pan {
+                last: p,
+                click: Some(p),
+            },
             LeftDrag::Select => DragState::Pending {
                 start: p,
                 start_img: pi,
@@ -1356,8 +1530,10 @@ impl<B: Backend> App<B> {
         None
     }
 
-    /// Double click: opens a grid item; on the filmstrip it does nothing.
-    /// `None` leaves it to the window (full screen).
+    /// Double click: opens a grid item; on the filmstrip it does nothing;
+    /// below the caption strip (anywhere in full screen) it enters or
+    /// leaves full screen. `None` leaves it to the window: the caption
+    /// strip and its buttons (maximize).
     pub fn double_click(&mut self, p: (f64, f64)) -> Option<Vec<Action>> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         if self.browse.grid.is_some() {
@@ -1366,7 +1542,13 @@ impl<B: Backend> App<B> {
                 None => vec![],
             });
         }
-        (self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale)).then(Vec::new)
+        if self.filmstrip_shown() && p.1 >= client.1 - strip_height(scale) {
+            return Some(vec![]);
+        }
+        if !self.fullscreen && p.1 < self.chrome().caption_height() {
+            return None;
+        }
+        Some(vec![Action::ToggleFullscreen])
     }
 
     fn open_from_grid(&mut self, i: usize) -> Vec<Action> {
@@ -1426,14 +1608,14 @@ impl<B: Backend> App<B> {
         }
         let Some(l) = self.layout() else { return };
         match self.drag.take() {
-            Some(DragState::Pan { last }) => {
+            Some(DragState::Pan { last, click }) => {
                 layout::pan(&mut self.view, &l, (p.0 - last.0, p.1 - last.1));
-                self.drag = Some(DragState::Pan { last: p });
+                let click = click.filter(|s| self.is_click(*s, p));
+                self.drag = Some(DragState::Pan { last: p, click });
                 self.invalidate();
             }
             Some(DragState::Pending { start, start_img }) => {
-                let moved = (p.0 - start.0).abs().max((p.1 - start.1).abs());
-                if moved > 3.0 * self.scale() {
+                if !self.is_click(start, p) {
                     let d = Drag::New { anchor: start_img };
                     self.selection = d.update(self.image_point(&l, p), &Self::content_bounds(&l));
                     self.drag = Some(DragState::Select(d));
@@ -1458,13 +1640,19 @@ impl<B: Backend> App<B> {
             d.mouse_up();
             return;
         }
-        if let Some(DragState::Pending { .. }) = self.drag {
+        if let Some(DragState::Pending { .. } | DragState::Pan { click: Some(_), .. }) = self.drag {
             // A click without dragging clears the selection.
             if self.selection.take().is_some() {
                 self.invalidate();
             }
         }
         self.drag = None;
+    }
+
+    /// The pointer moved at most 3 logical px from `start` to `p`: still a
+    /// click, not a drag.
+    fn is_click(&self, start: (f64, f64), p: (f64, f64)) -> bool {
+        (p.0 - start.0).abs().max((p.1 - start.1).abs()) <= 3.0 * self.scale()
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -1591,13 +1779,7 @@ impl<B: Backend> App<B> {
             Left if overflow && !ctrl => pan(self, -1.0, 0.0),
             Up if overflow => pan(self, 0.0, -1.0),
             Down if overflow => pan(self, 0.0, 1.0),
-            // Right-to-left languages page leftwards.
-            Right if blinzel_i18n::is_rtl() => self.command(Cmd::Prev),
-            Left if blinzel_i18n::is_rtl() => self.command(Cmd::Next),
-            Right | PageDown | Space | Down => self.command(Cmd::Next),
-            Left | PageUp | Backspace | Up => self.command(Cmd::Prev),
-            Home => self.command(Cmd::First),
-            End => self.command(Cmd::Last),
+            k if let Some(cmd) = nav_cmd(k, blinzel_i18n::is_rtl()) => self.command(cmd),
             Plus => self.command(Cmd::ZoomIn),
             Minus => self.command(Cmd::ZoomOut),
             Digit(0) => self.command(Cmd::ZoomReset),
@@ -1715,6 +1897,10 @@ impl<B: Backend> App<B> {
     }
 
     pub fn command(&mut self, cmd: Cmd) -> Vec<Action> {
+        if self.browse.grid.is_some() && acts_on_the_shown_image(cmd) {
+            // The grid covers the image: no zoom, rotation or copy of it.
+            return vec![];
+        }
         match cmd {
             Cmd::Open => vec![Action::OpenDialog],
             Cmd::View(mode) => {
@@ -1810,8 +1996,8 @@ impl<B: Backend> App<B> {
                 self.direction = -1;
                 self.go_to_index(self.list.len() - 1)
             }
-            Cmd::Recycle => match &self.current {
-                Some(c) => vec![Action::Recycle(c.path.clone())],
+            Cmd::Recycle => match self.target_file() {
+                Some(p) => vec![Action::Recycle(p)],
                 None => vec![],
             },
             Cmd::Language(lang) => {
@@ -1869,12 +2055,12 @@ impl<B: Backend> App<B> {
                 whole_screen: false,
             }],
             Cmd::CaptureScreen => vec![Action::Capture { whole_screen: true }],
-            Cmd::OpenWith => match &self.current {
-                Some(c) => vec![Action::OpenWith(c.path.clone())],
+            Cmd::OpenWith => match self.target_file() {
+                Some(p) => vec![Action::OpenWith(p)],
                 None => vec![],
             },
             Cmd::EditWith => {
-                let Some(file) = self.current.as_ref().map(|c| c.path.clone()) else {
+                let Some(file) = self.target_file() else {
                     return vec![];
                 };
                 vec![edit_action(self.settings.editor.as_deref(), file)]
@@ -1933,6 +2119,15 @@ impl<B: Backend> App<B> {
         }
     }
 
+    /// The file a file command (recycle, open with, edit) acts on: the
+    /// selected tile while the grid is open, else the current image.
+    fn target_file(&self) -> Option<PathBuf> {
+        match &self.browse.grid {
+            Some(g) => self.list.path(g.selected),
+            None => self.current.as_ref().map(|c| c.path.clone()),
+        }
+    }
+
     /// Announces the selection (or crop, or whole image) on the clipboard;
     /// the pixels are produced only when someone pastes.
     fn copy(&mut self) {
@@ -1987,13 +2182,28 @@ impl<B: Backend> App<B> {
         })
     }
 
-    /// Opens the batch dialog with an empty list (files are dropped onto
-    /// it), keeping the last settings.
+    /// Opens the batch dialog, keeping the last settings, with the files
+    /// marked in the grid (in folder order, those still there), else an
+    /// empty list (files are dropped onto it).
     fn open_batch(&mut self) {
-        self.dialog = Some(match self.last_dialog.take() {
+        let marked: Vec<PathBuf> = match &self.browse.grid {
+            Some(g) if !g.marked.is_empty() => self
+                .list
+                .entries()
+                .iter()
+                .filter(|e| g.marked.contains(&e.name))
+                .map(|e| self.list.dir().join(&e.name))
+                .filter(|p| p.is_file())
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut d = match self.last_dialog.take() {
             Some(d) => d.reopen(),
             None => BatchDialog::new(),
-        });
+        };
+        let o = d.add(marked);
+        self.dialog = Some(d);
+        self.dialog_outcome(o);
         self.invalidate();
     }
 
@@ -2120,12 +2330,32 @@ impl<B: Backend> App<B> {
             .collect()
     }
 
-    /// A screenshot is on the clipboard and, when the settings asked for
-    /// a file, in `file`: shows it in the viewer, then hands it to the
-    /// editor (which then lies on top), as configured.
-    pub fn on_screenshot(&mut self, file: Option<PathBuf>) -> Vec<Action> {
+    /// A screenshot is taken: `copied` says whether it reached the
+    /// clipboard, `file` where it was written (none when the settings ask
+    /// for no file). Shows it in the viewer and wakes the window, then
+    /// hands it to the editor (which then lies on top), as configured.
+    /// Returns those actions and the text for the user, if any: why the
+    /// shot failed, or that it is only on the clipboard
+    /// (`docs/specs/screenshots.md` AC-15, AC-20).
+    pub fn on_screenshot(
+        &mut self,
+        copied: bool,
+        file: Result<Option<PathBuf>, String>,
+    ) -> (Vec<Action>, Option<String>) {
+        let failed = |reason: &str| trf(Msg::ScreenshotFailed, &[("reason", &reason)]);
+        let file = match file {
+            Ok(file) => file,
+            Err(e) => return (vec![], Some(failed(&e))),
+        };
+        let text = if !copied {
+            Some(failed("clipboard"))
+        } else if !self.settings.screenshot_open {
+            Some(tr(Msg::ScreenshotCopied).to_string())
+        } else {
+            None
+        };
         let Some(file) = file else {
-            return vec![];
+            return (vec![], text);
         };
         let mut actions = Vec::new();
         if self.settings.screenshot_open {
@@ -2135,7 +2365,7 @@ impl<B: Backend> App<B> {
         if self.settings.screenshot_edit {
             actions.push(edit_action(self.settings.editor.as_deref(), file));
         }
-        actions
+        (actions, text)
     }
 
     pub fn screenshot_folder_picked(&mut self, folder: PathBuf) {
@@ -2163,6 +2393,17 @@ impl<B: Backend> App<B> {
     pub fn show_notice(&mut self, text: String) {
         self.notice = Some(text);
         self.invalidate();
+    }
+
+    /// A message for the user: the notice on the window (`None`), or,
+    /// while the window is hidden, `text` back for the tray balloon or the
+    /// menu bar title (`docs/specs/resident-mode.md` AC-22).
+    pub fn tell(&mut self, text: String) -> Option<String> {
+        if self.hidden {
+            return Some(text);
+        }
+        self.show_notice(text);
+        None
     }
 
     fn draw_notice(&mut self) {
@@ -2195,12 +2436,26 @@ impl<B: Backend> App<B> {
 
     /// After the file was moved to the recycle bin.
     pub fn removed(&mut self, path: &Path) -> Vec<Action> {
+        let other = self.current.as_ref().is_none_or(|c| c.path != path);
+        if other {
+            // A grid tile other than the current image.
+            let name = path.file_name().map(|n| n.to_string_lossy());
+            if path.parent() == Some(self.list.dir())
+                && let Some(i) = name.and_then(|n| {
+                    // Exactly this name: `a.jpg` may sit next to `A.jpg`.
+                    self.list.entries().iter().position(|e| e.name == n)
+                })
+            {
+                self.forget_entry(i);
+            }
+            return vec![];
+        }
+        if let Some(i) = self.current.as_ref().and_then(|c| c.index) {
+            self.forget_entry_in_grid(i);
+        }
         let Some(cur) = &self.current else {
             return vec![];
         };
-        if cur.path != path {
-            return vec![];
-        }
         match cur.index.and_then(|i| self.list.remove(i)) {
             Some(next) => self.go_to_index(next),
             None => {
@@ -2211,6 +2466,36 @@ impl<B: Backend> App<B> {
                 vec![]
             }
         }
+    }
+
+    /// Removes list entry `i`, which is not the current image.
+    fn forget_entry(&mut self, i: usize) {
+        self.forget_entry_in_grid(i);
+        self.list.remove(i);
+        if let Some(c) = &mut self.current
+            && let Some(ci) = &mut c.index
+            && *ci > i
+        {
+            *ci -= 1;
+        }
+        self.update_wanted();
+        self.invalidate();
+    }
+
+    /// Entry `i` is about to leave the list: its mark goes, the grid's
+    /// selection stays on the same place, clamped to the images left.
+    fn forget_entry_in_grid(&mut self, i: usize) {
+        let left = self.list.len().saturating_sub(1);
+        let Some(g) = &mut self.browse.grid else {
+            return;
+        };
+        if let Some(e) = self.list.get(i) {
+            g.marked.remove(&e.name);
+        }
+        if g.selected > i || g.selected >= left {
+            g.selected = g.selected.saturating_sub(1).min(left.saturating_sub(1));
+        }
+        self.invalidate();
     }
 
     pub fn resized(&mut self, client: (u32, u32)) {
@@ -2229,8 +2514,6 @@ impl<B: Backend> App<B> {
     }
 }
 
-/// Reads the source, exports the cutout and writes it atomically (temp
-/// file + rename). Returns the message for the notice toast.
 /// The platform's decoders and clock for batch work.
 struct BatchSource<S>(Arc<S>);
 
@@ -2250,6 +2533,35 @@ impl<S: Services> blinzel_core::batch::run::Source for BatchSource<S> {
     }
 }
 
+/// Decodes a copy's pixels ([`ClipSource::pixels`]) at once on a thread of
+/// its own, `blinzel-copy`, and hands them to `done` there: for the shells
+/// whose clipboard cannot ask for them later (Linux, macOS).
+pub fn copy_in_background<S: Services>(
+    services: Arc<S>,
+    clip: ClipSource,
+    done: impl FnOnce(Result<(Vec<u8>, u32, u32), String>) + Send + 'static,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("blinzel-copy".into())
+        .spawn(move || done(clip.pixels(&*services)))
+}
+
+/// Saves the cutout ([`save_cutout`]) on a thread of its own,
+/// `blinzel-save`, and hands the notice text to `done` there: the UI
+/// thread never waits for the file.
+pub fn save_in_background<S: Services>(
+    services: Arc<S>,
+    job: SaveJob,
+    target: PathBuf,
+    done: impl FnOnce(String) + Send + 'static,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("blinzel-save".into())
+        .spawn(move || done(save_cutout(&*services, &job, &target)))
+}
+
+/// Reads the source, exports the cutout and writes it atomically (temp
+/// file + rename). Returns the message for the notice toast.
 pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> String {
     use blinzel_core::export::{SaveFormat, export};
     use blinzel_i18n::{Msg, trf};
@@ -2257,6 +2569,11 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // docs/specs/blinzel.md §2: the viewer never modifies the image it
+    // shows, even after the dialog's overwrite confirmation.
+    if same_file(&job.source, target) {
+        return trf(Msg::ErrorSaveSource, &[("name", &name)]);
+    }
     let result = (|| -> Result<bool, String> {
         let data = services.read_file(&job.source).map_err(|e| e.to_string())?;
         let decode = |d: &[u8], req| services.decode(d, req, 1);
@@ -2277,8 +2594,151 @@ pub fn save_cutout(services: &impl Services, job: &SaveJob, target: &Path) -> St
 }
 
 #[cfg(test)]
+#[path = "app_selection_tests.rs"]
+mod selection_tests;
+
+#[cfg(test)]
+#[path = "app_thumbnail_tests.rs"]
+mod thumbnail_tests;
+
+#[cfg(test)]
+#[path = "app_settings_tests.rs"]
+mod settings_tests;
+
+#[cfg(test)]
+#[path = "app_batch_tests.rs"]
+mod batch_tests;
+
+#[cfg(test)]
+#[path = "app_viewing_tests.rs"]
+mod viewing_tests;
+
+#[cfg(test)]
+#[path = "app_browsing_tests.rs"]
+mod browsing_tests;
+
+#[cfg(test)]
+#[path = "app_format_tests.rs"]
+mod format_tests;
+
+#[cfg(test)]
+#[path = "app_startup_tests.rs"]
+mod startup_tests;
+
+#[cfg(test)]
+#[path = "app_animation_tests.rs"]
+mod animation_tests;
+
+#[cfg(test)]
+#[path = "app_resident_tests.rs"]
+mod resident_tests;
+
+#[cfg(test)]
+#[path = "app_language_tests.rs"]
+mod language_tests;
+
+#[cfg(test)]
+#[path = "app_screenshot_tests.rs"]
+mod screenshot_tests;
+
+/// The command a navigation key gives in the single-image view;
+/// right-to-left languages page leftwards.
+fn nav_cmd(key: Key, rtl: bool) -> Option<Cmd> {
+    use Key::*;
+    Some(match key {
+        Right if rtl => Cmd::Prev,
+        Left if rtl => Cmd::Next,
+        Right | PageDown | Space | Down => Cmd::Next,
+        Left | PageUp | Backspace | Up => Cmd::Prev,
+        Home => Cmd::First,
+        End => Cmd::Last,
+        _ => return None,
+    })
+}
+
+/// Commands on the image shown, which the grid covers.
+fn acts_on_the_shown_image(cmd: Cmd) -> bool {
+    matches!(
+        cmd,
+        Cmd::ZoomIn
+            | Cmd::ZoomOut
+            | Cmd::ZoomReset
+            | Cmd::RotateRight
+            | Cmd::RotateLeft
+            | Cmd::Copy
+            | Cmd::Cut
+            | Cmd::SelectAll
+            | Cmd::ShowOriginal
+            | Cmd::SaveCutout
+    )
+}
+
+/// `a` and `b` name the same existing file, whatever the spelling (`.`,
+/// `..`, symbolic links, letter case on a case-insensitive volume).
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+/// `a` and `b` name the same existing file, whatever the spelling: the
+/// final paths Windows resolves them to (case, short names, links) match.
+#[cfg(not(unix))]
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Read access to private state for the headless harness
+/// ([`crate::testkit`]); nothing here changes behaviour.
+#[cfg(test)]
+impl<B: Backend> App<B> {
+    /// The folder listing is still running.
+    pub(crate) fn is_listing(&self) -> bool {
+        self.list_rx.is_some()
+    }
+
+    /// The current folder's images, in browsing order.
+    pub(crate) fn list(&self) -> &FileList {
+        &self.list
+    }
+
+    /// The selection, in oriented image coordinates.
+    pub(crate) fn selection(&self) -> Option<Rect> {
+        self.selection
+    }
+
+    /// The user's rotation on top of the file's orientation.
+    pub(crate) fn user_rotation(&self) -> Orientation {
+        self.user_rotation
+    }
+
+    /// The layout of the image on screen, once one is loaded.
+    pub(crate) fn current_layout(&self) -> Option<Layout> {
+        self.layout()
+    }
+
+    /// Why image `cache_id` could not be shown (0: opening failed).
+    pub(crate) fn error_of(&self, cache_id: u64) -> Option<&str> {
+        self.failed.get(&cache_id).map(String::as_str)
+    }
+
+    /// A texture of `stage` is cached for image `cache_id`.
+    pub(crate) fn has_stage(&self, cache_id: u64, stage: Stage) -> bool {
+        self.textures.contains(&loader::key(cache_id, stage))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{Harness, IMAGE_SIZE};
+    use Key::*;
 
     #[test]
     fn edit_asks_for_an_editor_first() {
@@ -2295,4 +2755,72 @@ mod tests {
             a => panic!("{a:?}"),
         }
     }
+
+    #[test]
+    fn opening_loads_the_image_and_the_folder() {
+        let h = Harness::with_images(&["b.png", "a.png", "c.png"]);
+        assert_eq!(h.current_name().as_deref(), Some("b.png"));
+        assert_eq!(h.names(), ["a.png", "b.png", "c.png"]);
+        let cur = h.app.current.as_ref().unwrap();
+        assert_eq!(cur.index, Some(1));
+        assert!(h.app.has_stage(cur.cache_id, Stage::Screen));
+        let frame = h.frame();
+        assert_eq!(frame.images.len(), 1);
+        assert_eq!(frame.images[0].full_size, IMAGE_SIZE);
+        assert!(h.host().title.contains("b.png"));
+        assert!(h.actions().contains(&Action::Uncloak));
+    }
+
+    #[test]
+    fn arrows_step_through_the_folder() {
+        let mut h = Harness::with_images(&["a.png", "b.png", "c.png"]);
+        h.key(Right);
+        assert_eq!(h.current_name().as_deref(), Some("b.png"));
+        h.key(Right);
+        assert_eq!(h.current_name().as_deref(), Some("c.png"));
+        h.key(Left);
+        assert_eq!(h.current_name().as_deref(), Some("b.png"));
+        assert_eq!(h.current_path(), Some(h.images.join("b.png")));
+    }
+
+    #[test]
+    fn home_and_end_jump_to_the_first_and_last_image() {
+        let mut h = Harness::with_images(&["a.png", "b.png", "c.png", "d.png"]);
+        h.open("b.png");
+        h.key(End);
+        assert_eq!(h.current_name().as_deref(), Some("d.png"));
+        h.key(Home);
+        assert_eq!(h.current_name().as_deref(), Some("a.png"));
+    }
+
+    #[test]
+    fn digits_switch_the_view_mode_and_save_it() {
+        let mut h = Harness::with_images(&["a.png"]);
+        assert_eq!(h.mode(), ViewMode::FitImageToWindow);
+        h.key(Digit(3));
+        assert_eq!(h.mode(), ViewMode::ActualSize);
+        assert_eq!(h.menu_state().mode, ViewMode::ActualSize);
+        assert_eq!(h.layout().unwrap().scale, 1.0);
+        assert_eq!(h.saved_settings().unwrap().view.mode, ViewMode::ActualSize);
+        h.key(Digit(1));
+        assert_eq!(h.mode(), ViewMode::FitWindowToImage);
+        h.key(Digit(2));
+        assert_eq!(
+            h.saved_settings().unwrap().view.mode,
+            ViewMode::FitImageToWindow
+        );
+    }
+
+    #[test]
+    fn ctrl_o_asks_for_a_file_and_escape_closes() {
+        let mut h = Harness::with_images(&["a.png"]);
+        assert_eq!(h.ctrl(Letter('O')), [Action::OpenDialog]);
+        assert_eq!(h.key(Escape), [Action::Close]);
+        // An unbound key is left to the platform.
+        assert!(h.press(Letter('Q'), false, false).is_none());
+    }
 }
+
+#[cfg(test)]
+#[path = "app_color_tests.rs"]
+mod color_tests;

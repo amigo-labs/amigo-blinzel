@@ -33,6 +33,13 @@ pub enum Outcome {
     Done(Rect),
 }
 
+/// The index of the monitor under `p` among `monitors` (the first that
+/// holds it), for the screenshot of the whole screen and the overlay's
+/// Enter.
+pub fn monitor_under(monitors: &[Rect], p: (f64, f64)) -> Option<usize> {
+    monitors.iter().position(|m| m.contains(p))
+}
+
 pub struct Snip {
     /// The picture's size.
     size: (f64, f64),
@@ -80,11 +87,8 @@ impl Snip {
 
     /// The monitor under the pointer (the whole picture without one).
     fn monitor(&self) -> Rect {
-        self.monitors
-            .iter()
-            .find(|m| m.contains(self.cursor))
-            .copied()
-            .unwrap_or_else(|| self.bounds())
+        monitor_under(&self.monitors, self.cursor)
+            .map_or_else(|| self.bounds(), |i| self.monitors[i])
     }
 
     /// The frontmost window under the pointer.
@@ -310,6 +314,22 @@ mod tests {
         )
     }
 
+    /// `docs/specs/screenshots.md` AC-06: the whole screen is the monitor
+    /// under the pointer, also one above or left of the first; none
+    /// outside every monitor.
+    #[test]
+    fn the_whole_screen_is_the_monitor_under_the_pointer() {
+        let monitors = [
+            Rect::new(1920.0, 0.0, 1920.0, 1080.0),
+            Rect::new(0.0, 0.0, 1920.0, 1080.0),
+            Rect::new(0.0, -1080.0, 1920.0, 1080.0),
+        ];
+        assert_eq!(monitor_under(&monitors, (10.0, 10.0)), Some(1));
+        assert_eq!(monitor_under(&monitors, (2000.0, 500.0)), Some(0));
+        assert_eq!(monitor_under(&monitors, (10.0, -10.0)), Some(2));
+        assert_eq!(monitor_under(&monitors, (5000.0, 10.0)), None);
+    }
+
     #[test]
     fn drags_a_region_in_any_direction() {
         let mut s = snip();
@@ -350,6 +370,24 @@ mod tests {
         assert_eq!(
             s.mouse_up((3800.0, 1000.0)),
             Outcome::Done(Rect::new(3700.0, 900.0, 140.0, 180.0))
+        );
+    }
+
+    /// AC-10, AC-11: less than 4 px is a click, 4 px a drag (3 and 4 px
+    /// along one axis, so per axis and straight line agree).
+    #[test]
+    fn a_release_3_px_away_is_a_click_and_4_px_away_a_drag() {
+        let mut s = snip();
+        s.mouse_down((200.0, 200.0));
+        assert_eq!(
+            s.mouse_up((203.0, 200.0)),
+            Outcome::Done(Rect::new(100.0, 100.0, 400.0, 300.0)),
+            "the window under the pointer"
+        );
+        s.mouse_down((200.0, 200.0));
+        assert_eq!(
+            s.mouse_up((204.0, 201.0)),
+            Outcome::Done(Rect::new(200.0, 200.0, 4.0, 1.0))
         );
     }
 

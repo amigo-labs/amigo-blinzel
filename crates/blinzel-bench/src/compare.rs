@@ -26,6 +26,22 @@ pub fn compare(args: &[String]) -> Result<(), String> {
         return Err("usage: blinzel-bench compare <a.json> <b.json>".into());
     };
     let (a, b) = (load(Path::new(a))?, load(Path::new(b))?);
+    let md = table(&a, &b);
+    print!("{md}");
+    if let Ok(summary) = std::env::var("GITHUB_STEP_SUMMARY") {
+        fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&summary)
+            .and_then(|mut f| f.write_all(md.as_bytes()))
+            .map_err(|e| format!("{summary}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Both runs' machines, then every result present in both with both
+/// medians and the factor a/b.
+fn table(a: &Run, b: &Run) -> String {
     let mut md = String::new();
     let _ = writeln!(md, "### Benchmark: {} vs. {}\n", a.label, b.label);
     let _ = writeln!(md, "| | {} | {} |\n|---|---|---|", a.label, b.label);
@@ -60,16 +76,7 @@ pub fn compare(args: &[String]) -> Result<(), String> {
             ra.group, ra.candidate, ra.file, ra.median, rb.median
         );
     }
-    print!("{md}");
-    if let Ok(summary) = std::env::var("GITHUB_STEP_SUMMARY") {
-        fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&summary)
-            .and_then(|mut f| f.write_all(md.as_bytes()))
-            .map_err(|e| format!("{summary}: {e}"))?;
-    }
-    Ok(())
+    md
 }
 
 /// Reads a file written by `write_json`, which puts every result object on
@@ -148,6 +155,66 @@ fn list_field(s: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run(label: &str, rows: &[(&str, &str, f64)]) -> Run {
+        Run {
+            label: label.into(),
+            cpu: format!("{label} CPU"),
+            build_features: format!("{label}-features"),
+            rows: rows
+                .iter()
+                .map(|&(candidate, file, median)| Row {
+                    group: "jpeg-full".into(),
+                    candidate: candidate.into(),
+                    file: file.into(),
+                    median,
+                })
+                .collect(),
+        }
+    }
+
+    /// AC-09: both machines, the results present in both, the factor a/b
+    /// and "-" for a median of 0.
+    #[test]
+    fn the_table_has_both_machines_and_the_shared_results() {
+        let a = run(
+            "base",
+            &[
+                ("turbo", "x.jpg", 30.0),
+                ("turbo", "y.jpg", 0.0),
+                ("zune", "x.jpg", 5.0),
+                ("only-a", "x.jpg", 1.0),
+            ],
+        );
+        let b = run(
+            "v3",
+            &[
+                ("zune", "x.jpg", 0.0),
+                ("turbo", "y.jpg", 2.0),
+                ("turbo", "x.jpg", 20.0),
+                ("turbo", "z.jpg", 1.0),
+            ],
+        );
+        let md = table(&a, &b);
+        let lines: Vec<&str> = md.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                "### Benchmark: base vs. v3",
+                "",
+                "| | base | v3 |",
+                "|---|---|---|",
+                "| CPU | base CPU | v3 CPU |",
+                "| build features | base-features | v3-features |",
+                "",
+                "| group | candidate | file | base ms | v3 ms | factor |",
+                "|---|---|---|--:|--:|--:|",
+                "| jpeg-full | turbo | x.jpg | 30.000 | 20.000 | 1.50x |",
+                "| jpeg-full | turbo | y.jpg | 0.000 | 2.000 | - |",
+                "| jpeg-full | zune | x.jpg | 5.000 | 0.000 | - |",
+            ]
+        );
+    }
 
     #[test]
     fn reads_fields() {

@@ -17,8 +17,8 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext,
 };
 use windows::Win32::Graphics::Dxgi::{
-    DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO, IDXGIAdapter, IDXGIAdapter3,
-    IDXGIDevice1, IDXGIDevice3, IDXGIFactory2,
+    DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
+    IDXGIAdapter, IDXGIAdapter1, IDXGIAdapter3, IDXGIDevice1, IDXGIDevice3, IDXGIFactory2,
 };
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::core::HRESULT;
@@ -105,13 +105,20 @@ impl Gfx {
                     unsafe { dxgi.SetMaximumFrameLatency(1)? };
                     let adapter = unsafe { dxgi.GetAdapter()? };
                     let factory: IDXGIFactory2 = unsafe { adapter.GetParent()? };
+                    let desc = adapter
+                        .cast::<IDXGIAdapter1>()
+                        .ok()
+                        // SAFETY: a plain query of the adapter just created.
+                        .and_then(|a| unsafe { a.GetDesc1() }.ok());
+                    let (flags, vendor, device_id) =
+                        desc.map_or((0, 0, 0), |d| (d.Flags, d.VendorId, d.DeviceId));
                     return Ok(Gfx {
                         device,
                         context,
                         factory,
                         adapter,
                         feature_level,
-                        warp: driver == D3D_DRIVER_TYPE_WARP,
+                        warp: runs_on_warp(driver, flags, vendor, device_id),
                     });
                 }
                 Err(e) => last_err = Some(e),
@@ -147,22 +154,52 @@ impl Gfx {
 
     /// Bytes of video memory we allow ourselves to keep in textures.
     pub fn texture_budget(&self) -> usize {
-        const MIN: usize = 256 << 20;
-        const MAX: usize = 3 << 30;
         let os_budget = self.adapter.cast::<IDXGIAdapter3>().ok().and_then(|a3| {
             let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
             unsafe { a3.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info) }
                 .ok()?;
             Some(info.Budget as usize)
         });
-        let budget = match os_budget {
-            Some(b) if b > 0 => b / 2,
-            _ => unsafe { self.adapter.GetDesc() }
-                .map(|d| (d.DedicatedVideoMemory.max(d.SharedSystemMemory / 4)) / 2)
-                .unwrap_or(MIN),
-        };
-        budget.clamp(MIN, MAX)
+        texture_budget(os_budget, || {
+            unsafe { self.adapter.GetDesc() }
+                .ok()
+                .map(|d| (d.DedicatedVideoMemory, d.SharedSystemMemory))
+        })
     }
+}
+
+/// Microsoft's PCI vendor id and the "Microsoft Basic Render Driver"'s
+/// device id, the documented way to recognise it: on CI runners it does not
+/// set `DXGI_ADAPTER_FLAG_SOFTWARE`.
+const BASIC_RENDER_DRIVER: (u32, u32) = (0x1414, 0x8c);
+
+/// Whether a device created with `driver` on an adapter with
+/// `adapter_flags` (`DXGI_ADAPTER_DESC1::Flags`), `vendor` and `device_id`
+/// renders with WARP: the WARP driver type, or the hardware type on a
+/// software adapter such as the "Microsoft Basic Render Driver" of a
+/// machine without a GPU driver, which is WARP too.
+fn runs_on_warp(driver: D3D_DRIVER_TYPE, adapter_flags: u32, vendor: u32, device_id: u32) -> bool {
+    driver == D3D_DRIVER_TYPE_WARP
+        || adapter_flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
+        || (vendor, device_id) == BASIC_RENDER_DRIVER
+}
+
+/// Half of what Windows grants the process (`os_budget`, DXGI), else half
+/// of the adapter's (dedicated, shared) memory, counting a quarter of the
+/// shared; clamped to 256 MiB … 3 GiB (`docs/specs/browsing.md` AC-13).
+fn texture_budget(
+    os_budget: Option<usize>,
+    adapter: impl FnOnce() -> Option<(usize, usize)>,
+) -> usize {
+    const MIN: usize = 256 << 20;
+    const MAX: usize = 3 << 30;
+    let budget = match os_budget {
+        Some(b) if b > 0 => b / 2,
+        _ => adapter()
+            .map(|(dedicated, shared)| dedicated.max(shared / 4) / 2)
+            .unwrap_or(MIN),
+    };
+    budget.clamp(MIN, MAX)
 }
 
 fn load_create_device() -> windows::core::Result<CreateDeviceFn> {
@@ -174,5 +211,63 @@ fn load_create_device() -> windows::core::Result<CreateDeviceFn> {
             unsafe extern "system" fn() -> isize,
             CreateDeviceFn,
         >(proc))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIB: usize = 1 << 20;
+    const GIB: usize = 1 << 30;
+
+    fn no_adapter() -> Option<(usize, usize)> {
+        panic!("the OS budget is enough")
+    }
+
+    #[test]
+    fn texture_budget_is_half_the_os_budget_clamped() {
+        assert_eq!(texture_budget(Some(4 * GIB), no_adapter), 2 * GIB);
+        assert_eq!(texture_budget(Some(16 * GIB), no_adapter), 3 * GIB);
+        assert_eq!(texture_budget(Some(100 * MIB), no_adapter), 256 * MIB);
+    }
+
+    #[test]
+    fn texture_budget_falls_back_to_the_adapter_memory() {
+        assert_eq!(texture_budget(None, || Some((2 * GIB, 4 * GIB))), GIB);
+        assert_eq!(texture_budget(Some(0), || Some((0, 8 * GIB))), GIB);
+        assert_eq!(texture_budget(None, || Some((0, 0))), 256 * MIB);
+        assert_eq!(texture_budget(None, || None), 256 * MIB);
+    }
+
+    /// `docs/specs/startup.md` AC-11: `warp` is true on WARP, also when the
+    /// hardware driver type lands on the Basic Render Driver (CI runners).
+    #[test]
+    fn the_basic_render_driver_counts_as_warp() {
+        let software = DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32;
+        let nvidia = (0x10de, 0x2684);
+        let (brd_vendor, brd_device) = (0x1414, 0x8c);
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, 0, nvidia.0, nvidia.1));
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_WARP, software, 0, 0));
+        assert!(runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, software, 0, 0));
+        assert!(runs_on_warp(
+            D3D_DRIVER_TYPE_HARDWARE,
+            0,
+            brd_vendor,
+            brd_device
+        ));
+        assert!(!runs_on_warp(
+            D3D_DRIVER_TYPE_HARDWARE,
+            0,
+            nvidia.0,
+            nvidia.1
+        ));
+        assert!(!runs_on_warp(D3D_DRIVER_TYPE_HARDWARE, 0, brd_vendor, 0x8d));
+        // Whatever this machine has: the Basic Render Driver is WARP.
+        let gfx = Gfx::create(false).expect("a Direct3D 11 device");
+        if gfx.adapter_name() == "Microsoft Basic Render Driver" {
+            assert!(gfx.warp);
+        }
+        assert!(Gfx::create(true).expect("WARP").warp);
     }
 }
