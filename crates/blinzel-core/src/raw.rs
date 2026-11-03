@@ -727,4 +727,38 @@ mod tests {
         );
         assert!(probe(&t.d).unwrap().previews.is_empty());
     }
+
+    /// AC-18: a preview the end of the file cuts in the middle of its scan
+    /// data is not listed, although the bytes the file has parse as a JPEG;
+    /// the same preview whole is.
+    #[test]
+    fn a_preview_cut_by_the_end_of_the_file_is_not_listed() {
+        let mut full = jpeg(600, 400, 0xC0);
+        full.truncate(full.len() - 2);
+        full.extend([0x55; 64]);
+        full.extend([0xFF, 0xD9]);
+        let at = 512;
+        let tiff = |len: usize| {
+            let mut t = TiffLe::new(at + len);
+            t.put(at, &full[..len]);
+            t.ifd(
+                8,
+                Some(4),
+                &[
+                    (0x0201, 4, vec![at as u32]),
+                    (0x0202, 4, vec![full.len() as u32]),
+                ],
+            );
+            t.d
+        };
+        let whole = probe(&tiff(full.len())).unwrap();
+        assert_eq!(whole.previews.len(), 1, "the whole preview is listed");
+        // Half of the scan data and the EOI are missing.
+        let cut = full.len() - 2 - 32;
+        assert!(
+            blinzel_jpeg::parse(&full[..cut]).is_ok(),
+            "the cut bytes parse"
+        );
+        assert!(probe(&tiff(cut)).unwrap().previews.is_empty());
+    }
 }
