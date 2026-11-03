@@ -475,6 +475,11 @@ mod tests {
         assert_eq!(info(Some((6000, 4000))).image_size(), Some((6000, 4000)));
         assert_eq!(info(Some((4000, 6000))).image_size(), Some((1616, 1080)));
         assert_eq!(info(Some((800, 533))).image_size(), Some((1616, 1080)));
+        // The aspect ratio may differ by less than 3 % (AC-18), either way.
+        assert_eq!(info(Some((6000, 3897))).image_size(), Some((6000, 3897))); // 2.9 % wider
+        assert_eq!(info(Some((6000, 3889))).image_size(), Some((1616, 1080))); // 3.1 % wider
+        assert_eq!(info(Some((6000, 4130))).image_size(), Some((6000, 4130))); // 2.9 % narrower
+        assert_eq!(info(Some((6000, 4136))).image_size(), Some((1616, 1080))); // 3.05 % narrower
         assert_eq!(info(None).image_size(), Some((1616, 1080)));
         assert_eq!(RawInfo::default().image_size(), None);
     }
