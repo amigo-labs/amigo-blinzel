@@ -109,7 +109,7 @@ amigo-blinzel has no installer framework (`blinzel.md` §2, "Installer"). On Win
 | AC-15 | `quotes_exec_paths` (`crates/blinzel-app/src/linux/install.rs`), Linux CI | built |        |
 | AC-16 | `window_class_is_the_desktop_entrys` (`crates/blinzel-app/tests/startup.rs`), Linux CI job's Xvfb step | built |        |
 | AC-17 | `writes_a_bundle`, `icns_entries_are_pngs` (`crates/blinzel-release/src/macos.rs`), Linux and macOS CI | built |        |
-| AC-18 | `release.yml` macOS job, step "App bundle and disk image" (`lipo … -verify_arch arm64 x86_64`), CI: release — written, not run yet | open   |        |
+| AC-18 | `release.yml` macOS job, step "App bundle and disk image" (`lipo … -verify_arch arm64 x86_64`), CI: release, release run 41591512319 for v1.4.0 (`2f9b17e`, 2026-11-03), all jobs ok | built |        |
 | AC-19 | `signs_ad_hoc_without_an_identity` (`crates/blinzel-release/src/macos.rs`), Linux and macOS CI; `ci.yml` macOS step "App bundle and smoke test" (`codesign --verify`, ad hoc) | built |        |
 | AC-20 | `ci.yml` macOS step "Disk image" (`hdiutil verify`, `test -L "$mnt/Applications"`, `codesign --verify`) | built |        |
 | AC-21 |      | open   |        |
