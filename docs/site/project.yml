@@ -3,7 +3,7 @@
 # links and release notes come from the GitHub releases, not from this file.
 schema: 1
 slug: blinzel
-name: amigo-blinzel
+name: Blinzel
 status: released
 accent: "#ff4757"
 icon: icon.svg
