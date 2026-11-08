@@ -1,0 +1,554 @@
+# Content of amigo-labs.dev/blinzel/, read by the amigo-labs website at build
+# time (format: amigo-labs/website docs/project-data.md). Versions, download
+# links and release notes come from the GitHub releases, not from this file.
+schema: 1
+slug: blinzel
+name: amigo-blinzel
+status: released
+accent: "#3d8bff"
+icon: icon.svg
+tagline:
+  en: Open images, page, resize.
+  de: Bilder öffnen, blättern, verkleinern.
+summary:
+  en: An image viewer for Windows, macOS and Linux, built for short times when opening and paging through images. It also resizes many images at once and takes screenshots. No toolbars, no ads, no telemetry.
+  de: Ein Bildbetrachter für Windows, macOS und Linux, ausgelegt auf kurze Zeiten beim Öffnen und Durchblättern. Er verkleinert auch viele Bilder auf einmal und macht Bildschirmfotos. Keine Leisten, keine Werbung, keine Telemetrie.
+about:
+  en: |
+    There are no toolbars. The menu (☰) sits top left; everything else is in the menu or on a key. Image files stay unchanged: cutouts are only written as new files through “Save as”.
+
+    Source code open on GitHub; no ads, no telemetry, the only network connection is the daily update check with GitHub (can be turned off: `auto_update = false` in `settings.toml`).
+  de: |
+    Die Oberfläche hat keine Leisten. Links oben sitzt das Menü (☰); alles andere steckt im Menü oder liegt auf einer Taste. Bilddateien bleiben unverändert: Ausschnitte entstehen nur über „Speichern unter“ als neue Datei.
+
+    Quellcode offen auf GitHub; keine Werbung, keine Telemetrie, als einzige Netzwerkverbindung die tägliche Update-Prüfung bei GitHub (abschaltbar: `auto_update = false` in `settings.toml`).
+platforms: [windows, macos, linux]
+license: MIT
+
+highlights:
+  - value: "12×"
+    label:
+      en: faster opening than Windows Photos (90 ms vs. 1.12 s, 24 MP JPEG, median)
+      de: schneller geöffnet als mit Windows Fotos (90 ms statt 1,12 s, 24-MP-JPEG, Median)
+  - value: "18 ms"
+    label:
+      en: from key press to the next image (Windows, median)
+      de: vom Tastendruck bis zum nächsten Bild (Windows, Median)
+  - value: "4×"
+    label:
+      en: faster batch resizing than ImageMagick (8.6 vs. 2.1 photos per second)
+      de: schneller verkleinert als mit ImageMagick (8,6 statt 2,1 Fotos pro Sekunde)
+  - value: "8"
+    label:
+      en: image formats with our own decoders, on every platform
+      de: Bildformate mit eigenen Decodern, auf jeder Plattform
+
+features:
+  - title: { en: Viewing, de: Betrachten }
+    text:
+      en: The window appears with the image already on it. Images are decoded only as large as the screen needs; the next images wait as GPU textures in the direction you page. Image files stay unchanged; cutouts are only written as new files through “Save as”, losslessly from JPEG where possible (also PNG, WebP, AVIF).
+      de: Das Fenster erscheint erst mit dem Bild darauf. Decodiert wird nur so groß, wie der Bildschirm es braucht; die nächsten Bilder liegen in Blätterrichtung als GPU-Texturen bereit. Bilddateien bleiben unverändert; Ausschnitte entstehen nur über „Speichern unter“ als neue Datei, aus JPEG wenn möglich verlustfrei (auch PNG, WebP, AVIF).
+  - title: { en: Resize many images, de: Viele Bilder verkleinern }
+    text:
+      en: Ctrl+B (⌘B on a Mac) opens the dialog; drag images and folders into it. Long edge, width, height, fit into or fill a box, or percent, scaled with Lanczos3 in linear light; JPEG, PNG, WebP or AVIF. EXIF and the colour profile are kept, GPS can be removed. A name pattern shows every new name in advance. Source files are never overwritten. All cores work in parallel — 8.6 photos per second (12 MP to 1920 px, 4 cores) against 2.1 with ImageMagick.
+      de: Strg+B (auf dem Mac ⌘B) öffnet den Dialog; Bilder und Ordner hineinziehen. Längste Kante, Breite, Höhe, Rahmen einpassen oder füllen oder Prozent, skaliert mit Lanczos3 in linearem Licht; JPEG, PNG, WebP oder AVIF. EXIF und Farbprofil bleiben erhalten, GPS lässt sich entfernen. Ein Namensmuster zeigt jeden neuen Namen vorab. Quelldateien werden nie überschrieben. Alle Kerne arbeiten parallel — 8,6 Fotos pro Sekunde (12 MP auf 1920 px, 4 Kerne) gegenüber 2,1 mit ImageMagick.
+  - title: { en: Screenshots (Windows and macOS), de: Bildschirmfotos (Windows und macOS) }
+    text:
+      en: The Print key, on a Mac ⌘⇧1, freezes the screen across all monitors while amigo-blinzel stays ready in the background. Drag a region, click a window or press Enter for the whole screen. The screenshot goes to the clipboard and, as set, as PNG into “Pictures\Screenshots”, the viewer and the editor of your choice.
+      de: Die Druck-Taste, auf dem Mac ⌘⇧1, friert den Bildschirm über alle Monitore ein, solange amigo-blinzel im Hintergrund bereitsteht. Bereich aufziehen, Fenster anklicken oder Enter für den ganzen Bildschirm. Das Foto kommt in die Zwischenablage und je nach Einstellung als PNG nach „Bilder\Screenshots“, in den Viewer und in den Editor deiner Wahl.
+  - title: { en: Formats, de: Formate }
+    text:
+      en: Our own decoders on every platform for JPEG, PNG, GIF, BMP, TIFF, WebP, AVIF and JPEG XL. HEIC and camera RAW through the system — the installed Windows codecs on Windows, ImageIO on macOS (HEIC with Apple's hardware decoder), and RAW through the embedded previews on Linux.
+      de: Eigene Decoder auf jeder Plattform für JPEG, PNG, GIF, BMP, TIFF, WebP, AVIF und JPEG XL. HEIC und Kamera-RAW über das System — unter Windows über die installierten Windows-Codecs, unter macOS über ImageIO (HEIC mit Apples Hardware-Decoder), unter Linux RAW über die eingebetteten Vorschauen.
+  - title: { en: Grid and editing elsewhere, de: Raster und Bearbeiten woanders }
+    text:
+      en: G shows a grid of all images, Ctrl+click marks them. E hands the image to the editor you chose (e.g. Paint.NET, GIMP, Photoshop); “Open with…” is in the menu. Delete moves an image to the Recycle Bin.
+      de: G zeigt ein Raster aller Bilder, Strg+Klick markiert sie. E gibt das Bild an den Editor deiner Wahl (z. B. Paint.NET, GIMP, Photoshop); „Öffnen mit…“ steht im Menü. Entf verschiebt ein Bild in den Papierkorb.
+  - title: { en: Updates without asking, de: Updates ohne Nachfrage }
+    text:
+      en: Installs for you only, without administrator rights. amigo-blinzel asks GitHub at most once a day whether there is a new version and installs it silently; it takes effect at the next start. It can be turned off.
+      de: Installation nur für dich, ohne Administratorrechte. amigo-blinzel prüft höchstens einmal am Tag bei GitHub, ob es eine neue Version gibt, und installiert sie still; aktiv wird sie beim nächsten Start. Abschaltbar.
+
+sections:
+  - id: how-it-works
+    title: { en: How it works, de: Technik }
+    body:
+      en: |
+        - Decoding at screen resolution: JPEGs are decoded with DCT scaling straight into YCbCr planes; the GPU does colour conversion and scaling.
+        - An own JPEG decoder spreads Huffman decoding over all cores, even without restart markers, and is byte-identical with libjpeg-turbo.
+        - Prefetching in paging direction, with priorities and cancellation.
+        - Parallel start: window, GPU and decoder start at the same time.
+        - Native on every platform: Win32 and Direct3D 11 on Windows, AppKit and Metal on macOS, Vulkan (wgpu) on Linux. No runtime, no framework in between.
+      de: |
+        - Decodieren in Bildschirmauflösung: JPEGs werden per DCT-Skalierung direkt in YCbCr-Ebenen decodiert; Farbumrechnung und Skalierung übernimmt die Grafikkarte.
+        - Ein eigener JPEG-Decoder verteilt das Huffman-Decoding auf alle Kerne, auch ohne Restart-Marker, und liefert byte-genau dasselbe wie libjpeg-turbo.
+        - Prefetch in Blätterrichtung, mit Prioritäten und Abbruch.
+        - Paralleler Start: Fenster, Grafikkarte und Decoder starten gleichzeitig.
+        - Nativ auf jeder Plattform: Win32 und Direct3D 11 unter Windows, AppKit und Metal unter macOS, Vulkan (wgpu) unter Linux. Keine Runtime, kein Framework dazwischen.
+
+benchmarks:
+  - benchmarks/windows.yml
+
+comparisons:
+  - title: { en: "Image viewers on Windows", de: "Bildbetrachter unter Windows" }
+    intro: { en: "Every entry links its source (the maker's website, documentation, release notes or source code); what could not be confirmed there reads “not documented”. Download is the size of the x64 installer. Please report corrections as an issue on GitHub.", de: "Jede Angabe verlinkt ihre Quelle (Website, Dokumentation, Release-Notizen oder Quellcode des Herstellers); was sich dort nicht belegen ließ, steht als „nicht belegt“. Download ist die Größe des x64-Installers. Korrekturen bitte als Issue auf GitHub." }
+    asOf: 2026-10-23
+    tools:
+      - { name: "amigo-blinzel", own: true }
+      - { name: "IrfanView 64" }
+      - { name: "ImageGlass" }
+      - { name: "XnView MP" }
+      - { name: "FastStone Image Viewer" }
+      - { name: "JPEGView" }
+      - { name: "qimgv" }
+      - { name: { en: "Windows Photos", de: "Windows Fotos" } }
+    rows:
+      - feature: { en: "Checked version", de: "Geprüfte Version" }
+        cells:
+          - { text: { en: "1.2.1 (2026-10-29)", de: "1.2.1 (29.10.2026)" }, source: "https://github.com/amigo-labs/amigo-blinzel/releases/tag/v1.2.1" }
+          - { text: { en: "4.76 (2026-09-18)", de: "4.76 (18.09.2026)" }, source: "https://www.irfanview.com/64bit.htm" }
+          - { text: { en: "10.0.6.906 (2026-09-05)", de: "10.0.6.906 (05.09.2026)" }, source: "https://github.com/d2phap/ImageGlass/releases/tag/10.0.6.906" }
+          - { text: { en: "1.12.2 (2026-10-12)", de: "1.12.2 (12.10.2026)" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "8.5 (2026-06-24)", de: "8.5 (24.06.2026)" }, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { text: { en: "1.3.46 (2023-10-07)", de: "1.3.46 (07.10.2023)" }, source: "https://github.com/sylikc/jpegview/releases/tag/v1.3.46" }
+          - { text: { en: "1.0.2 (2021-09-29)", de: "1.0.2 (29.09.2021)" }, source: "https://github.com/easymodo/qimgv/releases/tag/v1.0.2" }
+          - { text: { en: "2026.11090.22001.0 (2026-10-19)", de: "2026.11090.22001.0 (19.10.2026)" }, source: "https://apps.microsoft.com/detail/9wzdncrfjbh4" }
+      - feature: { en: "Licence", de: "Lizenz" }
+        cells:
+          - { text: "MIT", source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE" }
+          - { text: { en: "freeware, proprietary", de: "Freeware, proprietär" }, source: "https://www.irfanview.com/eula.htm" }
+          - { text: { en: "GPLv3 (Classic), paid Pro", de: "GPLv3 (Classic), Pro kostenpflichtig" }, source: "https://imageglass.org/pricing" }
+          - { text: { en: "freeware, proprietary", de: "Freeware, proprietär" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "freeware, proprietary", de: "Freeware, proprietär" }, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { text: "GPL-2.0", source: "https://github.com/sylikc/jpegview/blob/master/LICENSE.txt" }
+          - { text: "GPL-3.0", source: "https://github.com/easymodo/qimgv" }
+          - { text: { en: "proprietary, part of Windows", de: "proprietär, Teil von Windows" }, source: "https://apps.microsoft.com/detail/9wzdncrfjbh4" }
+      - feature: { en: "Business use", de: "Firmen" }
+        cells:
+          - { text: { en: "allowed", de: "erlaubt" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE" }
+          - { text: { en: "licence required (EUR 15)", de: "Lizenz nötig (15 €)" }, source: "https://www.irfanview.com/eula.htm" }
+          - { text: { en: "allowed (Classic)", de: "erlaubt (Classic)" }, source: "https://imageglass.org/license?type=classic" }
+          - { text: { en: "licence required (from EUR 29)", de: "Lizenz nötig (ab 29 €)" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "licence required (USD 34.95)", de: "Lizenz nötig (34,95 USD)" }, source: "https://www.faststone.org/order.htm" }
+          - { text: { en: "allowed", de: "erlaubt" }, source: "https://github.com/sylikc/jpegview/blob/master/LICENSE.txt" }
+          - { text: { en: "allowed", de: "erlaubt" }, source: "https://github.com/easymodo/qimgv" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://apps.microsoft.com/detail/9wzdncrfjbh4" }
+      - feature: { en: "Ads", de: "Werbung" }
+        cells:
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://www.irfanview.com/faq.htm" }
+          - { text: { en: "none", de: "keine" }, source: "https://imageglass.org/classic" }
+          - { text: { en: "none", de: "keine" }, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "none", de: "keine" }, source: "https://www.faststone.org/PrivacyPolicy.htm" }
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/sylikc/jpegview" }
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/easymodo/qimgv" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://apps.microsoft.com/detail/9wzdncrfjbh4" }
+      - feature: { en: "Telemetry", de: "Telemetrie" }
+        cells:
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "no personal data", de: "keine personenbezogenen Daten" }, source: "https://www.irfanview.com/privacy_policy.htm" }
+          - { text: { en: "anonymous stats with the update check, opt-out", de: "anonyme Statistik beim Update-Check, abschaltbar" }, source: "https://imageglass.org/privacy" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "no personal data", de: "keine personenbezogenen Daten" }, source: "https://www.faststone.org/PrivacyPolicy.htm" }
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/sylikc/jpegview" }
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/easymodo/qimgv" }
+          - { text: { en: "yes (Windows diagnostic data)", de: "ja (Windows-Diagnosedaten)" }, source: "https://www.microsoft.com/en-us/privacy/privacystatement" }
+      - feature: { en: "Native ARM64", de: "ARM64 nativ" }
+        cells:
+          - { mark: yes, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { mark: yes, source: "https://www.irfanview.com/arm64.htm" }
+          - { mark: yes, note: "MSIX/ZIP", source: "https://github.com/d2phap/ImageGlass/releases/tag/10.0.6.906" }
+          - { mark: no, source: "https://newsgroup.xnview.com/viewtopic.php?t=51463" }
+          - { mark: no, source: "https://www.faststone.org/FSViewerDownload.htm" }
+          - { mark: no, source: "https://github.com/sylikc/jpegview/releases/tag/v1.3.46" }
+          - { mark: no, source: "https://github.com/easymodo/qimgv/releases/tag/v1.0.2" }
+          - { mark: yes, source: "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=9WZDNCRFJBH4&market=US&languages=en-US" }
+      - feature: "Download"
+        cells:
+          - { text: { en: "10.4 MB (one executable)", de: "10,4 MB (eine Exe)" }, source: "https://github.com/amigo-labs/amigo-blinzel/releases/tag/v1.2.1" }
+          - { text: { en: "4.3 MB (+ 30.1 MB plugins)", de: "4,3 MB (+ 30,1 MB Plugins)" }, source: "https://www.irfanview.com/64bit.htm" }
+          - { text: { en: "35.4 MB", de: "35,4 MB" }, source: "https://github.com/d2phap/ImageGlass/releases/tag/10.0.6.906" }
+          - { text: { en: "69.1 MB", de: "69,1 MB" }, source: "https://download.xnview.com/XnViewMP-win-x64.exe" }
+          - { text: { en: "12.5 MB", de: "12,5 MB" }, source: "https://www.faststonesoft.net/DN/FSViewerSetup85.exe" }
+          - { text: { en: "5.2 MB", de: "5,2 MB" }, source: "https://github.com/sylikc/jpegview/releases/tag/v1.3.46" }
+          - { text: { en: "29.3 MB", de: "29,3 MB" }, source: "https://github.com/easymodo/qimgv/releases/tag/v1.0.2" }
+          - { text: { en: "preinstalled", de: "vorinstalliert" }, source: "https://apps.microsoft.com/detail/9wzdncrfjbh4" }
+      - feature: { en: "Colour profiles", de: "Farbprofile" }
+        cells:
+          - { text: { en: "embedded + monitor", de: "eingebettet + Monitor" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "embedded (plugin), monitor not documented", de: "eingebettet (Plugin), Monitor nicht belegt" }, source: "https://www.irfanview.com/plugins.htm" }
+          - { text: { en: "embedded + monitor", de: "eingebettet + Monitor" }, source: "https://github.com/d2phap/ImageGlass/blob/develop/source/ImageGlass.Lib/Settings/Config.cs" }
+          - { text: { en: "embedded, monitor not documented", de: "eingebettet, Monitor nicht belegt" }, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "embedded, monitor optional", de: "eingebettet, Monitor optional" }, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { text: { en: "partly (JPEG/PNG/TIFF opt-in), monitor not documented", de: "teilweise (JPEG/PNG/TIFF per Einstellung), Monitor nicht belegt" }, source: "https://github.com/sylikc/jpegview/blob/master/src/JPEGView/Config/JPEGView.ini" }
+          - { mark: no, source: "https://github.com/easymodo/qimgv" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://blogs.windows.com/windowsexperience/2026/10/15/meet-the-new-photos-app-on-windows-11/" }
+      - feature: "HEIC"
+        cells:
+          - { text: { en: "Windows codec", de: "Windows-Codec" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "plugin / Windows codec", de: "Plugin / Windows-Codec" }, source: "https://www.irfanview.com/faq.htm" }
+          - { mark: yes, source: "https://imageglass.org/docs/supported-formats" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "Windows codec", de: "Windows-Codec" }, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { mark: yes, source: "https://github.com/sylikc/jpegview/blob/master/README.md" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/easymodo/qimgv/blob/master/README.md" }
+          - { text: { en: "Windows codec (extension)", de: "Windows-Codec (Erweiterung)" }, source: "https://apps.microsoft.com/detail/9PMMSR1CGPWG" }
+      - feature: "AVIF"
+        cells:
+          - { text: { en: "own decoder", de: "eigener Decoder" }, source: "https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode" }
+          - { text: { en: "plugin", de: "Plugin" }, source: "https://www.irfanview.com/main_formats.htm" }
+          - { mark: yes, source: "https://imageglass.org/docs/supported-formats" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { mark: yes, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { mark: yes, source: "https://github.com/sylikc/jpegview/blob/master/README.md" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/easymodo/qimgv/blob/master/README.md" }
+          - { text: { en: "Windows codec (extension)", de: "Windows-Codec (Erweiterung)" }, source: "https://apps.microsoft.com/detail/9PMMSR1CGPWG" }
+      - feature: "JPEG XL"
+        cells:
+          - { text: { en: "own decoder", de: "eigener Decoder" }, source: "https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode" }
+          - { text: { en: "plugin", de: "Plugin" }, source: "https://www.irfanview.com/plugins.htm" }
+          - { mark: yes, source: "https://imageglass.org/docs/supported-formats" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { mark: yes, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { mark: yes, source: "https://github.com/sylikc/jpegview/blob/master/README.md" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/easymodo/qimgv/blob/master/README.md" }
+          - { text: { en: "Windows codec (extension)", de: "Windows-Codec (Erweiterung)" }, source: "https://apps.microsoft.com/detail/9MZPRTH5C0TB" }
+      - feature: "WebP"
+        cells:
+          - { text: { en: "own decoder", de: "eigener Decoder" }, source: "https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode" }
+          - { text: { en: "plugin", de: "Plugin" }, source: "https://www.irfanview.com/main_formats.htm" }
+          - { mark: yes, source: "https://imageglass.org/docs/supported-formats" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { mark: yes, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { mark: yes, source: "https://github.com/sylikc/jpegview/blob/master/README.md" }
+          - { mark: yes, source: "https://github.com/easymodo/qimgv/blob/master/qimgv/sourcecontainers/documentinfo.cpp" }
+          - { text: { en: "Windows codec (extension)", de: "Windows-Codec (Erweiterung)" }, source: "https://apps.microsoft.com/detail/9PG2DK419DRG" }
+      - feature: "RAW"
+        cells:
+          - { text: { en: "Windows codec", de: "Windows-Codec" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "plugin", de: "Plugin" }, source: "https://www.irfanview.com/plugins.htm" }
+          - { mark: yes, source: "https://imageglass.org/docs/supported-formats" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { mark: yes, source: "https://www.faststone.org/FSViewerDetail.htm" }
+          - { mark: yes, source: "https://github.com/sylikc/jpegview/blob/master/README.md" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/easymodo/qimgv/blob/master/README.md" }
+          - { text: { en: "Windows codec (extension)", de: "Windows-Codec (Erweiterung)" }, source: "https://apps.microsoft.com/detail/9NCTDW2W1BH8" }
+  - title: { en: "Image viewers on macOS", de: "Bildbetrachter unter macOS" }
+    intro: { en: "Every entry links its source (the maker's website, documentation, App Store page, release notes or source code); what could not be confirmed there reads “not documented”. “macOS codec” means the program reads the format through Apple's ImageIO. Download is the size of the macOS download. Please report corrections as an issue on GitHub.", de: "Jede Angabe verlinkt ihre Quelle (Website, Dokumentation, App Store, Release-Notizen oder Quellcode des Herstellers); was sich dort nicht belegen ließ, steht als „nicht belegt“. „macOS-Codec“ heißt: Das Programm liest das Format über Apples ImageIO. Download ist die Größe des macOS-Downloads. Korrekturen bitte als Issue auf GitHub." }
+    asOf: 2026-10-26
+    tools:
+      - { name: "amigo-blinzel", own: true }
+      - { name: { en: "Preview", de: "Vorschau" } }
+      - { name: "XnView MP" }
+      - { name: "qView" }
+      - { name: "Pixea" }
+      - { name: "ApolloOne" }
+      - { name: "Phoenix Slides" }
+    rows:
+      - feature: { en: "Checked version", de: "Geprüfte Version" }
+        cells:
+          - { text: { en: "1.2.1 (2026-10-29)", de: "1.2.1 (29.10.2026)" }, source: "https://github.com/amigo-labs/amigo-blinzel/releases/tag/v1.2.1" }
+          - { text: { en: "macOS 27.0.1 (2026-09-28)", de: "macOS 27.0.1 (28.09.2026)" }, source: "https://support.apple.com/en-us/100100" }
+          - { text: { en: "1.12.2 (2026-10-12)", de: "1.12.2 (12.10.2026)" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "7.1 (2025-07-26)", de: "7.1 (26.07.2025)" }, source: "https://github.com/jurplel/qView/releases/tag/7.1" }
+          - { text: { en: "8.4 (2026-10-10)", de: "8.4 (10.10.2026)" }, source: "https://apps.apple.com/us/app/pixea/id1507782672?mt=12" }
+          - { text: { en: "5.1.0 (2026-10-22)", de: "5.1.0 (22.10.2026)" }, source: "https://apps.apple.com/us/app/apolloone-photo-video-viewer/id1044484672?mt=12" }
+          - { text: { en: "1.6.2 (2026-06-17)", de: "1.6.2 (17.06.2026)" }, source: "https://blyt.net/phxslides/" }
+      - feature: { en: "Licence", de: "Lizenz" }
+        cells:
+          - { text: "MIT", source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE" }
+          - { text: { en: "proprietary, part of macOS", de: "proprietär, Teil von macOS" }, source: "https://www.apple.com/legal/sla/docs/macOS27.pdf" }
+          - { text: { en: "freeware, proprietary", de: "Freeware, proprietär" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: "GPL-3.0", source: "https://github.com/jurplel/qView/blob/master/LICENSE" }
+          - { text: { en: "freeware, proprietary (Pixea Plus optional, USD 19.99 once)", de: "Freeware, proprietär (Pixea Plus optional, 22,99 € einmalig)" }, source: "https://apps.apple.com/us/app/pixea/id1507782672?mt=12" }
+          - { text: { en: "free edition, paid Standard/Pro/Max (from USD 14.99/year), proprietary", de: "Gratis-Edition, Standard/Pro/Max kostenpflichtig (ab 17,99 €/Jahr), proprietär" }, source: "https://anogeissus.com/apolloone-faq.html" }
+          - { text: "CC BY-NC-SA 4.0", source: "https://blyt.net/phxslides/" }
+      - feature: { en: "Business use", de: "Firmen" }
+        cells:
+          - { text: { en: "allowed", de: "erlaubt" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE" }
+          - { text: { en: "allowed", de: "erlaubt" }, source: "https://www.apple.com/legal/sla/docs/macOS27.pdf" }
+          - { text: { en: "licence required (from EUR 29)", de: "Lizenz nötig (ab 29 €)" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "allowed", de: "erlaubt" }, source: "https://github.com/jurplel/qView/blob/master/LICENSE" }
+          - { text: { en: "allowed (App Store licence)", de: "erlaubt (App-Store-Lizenz)" }, source: "https://www.apple.com/legal/internet-services/itunes/us/terms.html" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://anogeissus.com/termsofuse.html" }
+          - { mark: no, note: { en: "non-commercial only", de: "nur nicht-kommerziell" }, source: "https://blyt.net/phxslides/" }
+      - feature: { en: "Ads", de: "Werbung" }
+        cells:
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://support.apple.com/guide/preview/open-pdfs-and-images-prvw81f73d4e/mac" }
+          - { text: { en: "none", de: "keine" }, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/jurplel/qView" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://www.imagetasks.com/pixea/" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://anogeissus.com/apolloone.html" }
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/gobbledegook/creevey" }
+      - feature: { en: "Telemetry", de: "Telemetrie" }
+        cells:
+          - { text: { en: "none", de: "keine" }, source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: { en: "Mac Analytics, opt-in", de: "Mac-Analyse, nur mit Zustimmung" }, source: "https://support.apple.com/guide/mac-help/share-analytics-information-mac-mh27990/mac" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { text: { en: "none (update check off by default)", de: "keine (Update-Check standardmäßig aus)" }, source: "https://github.com/jurplel/qView/blob/7.1/src/settingsmanager.cpp" }
+          - { text: { en: "none (Data Not Collected)", de: "keine (keine Daten erfasst)" }, source: "https://apps.apple.com/us/app/pixea/id1507782672?mt=12" }
+          - { text: { en: "usage data for analytics, not linked to you", de: "Nutzungsdaten für Analysen, nicht mit Person verknüpft" }, source: "https://apps.apple.com/us/app/apolloone-photo-video-viewer/id1044484672?mt=12" }
+          - { text: { en: "none (weekly update check, on by default)", de: "keine (wöchentlicher Update-Check, standardmäßig an)" }, source: "https://github.com/gobbledegook/creevey/blob/master/DYVersChecker.m" }
+      - feature: { en: "Native on Apple silicon", de: "Apple Silicon nativ" }
+        cells:
+          - { mark: yes, note: { en: "universal", de: "Universal" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-release/src/macos.rs" }
+          - { mark: yes, source: "https://support.apple.com/en-us/127455" }
+          - { mark: yes, note: { en: "Universal DMG", de: "Universal-DMG" }, source: "https://www.xnview.com/en/xnview-mp/" }
+          - { mark: yes, note: "universal", source: "https://github.com/jurplel/qView/blob/7.1/dist/scripts/build.ps1" }
+          - { mark: yes, source: "https://www.imagetasks.com/pixea/" }
+          - { mark: yes, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { mark: yes, source: "https://blyt.net/phxslides/version.html" }
+      - feature: "Download"
+        cells:
+          - { text: { en: "8.1 MB (app bundle as ZIP)", de: "8,1 MB (App-Bundle als ZIP)" }, source: "https://github.com/amigo-labs/amigo-blinzel/releases/tag/v1.2.1" }
+          - { text: { en: "preinstalled", de: "vorinstalliert" }, source: "https://www.apple.com/legal/sla/docs/macOS27.pdf" }
+          - { text: { en: "136.7 MB", de: "136,7 MB" }, source: "https://download.xnview.com/XnViewMP-mac.dmg" }
+          - { text: { en: "43.1 MB", de: "43,1 MB" }, source: "https://github.com/jurplel/qView/releases/tag/7.1" }
+          - { text: { en: "275.8 MB (App Store)", de: "275,8 MB (App Store)" }, source: "https://apps.apple.com/us/app/pixea/id1507782672?mt=12" }
+          - { text: { en: "38.2 MB (App Store)", de: "38,2 MB (App Store)" }, source: "https://apps.apple.com/us/app/apolloone-photo-video-viewer/id1044484672?mt=12" }
+          - { text: { en: "0.9 MB", de: "0,9 MB" }, source: "https://blyt.net/phxslides/phoenix-slides-162.dmg" }
+      - feature: { en: "Colour profiles", de: "Farbprofile" }
+        cells:
+          - { text: { en: "embedded + monitor", de: "eingebettet + Monitor" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-app/src/macos/color.rs" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://support.apple.com/guide/preview/apply-a-color-profile-to-an-image-prvw41540291/mac" }
+          - { text: { en: "embedded, monitor not documented", de: "eingebettet, Monitor nicht belegt" }, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "embedded + monitor", de: "eingebettet + Monitor" }, source: "https://github.com/jurplel/qView/blob/7.1/src/qvimagecore.cpp" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://www.imagetasks.com/pixea/" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://github.com/gobbledegook/creevey/blob/master/DYImageCache.m" }
+      - feature: "HEIC"
+        cells:
+          - { text: { en: "macOS codec (hardware)", de: "macOS-Codec (Hardware)" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-app/src/macos/imageio.rs" }
+          - { mark: yes, source: "https://support.apple.com/en-us/116944" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/jurplel/qView/blob/7.1/dist/scripts/macdeploy.sh" }
+          - { mark: yes, source: "https://www.imagetasks.com/pixea/" }
+          - { mark: yes, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://github.com/gobbledegook/creevey/blob/master/README.md" }
+      - feature: "AVIF"
+        cells:
+          - { text: { en: "own decoder", de: "eigener Decoder" }, source: "https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://support.apple.com/guide/preview/prvw1012/mac" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/jurplel/kimageformats-binaries/blob/master/pwsh/get-vcpkg-deps.ps1" }
+          - { mark: yes, source: "https://www.imagetasks.com/pixea/" }
+          - { mark: yes, note: { en: "macOS 13+", de: "ab macOS 13" }, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://github.com/gobbledegook/creevey/blob/master/CreeveyController.m" }
+      - feature: "JPEG XL"
+        cells:
+          - { text: { en: "own decoder", de: "eigener Decoder" }, source: "https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://support.apple.com/guide/preview/prvw1012/mac" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/jurplel/kimageformats-binaries/blob/master/pwsh/buildkimageformats.ps1" }
+          - { mark: yes, source: "https://www.imagetasks.com/pixea/" }
+          - { mark: yes, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://github.com/gobbledegook/creevey/blob/master/CreeveyController.m" }
+      - feature: "WebP"
+        cells:
+          - { text: { en: "own decoder", de: "eigener Decoder" }, source: "https://github.com/amigo-labs/amigo-blinzel/tree/main/crates/blinzel-core/src/decode" }
+          - { text: { en: "not documented", de: "nicht belegt" }, source: "https://support.apple.com/guide/preview/prvw1012/mac" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { mark: yes, source: "https://interversehq.com/qview/" }
+          - { mark: yes, source: "https://www.imagetasks.com/pixea/" }
+          - { mark: yes, note: { en: "macOS 11+", de: "ab macOS 11" }, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://github.com/gobbledegook/creevey/blob/master/README.md" }
+      - feature: "RAW"
+        cells:
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-app/src/macos/imageio.rs" }
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://support.apple.com/en-us/127493" }
+          - { mark: yes, source: "https://www.xnview.com/en/faq/" }
+          - { text: { en: "plugin (bundled)", de: "Plugin (mitgeliefert)" }, source: "https://github.com/jurplel/kimageformats-binaries/blob/master/pwsh/get-vcpkg-deps.ps1" }
+          - { mark: yes, source: "https://www.imagetasks.com/pixea/" }
+          - { text: { en: "macOS codec + LibRaw", de: "macOS-Codec + LibRaw" }, source: "https://anogeissus.com/downloads/ApolloOne-Help-en.pdf" }
+          - { text: { en: "macOS codec", de: "macOS-Codec" }, source: "https://github.com/gobbledegook/creevey/blob/master/README.md" }
+  - title: { en: "Batch resizing", de: "Stapelverarbeitung" }
+    intro: { en: "So far only the speed against ImageMagick is measured, on the same files: 8.6 instead of 2.1 photos per second (`blinzel-bench batch`, 12 MP to 1920 px, 4 cores). Every entry links its source (the maker's website, documentation, release notes or source code); what could not be confirmed there reads “not documented”. Please report corrections as an issue on GitHub.", de: "Gemessen ist bisher nur das Tempo gegenüber ImageMagick, auf denselben Dateien: 8,6 statt 2,1 Fotos pro Sekunde (`blinzel-bench batch`, 12 MP auf 1920 px, 4 Kerne). Jede Angabe verlinkt ihre Quelle (Website, Dokumentation, Release-Notizen oder Quellcode des Herstellers); was sich dort nicht belegen ließ, steht als „nicht belegt“. Korrekturen bitte als Issue auf GitHub." }
+    asOf: 2026-10-29
+    tools:
+      - { name: "amigo-blinzel", own: true }
+      - { name: "PowerToys Image Resizer" }
+      - { name: "XnConvert" }
+      - { name: { en: "IrfanView (batch conversion)", de: "IrfanView (Batch-Konvertierung)" } }
+      - { name: "FastStone Photo Resizer" }
+      - { name: "ImageMagick (magick/mogrify)" }
+      - { name: "libvips (vipsthumbnail)" }
+    rows:
+      - feature: { en: "Checked version", de: "Geprüfte Version" }
+        cells:
+          - { text: { en: "1.2.1 (2026-10-29)", de: "1.2.1 (29.10.2026)" }, source: "https://github.com/amigo-labs/amigo-blinzel/releases/tag/v1.2.1" }
+          - { text: { en: "0.102.3001 (2026-10-27)", de: "0.102.3001 (27.10.2026)" }, source: "https://github.com/microsoft/PowerToys/releases/tag/v0.102.3001" }
+          - { text: { en: "1.118.0 (2026-10-12)", de: "1.118.0 (12.10.2026)" }, source: "https://www.xnview.com/en/xnconvert/" }
+          - { text: { en: "4.76 (2026-09-18)", de: "4.76 (18.09.2026)" }, source: "https://www.irfanview.com/main_history.htm" }
+          - { text: { en: "4.5 (2025-12-29)", de: "4.5 (29.12.2025)" }, source: "https://www.faststone.org/FSResizerDetail.htm" }
+          - { text: { en: "7.1.2-34 (2026-10-14)", de: "7.1.2-34 (14.10.2026)" }, source: "https://github.com/ImageMagick/ImageMagick/releases/tag/7.1.2-34" }
+          - { text: { en: "8.18.7 (2026-09-26)", de: "8.18.7 (26.09.2026)" }, source: "https://github.com/libvips/libvips/releases/tag/v8.18.7" }
+      - feature: { en: "Platforms", de: "Plattformen" }
+        cells:
+          - { text: "Windows, macOS, Linux", source: "https://github.com/amigo-labs/amigo-blinzel" }
+          - { text: "Windows", source: "https://learn.microsoft.com/en-us/windows/powertoys/image-resizer" }
+          - { text: "Windows, macOS, Linux", source: "https://www.xnview.com/en/xnconvert/" }
+          - { text: "Windows", source: "https://www.irfanview.com/main_what_is_engl.htm" }
+          - { text: "Windows", source: "https://www.faststone.org/FSResizerDetail.htm" }
+          - { text: "Windows, macOS, Linux", source: "https://imagemagick.org/download/" }
+          - { text: "Windows, macOS, Linux", source: "https://www.libvips.org/install.html" }
+      - feature: { en: "Licence", de: "Lizenz" }
+        cells:
+          - { text: "MIT", source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE" }
+          - { text: "MIT", source: "https://github.com/microsoft/PowerToys/blob/v0.102.3001/LICENSE" }
+          - { text: { en: "freeware (private, education), business: licence from €15", de: "Freeware (privat, Bildung), Firmen: Lizenz ab 15 €" }, source: "https://www.xnview.com/en/xnconvert/" }
+          - { text: { en: "freeware (private, education), business: licence (€15)", de: "Freeware (privat, Bildung), Firmen: Lizenz (15 €)" }, source: "https://www.irfanview.com/main_what_is_engl.htm" }
+          - { text: { en: "freeware (private, education), business: licence (USD 19.95)", de: "Freeware (privat, Bildung), Firmen: Lizenz (19,95 USD)" }, source: "https://www.faststone.org/order.htm" }
+          - { text: { en: "ImageMagick License (open source)", de: "ImageMagick-Lizenz (Open Source)" }, source: "https://imagemagick.org/license/" }
+          - { text: "LGPL-2.1", source: "https://github.com/libvips/libvips/blob/v8.18.7/LICENSE" }
+      - feature: { en: "Interface", de: "Bedienung" }
+        cells:
+          - { text: { en: "GUI (dialog in the viewer)", de: "GUI (Dialog im Viewer)" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-ui/src/batch_dialog.rs" }
+          - { text: { en: "Explorer context menu, GUI, command line", de: "Explorer-Kontextmenü, GUI, Kommandozeile" }, source: "https://learn.microsoft.com/en-us/windows/powertoys/image-resizer" }
+          - { text: "GUI", source: "https://www.xnview.com/en/batch-image-converter/" }
+          - { text: { en: "GUI, command line, Explorer context menu (plugin)", de: "GUI, Kommandozeile, Explorer-Kontextmenü (Plugin)" }, source: ["https://www.irfanview.com/history_old.htm", "https://www.irfanview.com/plugins.htm"] }
+          - { text: "GUI", source: "https://www.faststone.org/FSResizerDetail.htm" }
+          - { text: { en: "command line", de: "Kommandozeile" }, source: "https://imagemagick.org/mogrify/" }
+          - { text: { en: "command line", de: "Kommandozeile" }, source: "https://www.libvips.org/API/current/using-vipsthumbnail.html" }
+      - feature: { en: "Output", de: "Ausgabe" }
+        cells:
+          - { text: "JPEG, PNG, WebP, AVIF", source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/encode.rs" }
+          - { text: { en: "JPEG, PNG (source format)", de: "JPEG, PNG (Format der Quelle)" }, source: "https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Utilities/CodecHelper.cs" }
+          - { text: "JPEG, PNG, WebP, AVIF", source: "https://www.xnview.com/en/batch-image-converter/" }
+          - { text: { en: "JPEG, PNG, WebP (plugin)", de: "JPEG, PNG, WebP (Plugin)" }, source: "https://www.irfanview.com/main_formats.htm" }
+          - { text: "JPEG, PNG", source: "https://www.faststone.org/FSResizerDetail.htm" }
+          - { text: "JPEG, PNG, WebP, AVIF", source: "https://imagemagick.org/formats/" }
+          - { text: { en: "JPEG, PNG, WebP, AVIF (depending on build)", de: "JPEG, PNG, WebP, AVIF (je nach Build)" }, source: "https://github.com/libvips/libvips/blob/v8.18.7/README.md" }
+      - feature: { en: "Size modes", de: "Größenmodi" }
+        cells:
+          - { text: { en: "long edge, width, height, fit in box, fill box (crop), percent", de: "lange Kante, Breite, Höhe, Rahmen, Rahmen füllen (Zuschnitt), Prozent" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/mod.rs" }
+          - { text: { en: "width, height, fit in box, fill box (crop), stretch, percent", de: "Breite, Höhe, Rahmen, Rahmen füllen (Zuschnitt), Strecken, Prozent" }, source: "https://learn.microsoft.com/en-us/windows/powertoys/image-resizer#sizes" }
+          - { text: { en: "long edge, short edge, width, height, fit in box, fill box (crop not documented), megapixels, percent", de: "lange Kante, kurze Kante, Breite, Höhe, Rahmen, Rahmen füllen (Zuschnitt nicht belegt), Megapixel, Prozent" }, source: ["https://www.xnview.com/en/how-to-batch-convert-and-batch-process/", "https://www.xnview.com/en/batch-image-converter/"] }
+          - { text: { en: "long edge, short edge, fit in box (maximum size), megapixels", de: "lange Kante, kurze Kante, Rahmen (Höchstmaße), Megapixel" }, source: "https://www.irfanview.com/history_old.htm" }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { text: { en: "fit in box, fill box (^, no crop), percent, pixel area", de: "Rahmen, Rahmen füllen (^, ohne Zuschnitt), Prozent, Pixelfläche" }, source: "https://imagemagick.org/command-line-processing/#geometry" }
+          - { text: { en: "width, height, fit in box, fill box (crop)", de: "Breite, Höhe, Rahmen, Rahmen füllen (Zuschnitt)" }, source: "https://www.libvips.org/API/current/using-vipsthumbnail.html" }
+      - feature: { en: "Keep EXIF", de: "EXIF behalten" }
+        cells:
+          - { mark: yes, note: { en: "size and orientation updated", de: "Maße und Ausrichtung angepasst" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/meta.rs" }
+          - { mark: yes, source: "https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Models/ResizeOperation.cs" }
+          - { mark: yes, source: "https://www.xnview.com/en/batch-image-converter/" }
+          - { mark: yes, note: { en: "JPEG save option", de: "JPEG-Speicheroption" }, source: "https://www.irfanview.com/faq.htm" }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { mark: yes, source: "https://imagemagick.org/command-line-options/#profile" }
+          - { mark: yes, source: "https://www.libvips.org/API/current/flags.ForeignKeep.html" }
+      - feature: { en: "Remove GPS", de: "GPS entfernen" }
+        cells:
+          - { mark: yes, note: { en: "on its own", de: "einzeln" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/meta.rs" }
+          - { text: { en: "only with all metadata", de: "nur mit allen Metadaten" }, source: "https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Models/ResizeOperation.cs" }
+          - { mark: yes, source: "https://www.xnview.com/en/batch-image-converter/" }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { text: { en: "with the EXIF profile (+profile), on its own not documented", de: "mit dem EXIF-Profil (+profile), einzeln nicht belegt" }, source: "https://imagemagick.org/command-line-options/#profile" }
+          - { text: { en: "with all EXIF data (keep), on its own not documented", de: "mit allen EXIF-Daten (keep), einzeln nicht belegt" }, source: "https://www.libvips.org/API/current/flags.ForeignKeep.html" }
+      - feature: { en: "Keep colour profile", de: "Farbprofil behalten" }
+        cells:
+          - { mark: yes, note: { en: "also in WebP and AVIF", de: "auch in WebP und AVIF" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/encode.rs" }
+          - { text: { en: "PNG yes, JPEG no", de: "PNG ja, JPEG nein" }, source: "https://github.com/microsoft/PowerToys/blob/v0.102.3001/src/modules/imageresizer/ui/Models/ResizeOperation.cs" }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { text: { en: "not documented", de: "nicht belegt" } }
+          - { mark: yes, note: { en: "-thumbnail removes it", de: "-thumbnail entfernt es" }, source: "https://imagemagick.org/command-line-options/#thumbnail" }
+          - { mark: yes, source: "https://www.libvips.org/API/current/flags.ForeignKeep.html" }
+      - feature: { en: "Name pattern", de: "Namensmuster" }
+        cells:
+          - { text: { en: "placeholders, preview old → new", de: "Platzhalter, Vorschau alt → neu" }, source: "https://github.com/amigo-labs/amigo-blinzel/blob/main/crates/blinzel-core/src/batch/naming.rs" }
+          - { text: { en: "placeholders %1–%6; preview not documented", de: "Platzhalter %1–%6; Vorschau nicht belegt" }, source: "https://learn.microsoft.com/en-us/windows/powertoys/image-resizer#file" }
+          - { text: { en: "pattern with counter, date, metadata; preview not documented", de: "Muster mit Zähler, Datum, Metadaten; Vorschau nicht belegt" }, source: "https://www.xnview.com/en/batch-image-converter/" }
+          - { text: { en: "placeholders ($N etc.), test run when renaming", de: "Platzhalter ($N u. a.), Testlauf beim Umbenennen" }, source: ["https://www.irfanview.com/faq.htm", "https://www.irfanview.com/history_old.htm"] }
+          - { text: { en: "sequence number, search/replace, with preview", de: "fortlaufende Nummer, Suchen/Ersetzen, mit Vorschau" }, source: "https://www.faststone.org/FSResizerDetail.htm" }
+          - { text: { en: "placeholders (%[filename:…]), mogrify keeps the name; preview not documented", de: "Platzhalter (%[filename:…]), mogrify behält den Namen; Vorschau nicht belegt" }, source: ["https://imagemagick.org/command-line-processing/#output", "https://imagemagick.org/mogrify/"] }
+          - { text: { en: "placeholders (%s, %d, %c); preview not documented", de: "Platzhalter (%s, %d, %c); Vorschau nicht belegt" }, source: "https://www.libvips.org/API/current/using-vipsthumbnail.html" }
+
+
+downloads:
+  files:
+    - os: windows
+      label: { en: Viewer and installer, de: Viewer und Installer }
+      arch: x64
+      asset: amigo-blinzel-setup-x64.exe
+      note: { en: Windows 11 version 24H2 or newer., de: Windows 11 ab Version 24H2. }
+    - os: windows
+      label: { en: Viewer and installer, de: Viewer und Installer }
+      arch: arm64
+      asset: amigo-blinzel-setup-arm64.exe
+      note: { en: Windows 11 version 24H2 or newer., de: Windows 11 ab Version 24H2. }
+    - os: macos
+      label: DMG
+      arch: universal
+      asset: amigo-blinzel-macos.dmg
+      note: { en: "macOS 14 Sonoma or newer, Apple silicon and Intel in one app.", de: "macOS 14 Sonoma oder neuer, Apple Silicon und Intel in einer App." }
+    - os: linux
+      label: tar.gz
+      arch: x64
+      asset: amigo-blinzel-linux-x64.tar.gz
+      note: { en: "Wayland or X11, glibc 2.35 or newer, a Vulkan or OpenGL ES 3 driver.", de: "Wayland oder X11, glibc ab 2.35, Vulkan- oder OpenGL-ES-3-Treiber." }
+    - os: linux
+      label: tar.gz
+      arch: arm64
+      asset: amigo-blinzel-linux-arm64.tar.gz
+      note: { en: "Wayland or X11, glibc 2.35 or newer, a Vulkan or OpenGL ES 3 driver.", de: "Wayland oder X11, glibc ab 2.35, Vulkan- oder OpenGL-ES-3-Treiber." }
+  checksums: SHA256SUMS
+  install:
+    - label: { en: Linux (after downloading), de: Linux (nach dem Download) }
+      command: tar xzf amigo-blinzel-linux-x64.tar.gz && ./amigo-blinzel/blinzel --install
+  guide:
+    windows:
+      en: |
+        The file is viewer and installer in one and installs for you only, without administrator rights, to `%LOCALAPPDATA%\Programs\amigo-blinzel`.
+
+        The file is not signed with a code signing certificate, so Windows SmartScreen shows “Windows protected your PC” at the first start: click *More info*, then *Run anyway*. To make amigo-blinzel the default for images, use Windows Settings; the setup opens the page if you like. Uninstall: Settings → Apps → Installed apps.
+      de: |
+        Die Datei ist Viewer und Installer zugleich und installiert sich nur für dich, ohne Administratorrechte, nach `%LOCALAPPDATA%\Programs\amigo-blinzel`.
+
+        Die Datei ist nicht mit einem Code-Signing-Zertifikat signiert. Windows SmartScreen zeigt deshalb beim ersten Start „Der Computer wurde durch Windows geschützt“: auf *Weitere Informationen* und dann *Trotzdem ausführen* klicken. Als Standard-App für Bilder legst du amigo-blinzel danach in den Windows-Einstellungen fest; das Setup öffnet die Seite auf Wunsch. Deinstallieren: Einstellungen → Apps → Installierte Apps.
+    macos:
+      en: |
+        Open the DMG and drag `amigo-blinzel.app` onto the Applications folder.
+
+        The app is not notarized by Apple, so macOS reports at the first start that it cannot check it. On macOS 14: Control-click the app in Finder, choose *Open* and confirm. From macOS 15: open the app once and close the message with *Done*, then in System Settings → Privacy & Security, at the bottom next to “amigo-blinzel”, click *Open Anyway* and confirm with your password. This is needed for the first start only; the app downloads updates itself, without this prompt. Or in Terminal:
+
+        ```sh
+        xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app
+        ```
+
+        Make it the default through “Get Info” → “Open with” → “Change All”.
+      de: |
+        Die DMG öffnen und `amigo-blinzel.app` auf den Ordner „Programme“ ziehen.
+
+        Die App ist nicht von Apple notarisiert. macOS meldet deshalb beim ersten Öffnen, dass die App nicht geprüft werden kann. Unter macOS 14: im Finder mit gedrückter Ctrl-Taste auf die App klicken, *Öffnen* wählen und bestätigen. Ab macOS 15: die App einmal öffnen und die Meldung mit *Fertig* schließen, dann in Systemeinstellungen → Datenschutz & Sicherheit ganz unten bei „amigo-blinzel“ auf *Trotzdem öffnen* klicken und mit dem Passwort bestätigen. Das ist nur beim ersten Start nötig; Updates lädt die App selbst und ohne diese Abfrage. Alternativ im Terminal:
+
+        ```sh
+        xattr -dr com.apple.quarantine /Applications/amigo-blinzel.app
+        ```
+
+        Zur Standard-App wird sie über „Informationen“ → „Öffnen mit“ → „Alle ändern“.
+    linux:
+      en: |
+        ```sh
+        tar xzf amigo-blinzel-linux-x64.tar.gz
+        ./amigo-blinzel/blinzel --install
+        ```
+
+        This puts the program in `~/.local/share/amigo-blinzel`, a `blinzel` command in `~/.local/bin` and an entry in the application menu with “Open with” for images. To make it the default image viewer: `xdg-mime default amigo-blinzel.desktop image/jpeg image/png image/webp image/avif`. Uninstall: `blinzel --uninstall`.
+      de: |
+        ```sh
+        tar xzf amigo-blinzel-linux-x64.tar.gz
+        ./amigo-blinzel/blinzel --install
+        ```
+
+        Das legt das Programm nach `~/.local/share/amigo-blinzel`, einen Aufruf `blinzel` nach `~/.local/bin` und einen Eintrag ins Anwendungsmenü mit „Öffnen mit“ für Bilder. Als Standard-Bildbetrachter: `xdg-mime default amigo-blinzel.desktop image/jpeg image/png image/webp image/avif`. Deinstallieren: `blinzel --uninstall`.
+    all:
+      en: |
+        **Checksums:** the checksums of all files are in SHA256SUMS, signed with the project's release key. On Windows: `Get-FileHash amigo-blinzel-setup-x64.exe`; on macOS and Linux: `shasum -a 256` or `sha256sum`.
+
+        **Updates:** amigo-blinzel asks GitHub at most once a day whether there is a new version and installs it silently; it takes effect at the next start. To turn it off: `auto_update = false` in `settings.toml`, on Windows in `%APPDATA%\amigo-blinzel`, on macOS in `~/Library/Application Support/amigo-blinzel`, on Linux in `~/.config/amigo-blinzel`.
+      de: |
+        **Prüfsummen:** Die Prüfsummen aller Dateien stehen in SHA256SUMS, signiert mit dem Release-Schlüssel des Projekts. Unter Windows: `Get-FileHash amigo-blinzel-setup-x64.exe`, unter macOS und Linux: `shasum -a 256` bzw. `sha256sum`.
+
+        **Updates:** amigo-blinzel prüft höchstens einmal am Tag bei GitHub, ob es eine neue Version gibt, und installiert sie still; aktiv wird sie beim nächsten Start. Abschalten: `auto_update = false` in der Datei `settings.toml`, unter Windows in `%APPDATA%\amigo-blinzel`, unter macOS in `~/Library/Application Support/amigo-blinzel`, unter Linux in `~/.config/amigo-blinzel`.
