@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.4.0...v1.5.0) (2026-11-08)
+
+
+### Features
+
+* Bl pixel monogram as app icon and site colour ([bed526b](https://github.com/amigo-labs/amigo-blinzel/commit/bed526b015448e5ab03baae245735e5cc5f4f25b))
+* **race:** benchmark file from blinzel-race, retire the website ([1aee6a3](https://github.com/amigo-labs/amigo-blinzel/commit/1aee6a30eac3ae1c58fbcfea78ef06858da5a912))
+* **race:** blinzel-race site writes the amigo-labs.dev benchmark file ([967eb0a](https://github.com/amigo-labs/amigo-blinzel/commit/967eb0ab304fb76e1847674c57c9e3d201d78cdf)), closes [#50](https://github.com/amigo-labs/amigo-blinzel/issues/50)
+* the Bl pixel monogram as app icon ([7229c7a](https://github.com/amigo-labs/amigo-blinzel/commit/7229c7a3e5e4987a486b9c7643949b2e5f5ae448))
+
+
+### Bug Fixes
+
+* **race:** check out the generated benchmark files with LF ([bfc1c39](https://github.com/amigo-labs/amigo-blinzel/commit/bfc1c39af3c1bf2e5897e91a3daba9da3a9abdf3)), closes [#50](https://github.com/amigo-labs/amigo-blinzel/issues/50)
+
 ## [1.4.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.3.0...v1.4.0) (2026-11-03)
 
 
