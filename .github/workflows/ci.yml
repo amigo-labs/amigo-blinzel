@@ -50,9 +50,12 @@ jobs:
 
   macos:
     name: macOS (app, Metal, bundle)
-    # Apple silicon, macOS 14: the oldest macOS the viewer supports.
-    runs-on: macos-14
+    # Apple silicon. GitHub no longer runs macos-14 ("configuration
+    # 'macos-14-arm64-us-default' is not supported"), so the job runs on
+    # macOS 15 and builds for the oldest macOS the viewer supports, 14.0.
+    runs-on: macos-15
     env:
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
       # The Metal golden test must find a device (the runner's virtual GPU).
       BLINZEL_REQUIRE_GPU: "1"
     steps:
