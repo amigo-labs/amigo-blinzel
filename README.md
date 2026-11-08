@@ -120,8 +120,9 @@ Competitive comparison and website:
 
 ```
 cargo run --release -p blinzel-race -- corpus race-images
-cargo run --release -p blinzel-race -- run race-images --json website/data/race.json        # Windows
-cargo run --release -p blinzel-race -- run race-images --json website/data/race-macos.json  # macOS
+cargo run --release -p blinzel-race -- run race-images --json docs/race/windows.json  # Windows
+cargo run --release -p blinzel-race -- run race-images --json docs/race/macos.json    # macOS
+cargo run -p blinzel-race -- site docs/race/windows.json docs/site/benchmarks/windows.yml
 cargo run --release -p blinzel-site                       # website/dist
 ```
 

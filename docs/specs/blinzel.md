@@ -304,7 +304,7 @@ A dedicated measurement tool for Windows and macOS measures all viewers the same
 - Detection: screen capture on every monitor (viewers open where they last were). Windows: Desktop Duplication, every presented frame delivers `LastPresentTime` (QPC). macOS: ScreenCaptureKit, a frame only arrives when the screen has changed and carries its display time (`mach_absolute_time`). Both reduce each frame to a grid of 40 × 24 sample points.
 - Keys are only sent while the viewer owns the foreground window.
 - A cold run empties the standby list (Windows, administrator rights) or calls `purge` via `sudo` (macOS; the tool itself does not run as root, otherwise the viewers would also start as root).
-- macOS candidates: amigo-blinzel, Preview, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ is no longer distributed). Preview does not flip through the folder for a single file; for it there is only the value for opening. Result in `website/data/race-macos.json`, shown as a separate macOS section.
+- macOS candidates: amigo-blinzel, Preview, XnView MP, qView, Pixea, ApolloOne, Phoenix Slides (Xee³ is no longer distributed). Preview does not flip through the folder for a single file; for it there is only the value for opening. Result in `docs/race/macos.json`, shown as a separate macOS benchmark (`docs/site/benchmarks/macos.yml`).
 - **Candidates (Windows):** IrfanView 64, ImageGlass, XnView MP, FastStone Image Viewer, Windows Photos; optionally JPEGView and qimgv. Each with default settings; versions are logged.
 - **Metrics:**
   1. **Open:** time from process start until the image is visible, warm and cold (standby list emptied). The test images carry a unique color signature.
@@ -466,7 +466,7 @@ First trial runs (laptop, Ryzen 7 PRO 6850H, Radeon 680M, 3 monitors; proof of f
 | ImageGlass 8.8 | 1.8 s | 0.8 s | all, slowly |
 | Windows Photos 2026.11 | 1.2 s | 45 ms | 3 shown, keys swallowed |
 
-Published Windows measurement in `website/data/race.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
+Published Windows measurement in `docs/race/windows.json` (2026-10-26, laptop Ryzen 7 PRO 6850H, 3 monitors): amigo-blinzel 1.1.0 with default settings vs. Windows Photos, without `--cold`. `settle` in the raw data counts from the end of the pause after the last key press and is therefore negative for fast viewers.
 
 ### SIMD levels
 

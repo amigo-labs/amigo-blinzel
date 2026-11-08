@@ -5,6 +5,7 @@
 //! blinzel-race corpus <dir> [--count N]      signature test images (24 MP)
 //! blinzel-race list                          detected viewers and versions
 //! blinzel-race run <dir> [--reps N] [--cold] [--only a,b] [--viewer name=exe]... [--json out.json]
+//! blinzel-race site <report.json> <out.yml>  the benchmark file of amigo-labs.dev
 //! ```
 //!
 //! Run on an otherwise idle machine with one monitor, the console window
@@ -17,6 +18,7 @@ mod corpus;
 #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 mod frames;
 mod signature;
+mod site;
 
 // The measurement needs a screen capture with present times, synthetic
 // key presses and process control: Windows (Desktop Duplication) and macOS
@@ -50,7 +52,7 @@ use std::path::PathBuf;
 fn usage() -> String {
     "usage:\n  blinzel-race corpus <dir> [--count N]\n  blinzel-race list\n  \
      blinzel-race run <dir> [--reps N] [--cold] [--burst N] [--only name,...] \
-     [--viewer name=exe]... [--json out.json]"
+     [--viewer name=exe]... [--json out.json]\n  blinzel-race site <report.json> <out.yml>"
         .into()
 }
 
@@ -71,6 +73,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("corpus") => corpus_cmd(&args[1..]),
+        Some("site") => site_cmd(&args[1..]),
         #[cfg(any(windows, target_os = "macos"))]
         Some("list") => measure::list(),
         #[cfg(any(windows, target_os = "macos"))]
@@ -90,6 +93,19 @@ fn corpus_cmd(args: &[String]) -> Result<(), String> {
         ..Default::default()
     };
     corpus::write(&dir, &spec)
+}
+
+/// Writes the benchmark file amigo-labs.dev shows from a `run --json` report.
+fn site_cmd(args: &[String]) -> Result<(), String> {
+    let [report, out] = args else {
+        return Err(usage());
+    };
+    let text = std::fs::read_to_string(report).map_err(|e| format!("{report}: {e}"))?;
+    let file = site::benchmark_file(&text, &report.replace('\\', "/"))
+        .map_err(|e| format!("{report}: {e}"))?;
+    std::fs::write(out, file).map_err(|e| format!("{out}: {e}"))?;
+    println!("wrote {out}");
+    Ok(())
 }
 
 #[cfg(any(windows, target_os = "macos"))]
