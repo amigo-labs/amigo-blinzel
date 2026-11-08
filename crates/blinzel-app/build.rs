@@ -113,7 +113,9 @@ BEGIN
 END
 "#
     );
-    // The application icon (window, taskbar, tray, Start menu shortcut).
+    // The application icon (window, taskbar, tray, Start menu shortcut):
+    // the pixel monogram from assets/brand/ (build_icon.rs).
+    println!("cargo:rerun-if-changed=../../assets/brand");
     let ico = out.join("blinzel.ico");
     std::fs::write(&ico, icon::ico(&[16, 20, 24, 32, 40, 48, 64, 256])).unwrap();
     let script = format!(

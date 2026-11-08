@@ -33,6 +33,7 @@ IrfanView and ImageGlass are too slow. amigo-blinzel is meant to be measurably f
 | Installer | no installer framework; Windows: the exe installs itself; Linux: `blinzel --install` per user; macOS: drag the app into "Applications" |
 | Signature | **no code signing** (no Authenticode, no Apple notarization); proof of origin is our own Ed25519 signature of the checksums |
 | Updates | **silently in the background**: check at most 1× a day, download the signed update, verify it, active on the next start |
+| App icon | the amigo-labs pixel monogram "Bl" in the `accent` colour, generated into `assets/brand/` by amigo-labs/website `scripts/monogram.ts` from `docs/site/project.yml`, never drawn by hand; macOS uses its `icon.icns`, Linux its `monogram.svg`, Windows packs its PNGs as ICO (`build_icon.rs`). CI (`site-data.yml`) fails when they no longer match `project.yml` |
 | Website | **Cloudflare Workers** (static assets), with competitive comparison and benchmarks |
 
 ## 3. Methodology: benchmark gate "library vs. in-house build"
@@ -143,7 +144,7 @@ Behavior: [jpeg-decoder.md](jpeg-decoder.md). Measurements: [section 15](#jpeg-d
   - A needed LUT is built in parallel with decoding (4–7 ms, cold with DLL loading). Display P3 image (24 MP) cold: first GDI image as without a profile; resident handoff with profile 24–26 ms. The `--resident` start preloads `mscms`.
   - Profiles are read by the probe for JPEG, PNG, WebP, TIFF, JPEG XL (the color space `jxl-oxide` renders into; sRGB yields no profile), and by our own HEIF container reader for HEIC and AVIF (`colr`/`prof`, nclx with P3 primaries as a generated profile), also when WIC decodes. Grayscale and CMYK profiles yield no transform.
   - Behavior: [color-management.md](color-management.md).
-- **App icon:** `build.rs` draws the favicon motif and embeds it as ICO (DIB up to 64 px, PNG for 256 px). Window, taskbar, tray and Start menu shortcut use it.
+- **App icon:** `build.rs` packs the pixel monogram from `assets/brand/` (§2) as ICO with 16, 20, 24, 32, 40, 48, 64 and 256 px: DIBs up to 64 px, the generated PNG for 256 px; 20, 24 and 40 px centre the 16 or 32 px mark unscaled, as the generator does, so no size is blurred. Window, taskbar, tray and Start menu shortcut use it.
 
 ## 6. UI and window behavior
 
@@ -238,7 +239,7 @@ The shells implement the same traits as Windows (`Device`, `Canvas`, `Host`, `Se
 - ImageIO as the system decoder: HEIC goes there first (hardware HEVC, Apple's license) and to the native decoder only if ImageIO fails; every other format goes to the native decoders first (AVIF included) and to ImageIO when they decline; downscaled requests via the thumbnail path.
 - Resident mode with an icon in the menu bar (`NSStatusItem`) instead of a tray; start at sign-in via a LaunchAgent, only for a copy in an app bundle. No warm-up at the `--resident` start.
 - Color management: the target is the display's profile (`CGDisplayCopyColorSpace`), the transform comes from Little CMS; the Metal layer has no color space of its own, so macOS shows its pixels unchanged, as on Windows.
-- App bundle (`blinzel-release macos-bundle`): Info.plist with document types, icon (ICNS from the icon generator), universal binary via `lipo`, signed with our own self-signed certificate (ad hoc without it, see section 10), not notarized. The updater swaps the bundle; the previous one stays next to it for rollback.
+- App bundle (`blinzel-release macos-bundle`): Info.plist with document types, icon (the generated `assets/brand/icon.icns`), universal binary via `lipo`, signed with our own self-signed certificate (ad hoc without it, see section 10), not notarized. The updater swaps the bundle; the previous one stays next to it for rollback.
 - Download: `amigo-blinzel-macos.dmg` (`blinzel-release macos-dmg`: the bundle and a link to /Applications). The updater keeps fetching `amigo-blinzel-macos.zip`, which every release still carries, because installed copies look for that name.
 - dav1d assembly only on x86-64: the published `rav1d` does not contain `src/arm/asm-offsets.h`, which its ARM assembly files include. ARM64 (Mac and Linux) uses the Rust fallbacks.
 

@@ -411,7 +411,6 @@ version = "1.4.0"
 dependencies = [
  "blinzel-core",
  "ed25519-compact",
- "png",
  "toml",
 ]
 
