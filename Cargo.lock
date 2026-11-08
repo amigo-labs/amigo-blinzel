@@ -415,13 +415,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blinzel-site"
-version = "1.4.0"
-dependencies = [
- "blinzel-core",
-]
-
-[[package]]
 name = "blinzel-ui"
 version = "1.4.0"
 dependencies = [

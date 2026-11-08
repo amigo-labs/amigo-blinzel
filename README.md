@@ -78,7 +78,7 @@ Image files are never modified; every result is a new file. Copying finishes ins
 - **Prefetch in the browsing direction.** A priority scheduler with cancellation loads ahead; the results wait as GPU textures.
 - **Parallel startup.** The window is created invisible. Decoding and GPU setup run in parallel, the folder listing in the background. The window appears with the first image.
 - **Native stack per platform.** Win32 + Direct3D 11, AppKit + Metal, winit + wgpu. No runtime; on Windows a static exe of a few MB.
-- **Benchmark gate.** Every library is only a yardstick: where an in-house build is faster, it replaces the library (`crates/blinzel-bench`). The measurements and the comparison with other viewers are on the website.
+- **Benchmark gate.** Every library is only a yardstick: where an in-house build is faster, it replaces the library (`crates/blinzel-bench`). The measurements and the comparison with other viewers are on [amigo-labs.dev/blinzel](https://amigo-labs.dev/blinzel/).
 
 ## Structure
 
@@ -90,9 +90,8 @@ Image files are never modified; every result is a new file. Copying finishes ins
 | `blinzel-i18n` | translations from `i18n/*.toml`, compiled into static tables |
 | `blinzel-app` | the `blinzel` binary: one native shell per platform (Win32/D3D11, AppKit/Metal, winit/wgpu), loading pipeline, system decoders, installer, updater |
 | `blinzel-bench` | test corpus generator and benchmarks library vs. in-house build (`run --check` also verifies that `blinzel-jpeg` is byte-identical) |
-| `blinzel-race` | competitive comparison: measures viewers from the outside, on Windows via Desktop Duplication, on macOS via ScreenCaptureKit |
+| `blinzel-race` | competitive comparison: measures viewers from the outside, on Windows via Desktop Duplication, on macOS via ScreenCaptureKit, and writes the benchmark files of amigo-labs.dev |
 | `blinzel-release` | release tooling: keys, signing and verifying `SHA256SUMS`, macOS app bundle and DMG, license notices |
-| `blinzel-site` | builds the website (`website/`) with the charts as inline SVG |
 
 ## Building
 
@@ -116,14 +115,13 @@ cargo run --release -p blinzel-bench -- run testdata/generated --json bench.json
 target/release/blinzel --bench testdata/generated --json bench-app.json
 ```
 
-Competitive comparison and website:
+Competitive comparison (the page on amigo-labs.dev is built from `docs/site/`):
 
 ```
 cargo run --release -p blinzel-race -- corpus race-images
 cargo run --release -p blinzel-race -- run race-images --json docs/race/windows.json  # Windows
 cargo run --release -p blinzel-race -- run race-images --json docs/race/macos.json    # macOS
 cargo run -p blinzel-race -- site docs/race/windows.json docs/site/benchmarks/windows.yml
-cargo run --release -p blinzel-site                       # website/dist
 ```
 
 ## Releases

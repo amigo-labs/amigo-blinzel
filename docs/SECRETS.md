@@ -8,8 +8,6 @@ All secrets used by the GitHub workflows, what they are for and what happens wit
 | [`MACOS_SIGNING_CERT`](#macos_signing_cert-and-macos_signing_cert_password) | organization | no | `release.yml` | the Mac app is signed ad hoc |
 | [`MACOS_SIGNING_CERT_PASSWORD`](#macos_signing_cert-and-macos_signing_cert_password) | organization | with the certificate | `release.yml` | with the certificate set: the macOS job fails at the keychain import |
 | [`RELEASE_PLEASE_TOKEN`](#release_please_token) | repository | no | `release-please.yml` | no CI runs on the release PR |
-| [`CLOUDFLARE_API_TOKEN`](#cloudflare_api_token-and-cloudflare_account_id) | repository | no | `website.yml` | the workflow builds the website but does not deploy it |
-| [`CLOUDFLARE_ACCOUNT_ID`](#cloudflare_api_token-and-cloudflare_account_id) | repository | no | `website.yml` | as above |
 
 `GITHUB_TOKEN` (`github.token`) is not on this list: GitHub creates it for every run. The release workflow uses it to upload the files and publish the release.
 
@@ -63,11 +61,3 @@ The script creates `~/amigo-labs-signing/signing.p12`, outside any repository, a
 **Important:**
 - Either way, *Allow GitHub Actions to create and approve pull requests* must be on (Settings → Actions → General).
 - A personal access token expires: renew it in time and store the new one as the secret.
-
-## `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
-
-**What they are:** a Cloudflare API token with the permission *Workers Scripts: Edit* and the ID of the Cloudflare account.
-
-**What they do:** with both set, `website.yml` deploys the generated website (`website/dist`) with `wrangler deploy`.
-
-**Currently not needed:** Cloudflare Workers Builds is connected to the repository and builds and deploys the website itself (`wrangler.toml`), including a preview for each branch. Without the secrets the workflow only builds the site ("Cloudflare secrets not set: built only, not deployed"). Set them only if the deployment should move from Workers Builds to GitHub Actions.
