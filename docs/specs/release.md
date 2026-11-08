@@ -26,7 +26,7 @@ Releases are cut without manual steps: release-please turns the Conventional Com
 
 - The winget submission — because `packaging/winget/` holds templates that a person fills and submits after a release (`packaging/winget/README.md`); no workflow does it
 - Notarization and Authenticode — because releases deliberately carry no CA certificate (`blinzel.md` §2)
-- The website deployment (`website.yml`, Cloudflare secrets) — because the website has its own spec
+- The website — because amigo-labs.dev builds the project page from `docs/site/` and the GitHub releases itself
 - Creating the Mac signing certificate (`packaging/macos/create-signing-cert.sh`) — because it is a one-time operator task documented in `docs/SECRETS.md`
 
 ## Acceptance criteria

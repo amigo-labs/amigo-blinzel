@@ -8,7 +8,7 @@ Read this file before starting any task. Re-read Section 3 ("Session management"
 
 ## 1. Project overview
 
-amigo-blinzel is an image viewer for Windows, macOS and Linux with one goal: **maximum speed** when opening an image, when flipping through a folder and for thumbnails, measurably faster than every alternative and proven on the website with reproducible benchmarks. One platform-independent interface (`blinzel-ui`) runs inside one native shell per platform: Win32 + Direct3D 11, AppKit + Metal, winit + wgpu.
+amigo-blinzel is an image viewer for Windows, macOS and Linux with one goal: **maximum speed** when opening an image, when flipping through a folder and for thumbnails, measurably faster than every alternative and proven on amigo-labs.dev/blinzel with reproducible benchmarks. One platform-independent interface (`blinzel-ui`) runs inside one native shell per platform: Win32 + Direct3D 11, AppKit + Metal, winit + wgpu.
 
 The design specification lives in **`docs/specs/blinzel.md`**: goal, decisions (§2), the benchmark gate (§3), architecture, platforms, measurements. It is the source of truth for *what* to build and *why*. The feature specs next to it (`docs/specs/<name>.md`) say what each feature does and prove it with tests. This file is the source of truth for *how* to build it.
 
@@ -234,7 +234,7 @@ target/release/blinzel <image> --exit-after-first-frame --json startup.json
 
 cargo run --release -p blinzel-bench -- corpus testdata/generated
 cargo run --release -p blinzel-bench -- run testdata/generated --check --json bench.json
-cargo run --release -p blinzel-site           # website/dist
+cargo run -p blinzel-race -- site docs/race/windows.json docs/site/benchmarks/windows.yml   # after a new race report
 ```
 
 `.claude/gates.json` holds the gate commands: `fast` (Stop hook) and `full` (`/qa`, the Linux job of `.github/workflows/ci.yml` without its two Xvfb steps). The Xvfb steps (viewer smoke test, X11 display profile) and the Windows and macOS jobs (Direct3D/WARP golden test, benchmarks, Metal golden test, app bundle) run in CI only.
@@ -308,7 +308,6 @@ crates/blinzel-app/           The binary: Windows shell (src/), src/linux/, src/
 crates/blinzel-bench/         Corpus and benchmark gate
 crates/blinzel-race/          Comparison with other viewers
 crates/blinzel-release/       Release tooling (keys, signatures, notices, macOS bundle and DMG)
-crates/blinzel-site/          Website generator (website/ → website/dist)
 packaging/                    winget manifests, macOS signing certificate script
 assets/brand/                 App icon: the pixel monogram, generated from docs/site/project.yml (never edit by hand)
 ```

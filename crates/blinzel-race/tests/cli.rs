@@ -1,5 +1,5 @@
 //! The command line of `blinzel-race`: what it refuses before measuring
-//! (docs/specs/competitive-benchmark.md AC-11, AC-16).
+//! (docs/specs/competitive-benchmark.md AC-11, AC-16, AC-20).
 
 use std::process::{Command, Output};
 
@@ -52,4 +52,26 @@ fn run_without_a_corpus_says_how_to_write_one() {
         "{err}"
     );
     assert!(out.stdout.is_empty(), "measured something: {err}");
+}
+
+/// `site` works on every platform: it only converts a report. A file that
+/// is no report fails naming it, and nothing is written.
+#[test]
+fn site_refuses_a_file_that_is_no_report() {
+    let dir = std::env::temp_dir().join(format!("blinzel-race-site-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let report = dir.join("report.json");
+    let out_file = dir.join("bench.yml");
+    std::fs::write(&report, "{}").unwrap();
+    let out = race(&["site", report.to_str().unwrap(), out_file.to_str().unwrap()]);
+    let written = out_file.exists();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("report.json: not a blinzel-race report: no machine"),
+        "{err}"
+    );
+    assert!(!written && out.stdout.is_empty());
+    assert_usage(&["site", "only-one-argument"]);
 }

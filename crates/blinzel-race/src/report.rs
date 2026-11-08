@@ -1,6 +1,7 @@
 //! What a measurement found and how it is reported, independent of the
 //! platform: images counted in a burst, medians and percentiles, and the
-//! JSON report the website renders (docs/specs/competitive-benchmark.md).
+//! JSON report that `site.rs` turns into the amigo-labs.dev benchmark file
+//! (docs/specs/competitive-benchmark.md).
 
 use blinzel_core::timing::{json_num, json_str};
 
@@ -385,10 +386,10 @@ mod tests {
         assert_eq!(errors[0].as_str(), Some("warm-up: signature 0 not seen"));
     }
 
-    /// The published measurement the website renders has the same shape.
+    /// The published measurement has the same shape.
     #[test]
     fn published_report_has_the_reported_fields() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../website/data/race.json");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/race/windows.json");
         let json = Json::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(keys(json.get("machine").unwrap()), MACHINE_WINDOWS);
         for v in json.get("viewers").and_then(Json::as_array).unwrap() {

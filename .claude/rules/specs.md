@@ -36,5 +36,5 @@ Project knowledge belongs in the repository, not on one machine:
 - **Architecture decisions** → decisions table in `docs/specs/blinzel.md` §2; details in the matching section.
 - **Feature-local decisions** → `## Decisions` of the feature spec, with the reason.
 - **Progress of a feature** → `## Evidence` of the feature spec (there is no separate status file).
-- **Measurements** → `docs/specs/blinzel.md` §15 (and `website/data/` for the published ones).
+- **Measurements** → `docs/specs/blinzel.md` §15 (and `docs/race/` for the published competitive reports).
 - **Never** into auto memory under `~/.claude` — it is switched off for this project because it stays on one machine.

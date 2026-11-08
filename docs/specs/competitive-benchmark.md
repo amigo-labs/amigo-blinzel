@@ -10,7 +10,7 @@ design: [blinzel.md §1, blinzel.md §11, blinzel.md §12 (M8)]
 
 ## Context
 
-The product promise is to be measurably faster than other viewers at opening and flipping through images (`blinzel.md` §1), proven on the website with reproducible numbers. `crates/blinzel-race` measures every viewer the same way from the outside: it starts the viewer with a test image, watches what reaches the screen, sends arrow keys and times when the next image appears. Test images carry a colour signature so a coarse grid of screen samples tells which image is visible, wherever the window is and however it scales. The JSON report is what the website renders (`website.md`).
+The product promise is to be measurably faster than other viewers at opening and flipping through images (`blinzel.md` §1), proven on the website with reproducible numbers. `crates/blinzel-race` measures every viewer the same way from the outside: it starts the viewer with a test image, watches what reaches the screen, sends arrow keys and times when the next image appears. Test images carry a colour signature so a coarse grid of screen samples tells which image is visible, wherever the window is and however it scales. `blinzel-race site` turns the JSON report into the benchmark file that amigo-labs.dev/blinzel shows (`docs/site/benchmarks/`, format "Benchmark files" in amigo-labs/website `docs/project-data.md`), so a new measurement updates the site without hand editing.
 
 Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); macOS uses ScreenCaptureKit (display time, `mach_absolute_time`). The measurement flow is shared.
 
@@ -21,15 +21,16 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 - `blinzel-race corpus <dir> [--count N]`: the signature test images.
 - `blinzel-race list`: the detected viewers and their versions.
 - `blinzel-race run <dir> [--reps N] [--cold] [--burst N] [--only a,b] [--viewer name=path]... [--json out.json]`: open warm, open cold, next image, key repeat; console output and JSON report.
+- `blinzel-race site <report.json> <out.yml>`: the benchmark file of amigo-labs.dev from a report, on every platform.
 - Viewer discovery, launch, focus, input and quit on Windows and macOS.
 
 ### Out of scope
 
-- Linux — because there is no capture with present times implemented there; only `corpus` works.
+- Linux — because there is no capture with present times implemented there; only `corpus` and `site` work.
 - The thumbnail metric (time until a 1000-image grid is filled) — because it is not implemented yet (`blinzel.md` §11 lists it from M4).
 - Batch tool comparisons (vipsthumbnail, XnConvert) — because they are not implemented (`blinzel.md` §7, M9).
 - Resident-mode handoff — because the tool always starts a new process.
-- Rendering the report — because the website spec covers it.
+- Rendering the benchmark file — because amigo-labs.dev (amigo-labs/website) renders it from `docs/site/`.
 
 ## Acceptance criteria
 
@@ -50,15 +51,19 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 - [ ] AC-15 (option): Where `--json out.json` is given, the report holds `machine` (Windows: `cpu`, `logical_cpus`, `ram_gb`, `gpu`, `monitor`, `monitors`, `os_build`; macOS: `os` instead of `os_build`) and per viewer `name`, `version`, `open_warm`, `open_cold`, `next` (each `{median_ms, p95_ms, n, samples_ms}` or `null`), `burst` (`presses`, `shown`, `settle` with `settle` in ms after the last press) and `errors`.
 - [ ] AC-16 (error): If `list` or `run` is called on Linux, or the command is unknown, then the tool prints the usage and exits with status 2.
 - [ ] AC-17 (always, manual: a real measurement): Opening is timed from just before the viewer is launched until the presentation time of the first frame on any monitor that shows image 0's signature; next image from just before the key press until the first frame showing image 1.
+- [ ] AC-18 (event): When `site <report.json> <out.yml>` runs, then it writes the benchmark file of amigo-labs.dev: a header naming the report, title (Windows from `os_build`, macOS from `os`), intro with the measured versions, machine, `method` linking this spec, `better: lower`, `unit: ms`, all texts in English and German, and the groups Open (warm), Open (cold), Next image (median rounded to whole ms as value, p95 as `detail`, from one second on in seconds with two decimals) and Key repeat (median of images shown, `better: higher`, unit `/ <presses>`); a viewer without a value is left out of that group and of the measured versions only if it has none at all, a group without values is left out, amigo-blinzel is `own`.
+- [ ] AC-19 (always): `docs/site/benchmarks/windows.yml` is exactly what `site docs/race/windows.json` writes.
+- [ ] AC-20 (error): If the report is not valid JSON, lacks the machine (with `os_build` or `os`) or the viewers, or has no value at all, then `site` fails with "<report>: …" and status 2 and writes nothing; with other than two arguments it prints the usage.
 
 ## Technical notes
 
-- Files: `crates/blinzel-race/src/main.rs` (commands), `corpus.rs`, `signature.rs` (`COLORS`, `TOLERANCE = 56`, `MIN_MATCHES = 12`, `classify`, `image`), `frames.rs` (`Frames::wait_for`, `since`, `clear`), `race.rs` (`measure`, `navigate`), `plan.rs` (`RunArgs`, `select`, the `Steps` of one viewer and their order in `measure`), `report.rs` (`transitions`, `last_change`, `burst`, `median_p95`, `to_json`, the machine fields), Windows `capture.rs` / `sys.rs` / `viewers.rs`, macOS `capture_macos.rs` / `sys_macos.rs` / `viewers_macos.rs`. `race.rs` and the platform modules compile only on Windows and macOS; `plan.rs` and `report.rs` also in the Linux tests.
+- Files: `crates/blinzel-race/src/main.rs` (commands), `corpus.rs`, `signature.rs` (`COLORS`, `TOLERANCE = 56`, `MIN_MATCHES = 12`, `classify`, `image`), `frames.rs` (`Frames::wait_for`, `since`, `clear`), `race.rs` (`measure`, `navigate`), `plan.rs` (`RunArgs`, `select`, the `Steps` of one viewer and their order in `measure`), `report.rs` (`transitions`, `last_change`, `burst`, `median_p95`, `to_json`, the machine fields), `site.rs` (`benchmark_file`; German names of reported viewers and versions in `GERMAN`), Windows `capture.rs` / `sys.rs` / `viewers.rs`, macOS `capture_macos.rs` / `sys_macos.rs` / `viewers_macos.rs`. `race.rs` and the platform modules compile only on Windows and macOS; `plan.rs` and `report.rs` also in the Linux tests.
 - Sample grid 40 × 24 over each monitor. Windows: one Desktop Duplication thread per output of every adapter; frames with `LastPresentTime == 0` (pointer only) are skipped; a monitor that fails (mode switch, secure desktop) stops reporting while the others go on. macOS: ScreenCaptureKit per display, scaled to 160 × 96 on the GPU.
 - Launch: Windows starts the exe with the path as argument, Windows Photos via `ms-photos:viewer?fileName=…`; macOS `open -a <bundle> <file>`. Quit: `WM_CLOSE` / `NSRunningApplication.terminate`, after 3 s `TerminateProcess` / `SIGKILL`. Focus: Windows a synthetic Alt press plus `SetForegroundWindow`; macOS `open -a` again; foreground check via `GetForegroundWindow` / `CGWindowListCopyWindowInfo` (layer 0). Input: `SendInput` / `CGEvent` Right arrow. The mouse is parked in the middle of the primary monitor before each start.
 - Windows cold start: `NtSetSystemInformation(SystemMemoryListInformation, MemoryPurgeStandbyList)` after enabling `SeProfileSingleProcessPrivilege`; fails with "run as administrator" without elevation.
 - The Windows `blinzel.exe` carries a VERSIONINFO resource (`crates/blinzel-app/build.rs`) so its version is reported.
-- Published measurement: `website/data/race.json` (2026-10-26, Ryzen 7 PRO 6850H laptop, amigo-blinzel 1.1.0 vs. Windows Photos, no `--cold`). `website/data/race-macos.json` does not exist yet.
+- Published measurement: `docs/race/windows.json` (2026-10-26, Ryzen 7 PRO 6850H laptop, amigo-blinzel 1.1.0 vs. Windows Photos, no `--cold`), shown on amigo-labs.dev as `docs/site/benchmarks/windows.yml`. A macOS report goes to `docs/race/macos.json`, its file to `docs/site/benchmarks/macos.yml`, named under `benchmarks` in `docs/site/project.yml`.
+- After a new measurement: `cargo run -p blinzel-race -- site docs/race/windows.json docs/site/benchmarks/windows.yml` (from the repository root, so the header names the report by its relative path).
 
 ## Edge cases
 
@@ -96,6 +101,9 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 | AC-15 | `report_holds_the_machine_and_every_measurement`, `published_report_has_the_reported_fields` (`crates/blinzel-race/src/report.rs`, Linux CI) | built | |
 | AC-16 | `unknown_commands_print_the_usage_and_exit_2`, `list_and_run_print_the_usage_on_linux` (`crates/blinzel-race/tests/cli.rs`, Linux CI) | built | |
 | AC-17 | manual | open | |
+| AC-18 | `writes_every_measured_group_with_median_and_p95`, `windows_machine_names_lose_trademarks_and_integrated_graphics` (`crates/blinzel-race/src/site.rs`, Linux CI) | built | |
+| AC-19 | `published_benchmark_file_is_generated_from_the_report` (`crates/blinzel-race/src/site.rs`, Linux CI) | built | |
+| AC-20 | `reports_without_a_value_or_the_report_shape_are_refused` (`crates/blinzel-race/src/site.rs`), `site_refuses_a_file_that_is_no_report` (`crates/blinzel-race/tests/cli.rs`), Linux CI | built | |
 
 ## Decisions
 
@@ -106,3 +114,4 @@ Windows uses the Desktop Duplication API (frame time `LastPresentTime`, QPC); ma
 - 2026-11-02: The order of a viewer's timed steps and the recording of failures moved from `race.rs` to `plan::measure` over a `Steps` trait (the platform's screen in `race.rs`, a script in the tests), and the `run` options to `plan::RunArgs`; `measure` returns a result rather than an error, so a failing viewer cannot stop the run. `cold_starts_follow_the_warm_ones_until_the_first_failure` checks the order AC-07 and AC-08 name, but those stay manual: only a real desktop shows that the steps reach the viewer.
 - 2026-11-02: A `--viewer` override now takes the place of the detected viewer of the same name instead of moving it to the end, so a development build of amigo-blinzel is still measured first.
 - 2026-11-02: Viewer discovery takes its search roots as an argument (`detect_in`), so the Windows and macOS tests place stand-in executables and bundles in a temporary folder; the macOS test also finds the real Preview with a version, which is what `list` prints on every Mac. These tests compile only for Windows and macOS (type-checked and clippy-clean from Linux, not run): their first CI run is their proof, so AC-13 stays open until then.
+- 2026-11-08: The website moved to amigo-labs.dev (issue #50). `site` writes its benchmark file from the report, so the published numbers have one source; raw reports moved from `website/data/race.json` to `docs/race/windows.json`. The file is YAML written by hand-rolled code (strings JSON-quoted, which YAML reads as double-quoted scalars), so no YAML dependency. German texts live in `site.rs`, not in `i18n/`: they are the site's, not the app's. The cold opening is a group of its own when measured, since the format has one value per result.
