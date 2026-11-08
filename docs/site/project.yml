@@ -3,9 +3,9 @@
 # links and release notes come from the GitHub releases, not from this file.
 schema: 1
 slug: blinzel
-name: amigo-blinzel
+name: Blinzel
 status: released
-accent: "#3d8bff"
+accent: "#ff4757"
 icon: icon.svg
 tagline:
   en: Open images, page, resize.

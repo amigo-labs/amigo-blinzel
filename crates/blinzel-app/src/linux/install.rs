@@ -28,7 +28,9 @@ pub const MIME_TYPES: &[&str] = &[
     "image/jxl",
 ];
 
-const ICON: &[u8] = include_bytes!("../../../../packaging/linux/amigo-blinzel.svg");
+/// The scalable app icon: the pixel monogram generated into `assets/brand/`
+/// (the website's `scripts/monogram.ts`, from `docs/site/project.yml`).
+const ICON: &[u8] = include_bytes!("../../../../assets/brand/monogram.svg");
 
 /// Where an installation lives. [`Layout::user`] is the real one; tests use
 /// [`Layout::under`].
@@ -343,7 +345,10 @@ mod tests {
         let entry = std::fs::read_to_string(layout.desktop_file()).unwrap();
         assert!(entry.contains(&format!("Exec={} %f", layout.exe().display())));
         assert!(entry.contains("MimeType=image/jpeg;"));
-        assert!(layout.icon().exists());
+        assert_eq!(
+            std::fs::read(layout.icon()).unwrap(),
+            include_bytes!("../../../../assets/brand/monogram.svg")
+        );
         // Again (an update in place): still fine.
         install(&layout, &source).unwrap();
         // From the installed copy itself: nothing to copy.

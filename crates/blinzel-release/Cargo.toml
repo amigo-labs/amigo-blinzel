@@ -12,5 +12,3 @@ blinzel-core.workspace = true
 # Key generation needs the OS random number generator.
 ed25519-compact = { workspace = true, features = ["random"] }
 toml.workspace = true
-# The app icon for the macOS bundle (shared generator in blinzel-app).
-png.workspace = true

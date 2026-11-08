@@ -16,10 +16,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-#[path = "../../blinzel-app/build_icon.rs"]
-#[allow(dead_code)]
-mod icon;
-
 pub const BUNDLE_ID: &str = "io.github.amigo-labs.blinzel";
 const EXECUTABLE: &str = "blinzel";
 const ICON: &str = "amigo-blinzel";
@@ -45,6 +41,11 @@ const TYPES: &[&str] = &[
     "com.adobe.photoshop-image",
     "com.microsoft.ico",
 ];
+
+/// The app icon: the pixel monogram as ICNS, generated into `assets/brand/`
+/// by the website's `scripts/monogram.ts` from `docs/site/project.yml`,
+/// never drawn by hand.
+const ICON_ICNS: &[u8] = include_bytes!("../../../assets/brand/icon.icns");
 
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -152,7 +153,7 @@ pub fn bundle(out: &Path, executables: &[&Path], version: &str) -> Result<(), St
     let pkginfo = contents.join("PkgInfo");
     fs::write(&pkginfo, "APPL????").map_err(io(&pkginfo))?;
     let icns = resources.join(format!("{ICON}.icns"));
-    fs::write(&icns, icon::icns()).map_err(io(&icns))?;
+    fs::write(&icns, ICON_ICNS).map_err(io(&icns))?;
     if cfg!(target_os = "macos") {
         // Apple silicon runs only signed code; ad hoc needs no identity.
         let identity = sign_identity(std::env::var(SIGN_IDENTITY_ENV).ok());
@@ -225,6 +226,21 @@ pub fn dmg(_app: &Path, _out: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The ICNS types in `ICON_ICNS` and the pixel size of their PNG; the @2x
+    /// types share images with the next size up.
+    const ICNS: [(&[u8; 4], u32); 10] = [
+        (b"icp4", 16),
+        (b"icp5", 32),
+        (b"ic11", 32),
+        (b"ic12", 64),
+        (b"ic07", 128),
+        (b"ic13", 256),
+        (b"ic08", 256),
+        (b"ic14", 512),
+        (b"ic09", 512),
+        (b"ic10", 1024),
+    ];
+
     #[test]
     fn writes_a_bundle() {
         let dir = std::env::temp_dir().join(format!("blinzel-bundle-{}", std::process::id()));
@@ -245,6 +261,7 @@ mod tests {
             u32::from_be_bytes(icns[4..8].try_into().unwrap()) as usize,
             icns.len()
         );
+        assert_eq!(icns, ICON_ICNS);
         assert!(app.join("Contents/MacOS/blinzel").exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -258,13 +275,22 @@ mod tests {
     }
 
     #[test]
-    fn icns_entries_are_pngs() {
-        let icns = icon::icns();
+    fn icns_entries_are_the_monogram_pngs() {
+        let icns = ICON_ICNS;
+        assert_eq!(&icns[..4], b"icns");
         let mut at = 8;
         let mut n = 0;
         while at < icns.len() {
             let len = u32::from_be_bytes(icns[at + 4..at + 8].try_into().unwrap()) as usize;
-            assert_eq!(&icns[at + 8..at + 12], b"\x89PNG");
+            let (kind, size) = ICNS[n];
+            assert_eq!(&icns[at..at + 4], kind);
+            // The generated PNG of that size, byte for byte.
+            let image = &icns[at + 8..at + len];
+            let path = format!(
+                "{}/../../assets/brand/icon-{size}.png",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            assert_eq!(image, &fs::read(&path).unwrap()[..], "{path}");
             at += len;
             n += 1;
         }

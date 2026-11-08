@@ -309,7 +309,8 @@ crates/blinzel-bench/         Corpus and benchmark gate
 crates/blinzel-race/          Comparison with other viewers
 crates/blinzel-release/       Release tooling (keys, signatures, notices, macOS bundle and DMG)
 crates/blinzel-site/          Website generator (website/ → website/dist)
-packaging/                    winget manifests, Linux icon, macOS signing certificate script
+packaging/                    winget manifests, macOS signing certificate script
+assets/brand/                 App icon: the pixel monogram, generated from docs/site/project.yml (never edit by hand)
 ```
 
 ---

@@ -1,30 +1,64 @@
-//! The generated application icon (build_icon.rs, embedded by build.rs).
+//! The application icon (build_icon.rs, embedded by build.rs): the pixel
+//! monogram generated into `assets/brand/`.
 
 #[path = "../build_icon.rs"]
 mod icon;
+
+const MONOGRAM_JSON: &str = include_str!("../../../assets/brand/monogram.json");
 
 fn pixel(px: &[u8], size: u32, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * size + x) * 4) as usize;
     [px[i], px[i + 1], px[i + 2], px[i + 3]]
 }
 
+/// The `accent` colour recorded in monogram.json, as RGB.
+fn accent() -> [u8; 3] {
+    let key = "\"accent\": \"#";
+    let at = MONOGRAM_JSON.find(key).expect("accent in monogram.json") + key.len();
+    let hex = &MONOGRAM_JSON[at..at + 6];
+    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex accent");
+    [byte(0), byte(2), byte(4)]
+}
+
 #[test]
-fn draws_the_favicon() {
-    let size = 32;
-    let px = icon::rgba(size);
-    // Rounded corner: transparent.
-    assert_eq!(pixel(&px, size, 0, 0)[3], 0);
-    // Square left of the eye, and the pupil: opaque blue.
-    assert_eq!(pixel(&px, size, 2, 16), [0, 120, 212, 255]);
-    assert_eq!(pixel(&px, size, 16, 16), [0, 120, 212, 255]);
-    // Between upper lid and pupil: white.
-    assert_eq!(pixel(&px, size, 16, 9), [255, 255, 255, 255]);
-    // Symmetric about both axes.
-    for y in 0..size {
-        for x in 0..size {
-            let p = pixel(&px, size, x, y);
-            assert_eq!(p, pixel(&px, size, size - 1 - x, y), "({x}, {y})");
-            assert_eq!(p, pixel(&px, size, x, size - 1 - y), "({x}, {y})");
+fn uses_the_generated_monogram() {
+    let [r, g, b] = accent();
+    for (size, _) in icon::BRAND {
+        let px = icon::rgba(size);
+        assert_eq!(px.len(), (size * size * 4) as usize, "{size} px");
+        // The letters are drawn in the accent colour.
+        assert!(
+            px.as_chunks::<4>().0.contains(&[r, g, b, 255]),
+            "{size} px has no accent pixel"
+        );
+        // Not the old eye: no pixel in its blue.
+        assert!(
+            !px.as_chunks::<4>()
+                .0
+                .iter()
+                .any(|p| p[..3] == [0, 120, 212] && p[3] > 0),
+            "{size} px still shows the eye"
+        );
+    }
+}
+
+#[test]
+fn sizes_without_a_png_centre_the_small_mark_unscaled() {
+    for (size, inner) in [(20, 16), (24, 16), (40, 32)] {
+        let px = icon::rgba(size);
+        let src = icon::rgba(inner);
+        let offset = (size - inner) / 2;
+        for y in 0..size {
+            for x in 0..size {
+                let inside =
+                    (offset..offset + inner).contains(&x) && (offset..offset + inner).contains(&y);
+                let want = if inside {
+                    pixel(&src, inner, x - offset, y - offset)
+                } else {
+                    [0; 4]
+                };
+                assert_eq!(pixel(&px, size, x, y), want, "{size} px at ({x}, {y})");
+            }
         }
     }
 }
@@ -44,11 +78,11 @@ fn from_dib(data: &[u8], size: u32) -> Vec<u8> {
 
 #[test]
 fn packs_dib_and_png_entries() {
-    let sizes = [16, 32, 256];
+    let sizes = [16, 20, 32, 256];
     let ico = icon::ico(&sizes);
     let u16_at = |i: usize| u16::from_le_bytes([ico[i], ico[i + 1]]);
     let u32_at = |i: usize| u32::from_le_bytes(ico[i..i + 4].try_into().unwrap());
-    assert_eq!((u16_at(0), u16_at(2), u16_at(4)), (0, 1, 3));
+    assert_eq!((u16_at(0), u16_at(2), u16_at(4)), (0, 1, 4));
     for (k, &size) in sizes.iter().enumerate() {
         let entry = 6 + 16 * k;
         let dim = if size == 256 { 0 } else { size as u8 };
@@ -60,11 +94,7 @@ fn packs_dib_and_png_entries() {
             assert_eq!(from_dib(data, size), icon::rgba(size));
             continue;
         }
-        let decoder = png::Decoder::new(std::io::Cursor::new(data));
-        let mut reader = decoder.read_info().expect("valid png");
-        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut buf).unwrap();
-        assert_eq!((info.width, info.height), (size, size));
-        assert_eq!(&buf[..info.buffer_size()], &icon::rgba(size)[..]);
+        // The 256 px entry is the generated PNG itself.
+        assert_eq!(Some(data), icon::png(256));
     }
 }

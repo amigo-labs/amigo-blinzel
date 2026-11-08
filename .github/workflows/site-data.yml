@@ -1,0 +1,22 @@
+name: Site data
+
+# Validates docs/site/ (the page on amigo-labs.dev) against the website's
+# schema and fails when assets/brand/ (the app icons made from the pixel
+# monogram) no longer matches docs/site/project.yml. Regenerate with
+# `node scripts/monogram.ts amigo-labs/amigo-blinzel --out ../amigo-blinzel/assets/brand`
+# in amigo-labs/website.
+
+on:
+  pull_request:
+    paths:
+      - "docs/site/**"
+      - "assets/brand/**"
+      - ".github/workflows/site-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  site-data:
+    uses: amigo-labs/website/.github/workflows/validate-project.yml@main
