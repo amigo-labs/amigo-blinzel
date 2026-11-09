@@ -1,71 +1,42 @@
-// Shared by the project hooks and the gate scripts. Plain Node without
-// dependencies, so the hooks run in every clone. `.mjs` because a `.js` file
-// would be ESM or CommonJS depending on the nearest package.json.
+// Gate tooling shared by the qa, spec-build and spec-check skills and by the
+// agent adapters (e.g. the Claude Code hooks). Plain Node without
+// dependencies, so it runs in every clone and under every agent. `.mjs`
+// because a `.js` file would be ESM or CommonJS depending on the nearest
+// package.json.
+//
+// Source of truth: https://github.com/amigo-labs/skills (skills/qa/scripts/).
+// A consuming repository vendors it with `node .agents/sync.mjs`; edit it
+// there, not in the copy.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Claude Code writes one JSON document to stdin. On Windows the stream's 'end'
-// does not reliably follow, so parse on every chunk and settle as soon as the
-// document is complete; the idle timeout is only the fallback.
-const STDIN_IDLE_TIMEOUT_MS = 1000;
+/** Where the gate configuration lives, relative to the repository root, in lookup order. */
+export const GATES_FILES = ['.agents/gates.json', '.claude/gates.json'];
 
-export function readStdinJson() {
-  return new Promise(resolve => {
-    let data = '';
-    let settled = false;
-    let timer = null;
-
-    const settle = value => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      try {
-        process.stdin.destroy();
-      } catch {
-        // ignore
-      }
-      resolve(value);
-    };
-    const tryParse = () => {
-      try {
-        return JSON.parse(data);
-      } catch {
-        return undefined;
-      }
-    };
-    const arm = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => settle(tryParse() ?? {}), STDIN_IDLE_TIMEOUT_MS);
-    };
-
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => {
-      data += chunk;
-      arm();
-      if (!/\}\s*$/.test(data)) return;
-      const parsed = tryParse();
-      if (parsed !== undefined) settle(parsed);
-    });
-    process.stdin.on('end', () => settle(tryParse() ?? {}));
-    process.stdin.on('error', () => settle({}));
-    arm();
-  });
+/** The repository root: the scripts sit at <root>/<agent dir>/skills/qa/scripts/. */
+export function repoRootFromScript(scriptUrl) {
+  return resolve(dirname(fileURLToPath(scriptUrl)), '..', '..', '..', '..');
 }
 
-export function projectDir(input) {
-  return process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
-}
-
+/** The gate configuration of a repository, or null when there is none (or it is broken). */
 export function loadGates(dir) {
-  try {
-    return JSON.parse(readFileSync(join(dir, '.claude', 'gates.json'), 'utf8'));
-  } catch {
-    return null;
+  for (const file of GATES_FILES) {
+    let text;
+    try {
+      text = readFileSync(join(dir, file), 'utf8');
+    } catch {
+      continue;
+    }
+    try {
+      return { ...JSON.parse(text), $file: file };
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 const MAX_GATE_OUTPUT = 32 * 1024 * 1024;
@@ -83,7 +54,7 @@ function killTree(child) {
 }
 
 function runGate(dir, gate, timeoutMs) {
-  return new Promise(resolve => {
+  return new Promise(resolvePromise => {
     const started = Date.now();
     let output = '';
     let timedOut = false;
@@ -92,7 +63,7 @@ function runGate(dir, gate, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ status: timedOut ? 'timeout' : status, output, durationMs: Date.now() - started });
+      resolvePromise({ status: timedOut ? 'timeout' : status, output, durationMs: Date.now() - started });
     };
 
     // Detached only outside Windows, for the process group the timeout kills:
@@ -141,7 +112,7 @@ export function runGates(dir, gates, { timeoutMs, onSettled = () => {} }) {
   const results = gates.map(() => undefined);
   let running = 0;
 
-  return new Promise(resolve => {
+  return new Promise(resolvePromise => {
     const finish = (index, result) => {
       results[index] = { gate: gates[index], ...result };
       onSettled(results[index]);
@@ -173,7 +144,7 @@ export function runGates(dir, gates, { timeoutMs, onSettled = () => {} }) {
       for (const index of gates.keys()) {
         if (!results[index]) finish(index, { status: 'skipped', output: '', durationMs: 0, blockedBy: null });
       }
-      resolve(results);
+      resolvePromise(results);
     };
 
     schedule();
@@ -190,107 +161,17 @@ export function errorLines(output, max) {
   return (errors.length > 0 ? errors : lines.slice(-max)).slice(0, max);
 }
 
-function git(dir, args) {
-  const result = spawnSync('git', ['-C', dir, ...args], { encoding: 'buffer', timeout: 10000, maxBuffer: 64 * 1024 * 1024 });
-  return result.status === 0 ? result.stdout : null;
-}
-
-export function headCommit(dir) {
-  return git(dir, ['rev-parse', 'HEAD'])?.toString('utf8').trim() ?? null;
-}
-
-/** Repository-relative paths (forward slashes) of every uncommitted change. */
-function uncommittedPaths(dir) {
-  const status = git(dir, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
-  if (status === null) return null;
-  const paths = [];
-  const entries = status.toString('utf8').split('\0');
-  for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index];
-    if (entry.length < 4) continue;
-    paths.push(entry.slice(3));
-    // Renames and copies carry their original path as the next entry
-    if (entry[0] === 'R' || entry[0] === 'C') paths.push(entries[++index]);
-  }
-  return paths.filter(Boolean);
-}
-
-/**
- * A fingerprint of the working tree: HEAD plus every uncommitted path and its
- * content. Equal fingerprints mean nothing changed since the last check.
- */
-export function treeState(dir) {
-  const head = git(dir, ['rev-parse', 'HEAD']) ?? Buffer.alloc(0);
-  const paths = uncommittedPaths(dir);
-  if (paths === null) return null;
-
-  const hash = createHash('sha256').update(head);
-  for (const filePath of paths) {
-    try {
-      hash.update(filePath).update(readFileSync(join(dir, filePath)));
-    } catch {
-      hash.update(filePath).update('<deleted>');
-    }
-  }
-  return { hash: hash.digest('hex'), dirty: paths.length > 0 };
-}
-
-/**
- * Paths changed in this session: everything uncommitted plus what the commits
- * since `baseHead` touched. Without a base only the uncommitted paths count.
- */
-export function changedPaths(dir, baseHead) {
-  const paths = new Set(uncommittedPaths(dir) ?? []);
-  if (baseHead) {
-    const committed = git(dir, ['diff', '--name-only', '-z', baseHead, 'HEAD']);
-    for (const path of committed?.toString('utf8').split('\0') ?? []) if (path) paths.add(path);
-  }
-  return [...paths].map(path => path.replaceAll('\\', '/'));
-}
-
-/** Whether a gate concerns the given changes: no `paths` means always. */
-export function gateApplies(gate, paths) {
-  if (!Array.isArray(gate.paths)) return true;
-  return paths.some(path => gate.paths.some(prefix => path.startsWith(prefix)));
-}
-
-function stateFile(dir, sessionId) {
-  const key = createHash('sha256')
-    .update(`${dir}\0${sessionId ?? 'unknown'}`)
-    .digest('hex')
-    .slice(0, 24);
-  return join(tmpdir(), 'claude-gates', `${key}.json`);
-}
-
-export function loadState(dir, sessionId) {
-  try {
-    return JSON.parse(readFileSync(stateFile(dir, sessionId), 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-export function saveState(dir, sessionId, state) {
-  const folder = join(tmpdir(), 'claude-gates');
-  if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
-  writeFileSync(stateFile(dir, sessionId), JSON.stringify(state));
-}
-
 /**
  * Whether the spec skills commit without asking: on unless the developer sets
- * SPEC_AUTOCOMMIT=false (e.g. under `env` in .claude/settings.local.json).
- * Committing on someone's behalf is up to that person, so this is never read
- * from a tracked file.
+ * SPEC_AUTOCOMMIT=false in their environment (for Claude Code e.g. under `env`
+ * in .claude/settings.local.json). Committing on someone's behalf is up to
+ * that person, so this is never read from a tracked file.
  */
 export function commitMode(env = process.env) {
   const value = env.SPEC_AUTOCOMMIT;
   if (value === undefined || value === '' || value === 'true') return { autoCommit: true };
   if (value === 'false') return { autoCommit: false };
   return { autoCommit: true, problem: `invalid SPEC_AUTOCOMMIT=${JSON.stringify(value)} (allowed: true, false)` };
-}
-
-export function print(output) {
-  process.stdout.write(JSON.stringify(output));
 }
 
 /** The lines of a level-2 section up to the next level-2 heading. */

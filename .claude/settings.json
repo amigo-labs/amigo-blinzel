@@ -48,10 +48,12 @@
     "ask": [
       "Edit(**/.claude/settings.json)",
       "Edit(**/.claude/hooks/**)",
-      "Edit(**/.claude/gates.json)",
+      "Edit(**/.agents/gates.json)",
+      "Edit(**/.agents/skills/qa/scripts/**)",
       "Write(**/.claude/settings.json)",
       "Write(**/.claude/hooks/**)",
-      "Write(**/.claude/gates.json)"
+      "Write(**/.agents/gates.json)",
+      "Write(**/.agents/skills/qa/scripts/**)"
     ]
   }
 }

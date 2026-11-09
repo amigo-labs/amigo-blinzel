@@ -1,6 +1,6 @@
 # Feature specs
 
-One feature spec per feature, with testable acceptance criteria (ACs) and the tests that prove them. Written with `/spec`, built with `/spec-build`, accepted with `/spec-check` (`.claude/rules/specs.md`). The goal, the decisions, the architecture and the measurements they build on are in the design spec [`blinzel.md`](blinzel.md).
+One feature spec per feature, with testable acceptance criteria (ACs) and the tests that prove them. Written with `/spec`, built with `/spec-build`, accepted with `/spec-check` (AGENTS.md, "Spec-driven workflow"). The goal, the decisions, the architecture and the measurements they build on are in the design spec [`blinzel.md`](blinzel.md).
 
 All specs below were extracted from the code on 2026-11-02 (`/spec-extract`). They describe what the code does today. An AC is **proven** when an existing test checks exactly that behavior. Tests marked `CI: windows` / `CI: macos` run only in that CI job, and `manual` ACs need a person on that platform. Specs that `/spec-check` has accepted move to [Done](#done); every spec in the order below still has ACs without a test. `/spec-build <name>` writes the missing tests (and fixes what they find), and `/spec-check <name>` then accepts the spec.
 

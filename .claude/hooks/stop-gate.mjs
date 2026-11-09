@@ -1,5 +1,5 @@
 // Stop: before Claude may end a turn that changed code, the fast gates from
-// .claude/gates.json must be green. A red gate blocks the stop and hands
+// the gate configuration (.agents/gates.json) must be green. A red gate blocks the stop and hands
 // Claude the errors -- deterministic, unlike a rule that asks for the same
 // thing. Gates without `needs` between them run at the same time, and one
 // block names every red gate.
@@ -30,7 +30,7 @@ import {
   runGates,
   saveState,
   treeState,
-} from './lib.mjs';
+} from './hook-lib.mjs';
 
 const MAX_BLOCKS = 3;
 const MAX_ERROR_LINES = 30;
