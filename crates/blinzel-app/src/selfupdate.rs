@@ -338,7 +338,7 @@ mod tests {
         save_state(&served, &recent);
         assert_eq!(
             manual_check(Ok(served)),
-            format!("amigo-blinzel {} is up to date.", running_version())
+            format!("Blinzel {} is up to date.", running_version())
         );
         assert_eq!(*asked.lock().unwrap(), [core::latest_release_url()]);
         assert_eq!(load_state(&Fake(dir.clone())), recent);
@@ -396,7 +396,7 @@ mod tests {
         let v = Version::parse("1.3.0").unwrap();
         assert_eq!(
             notice_text(Ok(Outcome::Current(v))),
-            "amigo-blinzel 1.3.0 is up to date."
+            "Blinzel 1.3.0 is up to date."
         );
         assert_eq!(
             notice_text(Ok(Outcome::Installed(v))),
