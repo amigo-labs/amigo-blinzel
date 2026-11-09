@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.5.0...v1.6.0) (2026-11-09)
+
+
+### Features
+
+* the app is called Blinzel ([0f333a1](https://github.com/amigo-labs/amigo-blinzel/commit/0f333a13b3d3c33759c55f434b18495f9b2d83a6))
+
+
+### Bug Fixes
+
+* **app:** tray icon fills its slot at 125 % and 150 % scaling ([362bb05](https://github.com/amigo-labs/amigo-blinzel/commit/362bb057247f6eeb4bd697f4e338a2e23d676f8d))
+
 ## [1.5.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.4.0...v1.5.0) (2026-11-08)
 
 
