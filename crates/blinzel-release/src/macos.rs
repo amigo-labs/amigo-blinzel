@@ -67,7 +67,7 @@ pub fn info_plist(version: &str) -> String {
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>amigo-blinzel</string>
+	<string>Blinzel</string>
 	<key>CFBundleExecutable</key>
 	<string>{EXECUTABLE}</string>
 	<key>CFBundleIconFile</key>
@@ -77,7 +77,7 @@ pub fn info_plist(version: &str) -> String {
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>amigo-blinzel</string>
+	<string>Blinzel</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -93,7 +93,7 @@ pub fn info_plist(version: &str) -> String {
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>amigo-blinzel captures the part of the screen you pick for a screenshot.</string>
+	<string>Blinzel captures the part of the screen you pick for a screenshot.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -200,7 +200,7 @@ pub fn dmg(app: &Path, out: &Path) -> Result<(), String> {
         std::os::unix::fs::symlink("/Applications", staging.join("Applications"))
             .map_err(|e| format!("Applications link: {e}"))?;
         let ok = Command::new("hdiutil")
-            .args(["create", "-volname", "amigo-blinzel", "-fs", "HFS+"])
+            .args(["create", "-volname", "Blinzel", "-fs", "HFS+"])
             .args(["-format", "UDZO", "-ov", "-srcfolder"])
             .arg(&staging)
             .arg(out)
@@ -255,6 +255,12 @@ mod tests {
         assert!(plist.contains("<string>public.heic</string>"));
         assert!(plist.contains(BUNDLE_ID));
         assert!(plist.contains("<key>NSScreenCaptureUsageDescription</key>"));
+        // The name in Finder, the Dock and the menu bar; the bundle keeps
+        // amigo-blinzel.app for the updater.
+        for key in ["CFBundleName", "CFBundleDisplayName"] {
+            let entry = format!("<key>{key}</key>\n\t<string>Blinzel</string>");
+            assert!(plist.contains(&entry), "{key}");
+        }
         let icns = fs::read(app.join("Contents/Resources/amigo-blinzel.icns")).unwrap();
         assert_eq!(&icns[..4], b"icns");
         assert_eq!(

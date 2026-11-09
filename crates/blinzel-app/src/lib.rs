@@ -1,6 +1,11 @@
 //! amigo-blinzel's platform shells around `blinzel-ui`: Windows (Win32,
 //! Direct3D 11), Linux (winit, wgpu) and macOS (AppKit, Metal).
 
+/// The name people see: Start menu, "Installed apps", default apps, the
+/// Linux app menu (and `app_name` in i18n/). Folders, registry keys,
+/// release assets and the repository keep `amigo-blinzel`.
+pub const DISPLAY_NAME: &str = "Blinzel";
+
 #[cfg(unix)]
 pub mod curl;
 #[cfg(unix)]

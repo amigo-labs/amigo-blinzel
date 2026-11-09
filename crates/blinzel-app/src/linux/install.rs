@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 
 use blinzel_i18n::{Msg, tr, trf};
 
+use crate::DISPLAY_NAME;
+
+/// Folders; the desktop entry shows [`DISPLAY_NAME`].
 pub const PRODUCT: &str = "amigo-blinzel";
 pub const EXE_NAME: &str = "blinzel";
 /// The desktop entry's id; also the window's app id / WM_CLASS, so the
@@ -203,7 +206,7 @@ pub fn desktop_entry(exe: &Path, comment: &str) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name={PRODUCT}\n\
+         Name={DISPLAY_NAME}\n\
          Comment={comment}\n\
          Exec={} %f\n\
          Icon={APP_ID}\n\
@@ -345,6 +348,12 @@ mod tests {
         let entry = std::fs::read_to_string(layout.desktop_file()).unwrap();
         assert!(entry.contains(&format!("Exec={} %f", layout.exe().display())));
         assert!(entry.contains("MimeType=image/jpeg;"));
+        // The app menu shows "Blinzel"; the ids keep amigo-blinzel.
+        assert!(entry.contains("\nName=Blinzel\n"), "{entry}");
+        assert!(
+            entry.contains("\nStartupWMClass=amigo-blinzel\n"),
+            "{entry}"
+        );
         assert_eq!(
             std::fs::read(layout.icon()).unwrap(),
             include_bytes!("../../../../assets/brand/monogram.svg")

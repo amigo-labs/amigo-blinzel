@@ -3,7 +3,7 @@ PackageVersion: "{{VERSION}}"
 PackageLocale: en-US
 Publisher: amigo-labs
 PublisherUrl: https://github.com/amigo-labs
-PackageName: amigo-blinzel
+PackageName: Blinzel
 PackageUrl: https://github.com/amigo-labs/amigo-blinzel
 License: MIT
 LicenseUrl: https://github.com/amigo-labs/amigo-blinzel/blob/main/LICENSE

@@ -158,7 +158,7 @@ fn the_tray_menu_shows_opens_takes_screenshots_and_exits() {
     assert_eq!(
         entries(true),
         [
-            item(ShowWindow, "Show amigo-blinzel"),
+            item(ShowWindow, "Show Blinzel"),
             item(Open, "Open…"),
             None,
             item(Capture, "Take screenshot…"),

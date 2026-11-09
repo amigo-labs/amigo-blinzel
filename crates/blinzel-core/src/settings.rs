@@ -192,7 +192,7 @@ impl Settings {
             optional += &format!("editor = \"{e}\"\n");
         }
         format!(
-            "# amigo-blinzel settings\n\
+            "# Blinzel settings\n\
              view_mode = \"{}\"\n\
              no_upscale = {}\n\
              language = \"{}\"\n\
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply() {
         let s = Settings::parse(
-            "# amigo-blinzel settings\n\
+            "# Blinzel settings\n\
              [viewer]\n\
              screenshot_clipboard = true\n\
              ram_budget_mb = 2048\n\

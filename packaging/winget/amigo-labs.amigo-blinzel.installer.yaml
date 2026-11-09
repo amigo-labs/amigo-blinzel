@@ -16,7 +16,7 @@ UpgradeBehavior: install
 # The "Installed apps" entry the setup writes (HKCU\...\Uninstall\amigo-blinzel).
 ProductCode: amigo-blinzel
 AppsAndFeaturesEntries:
-  - DisplayName: amigo-blinzel
+  - DisplayName: Blinzel
     Publisher: amigo-labs
     ProductCode: amigo-blinzel
 FileExtensions:
