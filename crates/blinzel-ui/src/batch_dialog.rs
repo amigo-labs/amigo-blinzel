@@ -17,8 +17,8 @@ use blinzel_core::geom::Rect;
 use blinzel_i18n::{Msg, PluralMsg, tr, trf, trp};
 
 use crate::backend::{Canvas, Key};
-use crate::batch_files::{BatchFiles, Inspected, ROW, file_name};
-use crate::widgets::{self, Painter};
+use crate::batch_files::{self, BatchFiles, Inspected, ROW, file_name};
+use crate::widgets::{self, CHECK_ROW, CONTROL_H, Painter, TEXT_BODY, TEXT_SMALL, TEXT_TITLE};
 
 /// Messages from the running batch.
 pub enum RunMsg {
@@ -92,11 +92,53 @@ const FORMATS: [Option<Codec>; 5] = [
 /// what is typed).
 const PLACEHOLDERS: &str = "{name}  {n:3}  {w}  {h}  {date}  {date:DD.MM.YYYY_hh-mm}";
 
+// The layout (logical pixels). A label gutter on the left, every control
+// from one content edge right of it; the panel is as tall as its content
+// and the window allow, the list takes the whole rows that are left.
+
+/// The spacing scale: inside a group, between rows, between groups, and
+/// the panel's padding (also above the footer).
+const GAP_TIGHT: f64 = 4.0;
+const GAP_ROW: f64 = 8.0;
+const GAP_GROUP: f64 = 16.0;
+const PAD: f64 = 24.0;
+/// The panel: width, corner, and the least room to the window's edge.
+const WIDTH: f64 = 640.0;
+const RADIUS: f64 = 12.0;
+const MARGIN: f64 = 8.0;
+/// Title row and the list's header row (count, "Remove all"); also the
+/// progress and status rows of a run.
+const HEAD_H: f64 = 24.0;
+const HINT_H: f64 = 16.0;
+const BUTTON_H: f64 = 32.0;
+const BAR_H: f64 = 8.0;
+/// A size field (six digits), the folder picker, the quality number.
+const FIELD_W: f64 = 80.0;
+const PICK_W: f64 = 40.0;
+const VALUE_W: f64 = 32.0;
+/// The label gutter: its widest label plus a group gap, within limits.
+const GUTTER_MIN: f64 = 96.0;
+const GUTTER_MAX: f64 = 160.0;
+/// The list shows at least this many rows (fewer only when the window
+/// is too small) and at most that many.
+const LIST_MIN_ROWS: usize = 4;
+const LIST_MAX_ROWS: usize = 12;
+/// The labels of the gutter, top to bottom.
+const LABELS: [Msg; 6] = [
+    Msg::BatchSize,
+    Msg::BatchFormat,
+    Msg::BatchQuality,
+    Msg::BatchOptions,
+    Msg::BatchName,
+    Msg::BatchFolder,
+];
+
 struct Run {
     total: usize,
     done: usize,
     failed: usize,
-    errors: Vec<String>,
+    /// The first failures: file name and reason.
+    errors: Vec<(String, String)>,
     /// A folder that received output.
     output: Option<PathBuf>,
     cancel: Arc<AtomicBool>,
@@ -311,7 +353,7 @@ impl BatchDialog {
                 RunMsg::Progress(Progress::Failed { source, error, .. }) => {
                     run.failed += 1;
                     if run.errors.len() < 4 {
-                        run.errors.push(format!("{}: {error}", file_name(&source)));
+                        run.errors.push((file_name(&source), error));
                     }
                 }
                 RunMsg::Finished(s) => run.summary = Some(s),
@@ -488,6 +530,25 @@ impl BatchDialog {
         Outcome::Redraw
     }
 
+    fn format_labels() -> Vec<&'static str> {
+        FORMATS
+            .iter()
+            .map(|f| match f {
+                None => tr(Msg::BatchSame),
+                Some(Codec::Jpeg) => "JPEG",
+                Some(Codec::Png) => "PNG",
+                Some(Codec::Webp) => "WebP",
+                Some(Codec::Avif) => "AVIF",
+            })
+            .collect()
+    }
+
+    /// Output with a quality setting (not PNG, not lossless WebP).
+    fn lossy(&self) -> bool {
+        FORMATS[self.format] != Some(Codec::Png)
+            && !(FORMATS[self.format] == Some(Codec::Webp) && self.lossless)
+    }
+
     /// Draws the dialog centred in `client` (physical pixels) and
     /// remembers where its controls are.
     pub fn draw(&mut self, canvas: &mut impl Canvas, client: (f64, f64), scale: f64) {
@@ -495,82 +556,114 @@ impl BatchDialog {
         let mut p = Painter { canvas, scale };
         // Dim the viewer behind the modal panel.
         p.fill(Rect::new(0.0, 0.0, client.0, client.1), 0.0, widgets::SCRIM);
-        let pad = p.px(24.0);
-        let w = p.px(640.0).min(client.0 - p.px(16.0));
-        // Edit mode: title, file list, size, format, quality, options,
-        // name with placeholders, folder, footer (see the layout below).
-        // The list takes what the window leaves, within limits.
-        let fixed = p.px(640.0);
-        let list_h = (client.1 - p.px(16.0) - fixed).clamp(p.px(96.0), p.px(ROW * 9.0 + 12.0));
-        let h = match &self.run {
-            None => fixed + list_h,
-            Some(r) if r.summary.is_some() => p.px(230.0) + p.px(20.0) * r.errors.len() as f64,
-            Some(_) => p.px(200.0),
+        let (pad, margin) = (p.px(PAD), p.px(MARGIN));
+        let (tight, gap, group) = (p.px(GAP_TIGHT), p.px(GAP_ROW), p.px(GAP_GROUP));
+        let (head, ctrl, check, row) = (p.px(HEAD_H), p.px(CONTROL_H), p.px(CHECK_ROW), p.px(ROW));
+        let w = p.px(WIDTH).min(client.0 - 2.0 * margin);
+        let inner = w - 2.0 * pad;
+        // Title and list header above, the footer below: in every mode.
+        let top = pad + head + tight + head + tight;
+        let bottom = pad + p.px(BUTTON_H) + pad;
+        let edit = self.run.is_none().then(|| Edit::measure(&mut p, inner));
+        let (h, list_h) = match (&self.run, &edit) {
+            (None, Some(e)) => {
+                // The list takes the whole rows the window leaves.
+                let fixed = top + group + e.body + bottom;
+                let inset = 2.0 * p.px(batch_files::INSET_V);
+                let fit = ((client.1 - 2.0 * margin - fixed - inset) / row).floor();
+                let rows = self
+                    .files
+                    .len()
+                    .clamp(LIST_MIN_ROWS, LIST_MAX_ROWS)
+                    .min(fit.max(1.0) as usize);
+                let list_h = rows as f64 * row + inset;
+                (fixed + list_h, list_h)
+            }
+            (Some(run), _) => (
+                top + head + head + row * run.errors.len() as f64 + bottom,
+                0.0,
+            ),
+            (None, None) => (top + bottom, 0.0),
         };
         let panel = Rect::new(
             ((client.0 - w) / 2.0).round(),
-            ((client.1 - h) / 2.0).max(p.px(8.0)).round(),
+            ((client.1 - h) / 2.0).max(margin).round(),
             w,
             h,
         );
-        p.fill(panel, 12.0, widgets::PANEL);
-        p.outline(panel, 1.0, 12.0, widgets::BORDER);
-        let (x0, inner) = (panel.x + pad, w - 2.0 * pad);
+        p.fill(panel, RADIUS, widgets::PANEL);
+        p.outline(panel, 1.0, RADIUS, widgets::BORDER);
+        let x0 = panel.x + pad;
         let mut y = panel.y + pad;
-        let (_, th) = p.text(tr(Msg::BatchTitle), 18.0, x0, y, widgets::FG);
-        y += th + p.px(4.0);
+        let title = Rect::new(x0, y, inner, head);
+        p.text_in(tr(Msg::BatchTitle), TEXT_TITLE, &title, 0.0, widgets::FG);
+        y += head + tight;
+        // The files come first: their count, and "Remove all" at the
+        // list's right edge.
         let count = trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]);
-        let (_, sh) = p.text(&count, 13.0, x0, y, widgets::DIM);
+        let count_r = Rect::new(x0, y, inner, head);
+        p.text_in(&count, TEXT_BODY, &count_r, 0.0, widgets::FG);
         let hover = self.hover;
         if self.run.is_none() && !self.files.is_empty() {
             let clear = tr(Msg::BatchClear);
-            let (cw, _) = p.text_size(clear, 13.0);
-            let cr = Rect::new(x0 + inner - cw, y, cw, sh);
+            let (cw, _) = p.text_size(clear, TEXT_BODY);
+            let cr = Rect::new(x0 + inner - cw - gap, y, cw + gap, head);
             let color = if hover == Some(Hit::Clear) {
                 widgets::FG
             } else {
                 widgets::ACCENT
             };
-            p.text_in(clear, 13.0, &cr, 0.0, color);
+            p.text_in(clear, TEXT_BODY, &cr, gap, color);
             hits.push((cr, Hit::Clear));
         }
-        y += sh + p.px(10.0);
+        y += head + tight;
 
-        let footer_h = p.px(34.0);
-        let footer_y = panel.bottom() - pad - footer_h;
-        if self.run.is_none() {
-            let hover_remove = match hover {
-                Some(Hit::Remove(i)) => Some(i),
-                _ => None,
-            };
-            let job = self.job();
-            let list = Rect::new(x0, y, inner, list_h);
-            for (r, i) in self.files.draw(&mut p, list, job, hover_remove) {
-                hits.push((r, Hit::Remove(i)));
-            }
-            y += list_h + p.px(18.0);
-        }
-        match &self.run {
-            None => {
-                // Size.
-                let (_, lh) = p.text(tr(Msg::BatchSize), 12.5, x0, y, widgets::DIM);
-                y += lh + p.px(6.0);
+        let footer = Rect::new(
+            x0,
+            panel.bottom() - pad - p.px(BUTTON_H),
+            inner,
+            p.px(BUTTON_H),
+        );
+        match (&self.run, edit) {
+            (None, Some(e)) => {
+                let hover_remove = match hover {
+                    Some(Hit::Remove(i)) => Some(i),
+                    _ => None,
+                };
+                let job = self.job();
+                let list = Rect::new(x0, y, inner, list_h);
+                for (r, i) in self.files.draw(&mut p, list, job, hover_remove) {
+                    hits.push((r, Hit::Remove(i)));
+                }
+                y += list_h + group;
+                // Every control starts at the content edge `cx`; the
+                // second column (`col2`) holds the switches.
+                let cx = x0 + e.gutter;
+                let cw = inner - e.gutter;
+                let col2 = cx + (cw / 2.0).round();
+                let check_dy = ((ctrl - check) / 2.0).round();
+                let label = |p: &mut Painter<_>, msg: Msg, y: f64, h: f64| {
+                    let r = Rect::new(x0, y, e.gutter, h);
+                    p.text_in(tr(msg), TEXT_BODY, &r, 0.0, widgets::DIM);
+                };
+
+                // Size: the mode, then the value(s).
+                label(&mut p, Msg::BatchSize, y, ctrl);
                 let modes: Vec<&str> = MODES.iter().map(|m| tr(*m)).collect();
                 let hm = match hover {
                     Some(Hit::Mode(i)) => Some(i),
                     _ => None,
                 };
-                for (i, r) in p
-                    .segmented(&modes, self.mode, hm, x0, y, inner)
-                    .into_iter()
-                    .enumerate()
-                {
-                    hits.push((r, Hit::Mode(i)));
-                }
-                y += p.px(30.0) + p.px(10.0);
-                let fw = p.px(84.0);
-                let fh = p.px(30.0);
-                let f1 = Rect::new(x0, y, fw, fh);
+                let rects = p.segmented(&modes, self.mode, hm, cx, y, cw);
+                y = rects.last().map_or(y + ctrl, |r| r.bottom()) + gap;
+                hits.extend(
+                    rects
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, r)| (r, Hit::Mode(i))),
+                );
+                let fw = p.px(FIELD_W);
+                let f1 = Rect::new(cx, y, fw, ctrl);
                 p.field(
                     &self.first,
                     self.focus == Some(Field::First),
@@ -578,12 +671,13 @@ impl BatchDialog {
                     f1,
                 );
                 hits.push((f1, Hit::Field(Field::First)));
-                let mut x = f1.right() + p.px(8.0);
+                let mut x = f1.right() + gap;
                 if self.two_values() {
-                    let (tw, _) = p.text_size("×", 14.0);
-                    p.text_in("×", 14.0, &Rect::new(x, y, tw, fh), 0.0, widgets::DIM);
-                    x += tw + p.px(8.0);
-                    let f2 = Rect::new(x, y, fw, fh);
+                    let (tw, _) = p.text_size("×", TEXT_BODY);
+                    let times = Rect::new(x, y, tw, ctrl);
+                    p.text_in("×", TEXT_BODY, &times, 0.0, widgets::DIM);
+                    x += tw + gap;
+                    let f2 = Rect::new(x, y, fw, ctrl);
                     p.field(
                         &self.second,
                         self.focus == Some(Field::Second),
@@ -591,108 +685,73 @@ impl BatchDialog {
                         f2,
                     );
                     hits.push((f2, Hit::Field(Field::Second)));
-                    x = f2.right() + p.px(8.0);
+                    x = f2.right() + gap;
                 }
                 let unit = if self.mode == 5 { "%" } else { "px" };
-                let (uw, _) = p.text_size(unit, 13.0);
-                p.text_in(unit, 13.0, &Rect::new(x, y, uw, fh), 0.0, widgets::DIM);
-                let cb = p.checkbox(
-                    tr(Msg::BatchNoEnlarge),
-                    self.no_enlarge,
-                    true,
-                    x + uw + p.px(24.0),
-                    y + p.px(4.0),
+                let (uw, _) = p.text_size(unit, TEXT_BODY);
+                p.text_in(
+                    unit,
+                    TEXT_BODY,
+                    &Rect::new(x, y, uw, ctrl),
+                    0.0,
+                    widgets::DIM,
                 );
+                let no_enlarge = tr(Msg::BatchNoEnlarge);
+                let cb = p.checkbox(no_enlarge, self.no_enlarge, true, col2, y + check_dy);
                 hits.push((cb, Hit::NoEnlarge));
-                y += fh + p.px(18.0);
+                y += ctrl + group;
 
-                // Format and quality.
-                let (_, lh) = p.text(tr(Msg::BatchFormat), 12.5, x0, y, widgets::DIM);
-                y += lh + p.px(6.0);
-                let formats: Vec<&str> = FORMATS
-                    .iter()
-                    .map(|f| match f {
-                        None => tr(Msg::BatchSame),
-                        Some(Codec::Jpeg) => "JPEG",
-                        Some(Codec::Png) => "PNG",
-                        Some(Codec::Webp) => "WebP",
-                        Some(Codec::Avif) => "AVIF",
-                    })
-                    .collect();
+                // Output: format, quality, options, name, folder.
+                label(&mut p, Msg::BatchFormat, y, ctrl);
+                let formats = Self::format_labels();
                 let hf = match hover {
                     Some(Hit::Format(i)) => Some(i),
                     _ => None,
                 };
-                for (i, r) in p
-                    .segmented(&formats, self.format, hf, x0, y, inner)
-                    .into_iter()
-                    .enumerate()
-                {
-                    hits.push((r, Hit::Format(i)));
-                }
-                y += p.px(30.0) + p.px(12.0);
-                let lossy = FORMATS[self.format] != Some(Codec::Png)
-                    && !(FORMATS[self.format] == Some(Codec::Webp) && self.lossless);
-                let ql = tr(Msg::BatchQuality);
-                let (qw, _) = p.text_size(ql, 13.0);
-                let row = Rect::new(x0, y, inner, p.px(22.0));
-                p.text_in(
-                    ql,
-                    13.0,
-                    &row,
-                    0.0,
-                    if lossy { widgets::FG } else { widgets::FAINT },
+                let rects = p.segmented(&formats, self.format, hf, cx, y, cw);
+                y = rects.last().map_or(y + ctrl, |r| r.bottom()) + gap;
+                hits.extend(
+                    rects
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, r)| (r, Hit::Format(i))),
                 );
-                let sx = x0 + qw + p.px(14.0);
-                let slider = Rect::new(sx, y, p.px(240.0), p.px(22.0));
-                if lossy {
+
+                label(&mut p, Msg::BatchQuality, y, ctrl);
+                let value_w = p.px(VALUE_W);
+                let slider = Rect::new(cx, y, col2 - cx - group - value_w - gap, ctrl);
+                if self.lossy() {
                     p.slider((self.quality as f64 - 1.0) / 99.0, slider);
                     hits.push((slider, Hit::Slider));
+                    // The number, right-aligned after the track.
                     let v = self.quality.to_string();
-                    p.text_in(
-                        &v,
-                        13.0,
-                        &Rect::new(slider.right() + p.px(12.0), y, p.px(40.0), p.px(22.0)),
-                        0.0,
-                        widgets::FG,
-                    );
+                    let (vw, _) = p.text_size(&v, TEXT_BODY);
+                    let vr = Rect::new(slider.right() + gap + value_w - vw, y, vw, ctrl);
+                    p.text_in(&v, TEXT_BODY, &vr, 0.0, widgets::FG);
                 }
                 self.slider = slider;
                 if FORMATS[self.format] == Some(Codec::Webp) {
-                    let cb = p.checkbox(
-                        tr(Msg::BatchLossless),
-                        self.lossless,
-                        true,
-                        slider.right() + p.px(64.0),
-                        y,
-                    );
+                    let lossless = tr(Msg::BatchLossless);
+                    let cb = p.checkbox(lossless, self.lossless, true, col2, y + check_dy);
                     hits.push((cb, Hit::Lossless));
                 }
-                y += p.px(22.0) + p.px(16.0);
+                y += ctrl + gap;
 
-                // Options in two columns.
-                let col2 = x0 + inner / 2.0;
-                let cb = p.checkbox(tr(Msg::BatchSharpen), self.sharpen, true, x0, y);
+                label(&mut p, Msg::BatchOptions, y, check);
+                let cb = p.checkbox(tr(Msg::BatchSharpen), self.sharpen, true, cx, y);
                 hits.push((cb, Hit::Sharpen));
                 let cb = p.checkbox(tr(Msg::BatchKeepIcc), self.keep_icc, true, col2, y);
                 hits.push((cb, Hit::KeepIcc));
-                y += p.px(28.0);
-                let cb = p.checkbox(tr(Msg::BatchKeepMeta), self.keep_meta, true, x0, y);
+                y += check + gap;
+                let cb = p.checkbox(tr(Msg::BatchKeepMeta), self.keep_meta, true, cx, y);
                 hits.push((cb, Hit::KeepMeta));
-                let cb = p.checkbox(
-                    tr(Msg::BatchStripGps),
-                    self.strip_gps,
-                    self.keep_meta,
-                    col2,
-                    y,
-                );
+                let strip = tr(Msg::BatchStripGps);
+                let cb = p.checkbox(strip, self.strip_gps, self.keep_meta, col2, y);
                 hits.push((cb, Hit::StripGps));
-                y += p.px(22.0) + p.px(18.0);
+                y += check + gap;
 
-                // Name and folder.
-                let (_, lh) = p.text(tr(Msg::BatchName), 12.5, x0, y, widgets::DIM);
-                y += lh + p.px(6.0);
-                let pf = Rect::new(x0, y, inner, fh);
+                label(&mut p, Msg::BatchName, y, ctrl);
+                let pf = Rect::new(cx, y, cw, ctrl);
                 p.field(
                     &self.pattern,
                     self.focus == Some(Field::Pattern),
@@ -700,13 +759,14 @@ impl BatchDialog {
                     pf,
                 );
                 hits.push((pf, Hit::Field(Field::Pattern)));
-                y += fh + p.px(4.0);
-                let (_, eh) = p.text(PLACEHOLDERS, 12.0, x0, y, widgets::FAINT);
-                y += eh + p.px(12.0);
-                let (_, lh) = p.text(tr(Msg::BatchFolder), 12.5, x0, y, widgets::DIM);
-                y += lh + p.px(6.0);
-                let bw = p.px(40.0);
-                let ff = Rect::new(x0, y, inner - bw - p.px(8.0), fh);
+                y += ctrl + tight;
+                let hint = Rect::new(cx, y, cw, p.px(HINT_H));
+                p.text_in(PLACEHOLDERS, TEXT_SMALL, &hint, 0.0, widgets::DIM);
+                y += hint.h + gap;
+
+                label(&mut p, Msg::BatchFolder, y, ctrl);
+                let bw = p.px(PICK_W);
+                let ff = Rect::new(cx, y, cw - gap - bw, ctrl);
                 p.field(
                     &self.folder,
                     self.focus == Some(Field::Folder),
@@ -714,27 +774,28 @@ impl BatchDialog {
                     ff,
                 );
                 hits.push((ff, Hit::Field(Field::Folder)));
-                let pick = Rect::new(ff.right() + p.px(8.0), y, bw, fh);
+                let pick = Rect::new(ff.right() + gap, y, bw, ctrl);
                 p.button("…", false, hover == Some(Hit::PickFolder), true, pick);
                 hits.push((pick, Hit::PickFolder));
 
-                // Footer.
+                // Footer: Start, the one primary action, rightmost.
                 let ok = self.job().is_some() && self.files.ready();
                 let (start, cancel) = (tr(Msg::BatchStart), tr(Msg::BatchCancel));
                 let (sw, cw) = (p.button_width(start), p.button_width(cancel));
-                let sr = Rect::new(panel.right() - pad - sw, footer_y, sw, footer_h);
-                let cr = Rect::new(sr.x - p.px(10.0) - cw, footer_y, cw, footer_h);
+                let sr = Rect::new(footer.right() - sw, footer.y, sw, footer.h);
+                let cr = Rect::new(sr.x - gap - cw, footer.y, cw, footer.h);
                 p.button(cancel, false, hover == Some(Hit::Cancel), true, cr);
                 p.button(start, true, hover == Some(Hit::Start), ok, sr);
                 hits.push((cr, Hit::Cancel));
                 hits.push((sr, Hit::Start));
             }
-            Some(run) => {
+            (Some(run), _) => {
                 let finished = run.summary.is_some();
                 let handled = run.done + run.failed;
-                let bar = Rect::new(x0, y, inner, p.px(8.0));
+                let bar_h = p.px(BAR_H);
+                let bar = Rect::new(x0, y + ((head - bar_h) / 2.0).round(), inner, bar_h);
                 p.progress(handled as f64 / run.total.max(1) as f64, bar);
-                y += p.px(8.0) + p.px(12.0);
+                y += head;
                 let status = match &run.summary {
                     Some(s) if s.skipped > 0 => trf(
                         Msg::BatchCancelled,
@@ -746,17 +807,20 @@ impl BatchDialog {
                         &[("done", &handled), ("total", &run.total)],
                     ),
                 };
-                let (_, sh) = p.text(&status, 13.0, x0, y, widgets::FG);
-                y += sh + p.px(8.0);
-                for e in &run.errors {
-                    let (_, eh) = p.text(e, 12.0, x0, y, widgets::DANGER);
-                    y += eh + p.px(4.0);
+                let status_r = Rect::new(x0, y, inner, head);
+                p.text_in(&status, TEXT_BODY, &status_r, 0.0, widgets::FG);
+                y += head;
+                for (name, error) in &run.errors {
+                    let line = error_line(&mut p, name, error, inner);
+                    let r = Rect::new(x0, y, inner, row);
+                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER);
+                    y += row;
                 }
                 if finished {
                     let (close, open) = (tr(Msg::BatchClose), tr(Msg::BatchOpenFolder));
                     let (clw, ow) = (p.button_width(close), p.button_width(open));
-                    let clr = Rect::new(panel.right() - pad - clw, footer_y, clw, footer_h);
-                    let or = Rect::new(clr.x - p.px(10.0) - ow, footer_y, ow, footer_h);
+                    let clr = Rect::new(footer.right() - clw, footer.y, clw, footer.h);
+                    let or = Rect::new(clr.x - gap - ow, footer.y, ow, footer.h);
                     let has_output = run.output.is_some();
                     p.button(open, false, hover == Some(Hit::OpenFolder), has_output, or);
                     p.button(close, true, hover == Some(Hit::Close), true, clr);
@@ -767,14 +831,79 @@ impl BatchDialog {
                 } else {
                     let cancel = tr(Msg::BatchCancel);
                     let cw = p.button_width(cancel);
-                    let cr = Rect::new(panel.right() - pad - cw, footer_y, cw, footer_h);
+                    let cr = Rect::new(footer.right() - cw, footer.y, cw, footer.h);
                     let cancelling = run.cancel.load(Ordering::Relaxed);
                     p.button(cancel, false, hover == Some(Hit::Cancel), !cancelling, cr);
                     hits.push((cr, Hit::Cancel));
                 }
             }
+            (None, None) => {}
         }
         self.hits = hits;
+    }
+}
+
+/// The edit mode's measured parts.
+struct Edit {
+    /// Width of the label gutter.
+    gutter: f64,
+    /// Height of everything between the list and the footer's gap.
+    body: f64,
+}
+
+impl Edit {
+    fn measure(p: &mut Painter<impl Canvas>, inner: f64) -> Edit {
+        let widest = LABELS
+            .iter()
+            .map(|m| p.text_size(tr(*m), TEXT_BODY).0)
+            .fold(0.0, f64::max);
+        let step = p.px(GAP_ROW);
+        let gutter = (((widest + p.px(GAP_GROUP)) / step).ceil() * step)
+            .clamp(p.px(GUTTER_MIN), p.px(GUTTER_MAX));
+        let cw = inner - gutter;
+        let modes: Vec<&str> = MODES.iter().map(|m| tr(*m)).collect();
+        let segments_h = |p: &mut Painter<_>, labels: &[&str]| {
+            p.segment_rects(labels, 0.0, 0.0, cw)
+                .last()
+                .map_or(0.0, |r| r.bottom())
+        };
+        let modes_h = segments_h(p, &modes);
+        let formats_h = segments_h(p, &BatchDialog::format_labels());
+        let (tight, gap, group) = (p.px(GAP_TIGHT), p.px(GAP_ROW), p.px(GAP_GROUP));
+        let (ctrl, check) = (p.px(CONTROL_H), p.px(CHECK_ROW));
+        // Size: modes, values. Output: format, quality, two option
+        // rows, name and hint, folder. As drawn in `BatchDialog::draw`.
+        let size = modes_h + gap + ctrl;
+        let output = formats_h
+            + gap
+            + ctrl
+            + gap
+            + 2.0 * (check + gap)
+            + ctrl
+            + tight
+            + p.px(HINT_H)
+            + gap
+            + ctrl;
+        Edit {
+            gutter,
+            body: size + group + output,
+        }
+    }
+}
+
+/// A failure as "name: reason" in `w`: a long name is shortened in the
+/// middle so the reason stays whole, else the line is cut at its end.
+fn error_line(p: &mut Painter<impl Canvas>, name: &str, error: &str, w: f64) -> String {
+    let full = format!("{name}: {error}");
+    if p.text_size(&full, TEXT_BODY).0 <= w {
+        return full;
+    }
+    let reason = format!(": {error}");
+    let room = w - p.text_size(&reason, TEXT_BODY).0;
+    if room >= w / 3.0 {
+        p.elide_middle(name, TEXT_BODY, room) + &reason
+    } else {
+        p.elide_end(&full, TEXT_BODY, w)
     }
 }
 
@@ -962,6 +1091,139 @@ mod tests {
         d.poll();
         assert!(d.job().is_some());
         assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "no readable file");
+    }
+
+    /// A dialog with `n` readable files.
+    fn dialog_with(n: usize) -> BatchDialog {
+        let mut d = BatchDialog::new();
+        for i in 0..n {
+            d.files.push_ready(
+                format!("/photos/IMG_{i:04}.jpg").into(),
+                crate::batch_files::tests::info(),
+            );
+        }
+        d
+    }
+
+    fn drawn(d: &mut BatchDialog, client: (f64, f64)) {
+        let mut canvas = crate::testkit::FakeCanvas::default();
+        d.draw(&mut canvas, client, 1.0);
+    }
+
+    /// The whole panel, footer included, fits the narrowest window, and
+    /// the footer sits one padding under the last control: the measured
+    /// height is the drawn one.
+    #[test]
+    fn the_panel_fits_the_window_and_its_content() {
+        for client in [(960.0, 640.0), (1200.0, 800.0), (1600.0, 1067.0)] {
+            let mut d = dialog_with(48);
+            drawn(&mut d, client);
+            let window = Rect::new(0.0, 0.0, client.0, client.1);
+            for (r, h) in &d.hits {
+                assert!(
+                    r.x >= MARGIN
+                        && r.y >= MARGIN
+                        && r.right() <= window.right() - MARGIN
+                        && r.bottom() <= window.bottom() - MARGIN,
+                    "{h:?} at {r:?} outside {client:?}"
+                );
+            }
+            let start = d.drawn_at(Hit::Start).unwrap();
+            let pick = d.drawn_at(Hit::PickFolder).unwrap();
+            assert_eq!(start.y - pick.bottom(), PAD, "{client:?}");
+            assert_eq!(start.right(), d.drawn_at(Hit::Clear).unwrap().right());
+            let cancel = d.drawn_at(Hit::Cancel).unwrap();
+            assert!(cancel.right() < start.x, "Cancel left of Start");
+            let rows = (0..48)
+                .filter(|&i| d.drawn_at(Hit::Remove(i)).is_some())
+                .count();
+            assert!((1..=LIST_MAX_ROWS).contains(&rows), "{rows} rows");
+            if client.1 > 1000.0 {
+                assert_eq!(rows, LIST_MAX_ROWS, "a tall window shows the most rows");
+            }
+        }
+        // A short list keeps its least height; the panel shrinks with it.
+        let mut d = dialog_with(3);
+        drawn(&mut d, (1600.0, 1067.0));
+        assert!(d.drawn_at(Hit::Remove(2)).is_some());
+        let few = d.drawn_at(Hit::Start).unwrap().y;
+        let mut d = dialog_with(48);
+        drawn(&mut d, (1600.0, 1067.0));
+        assert!(d.drawn_at(Hit::Start).unwrap().y > few);
+    }
+
+    /// Every control of the size and output groups starts at one content
+    /// edge right of the label gutter.
+    #[test]
+    fn controls_share_the_content_edge() {
+        let mut d = dialog_with(3);
+        drawn(&mut d, (1200.0, 800.0));
+        let edge = d.drawn_at(Hit::Mode(0)).unwrap().x;
+        for hit in [
+            Hit::Format(0),
+            Hit::Field(Field::First),
+            Hit::Slider,
+            Hit::Sharpen,
+            Hit::KeepMeta,
+            Hit::Field(Field::Pattern),
+            Hit::Field(Field::Folder),
+        ] {
+            assert_eq!(d.drawn_at(hit).unwrap().x, edge, "{hit:?}");
+        }
+        let col2 = d.drawn_at(Hit::KeepIcc).unwrap().x;
+        assert_eq!(d.drawn_at(Hit::StripGps).unwrap().x, col2);
+        assert_eq!(d.drawn_at(Hit::NoEnlarge).unwrap().x, col2);
+        d.format = 3;
+        drawn(&mut d, (1200.0, 800.0));
+        assert_eq!(d.drawn_at(Hit::Lossless).unwrap().x, col2);
+        // The panel's inner left edge: its right edge less the inner width.
+        let x0 = d.drawn_at(Hit::PickFolder).unwrap().right() - (WIDTH - 2.0 * PAD);
+        assert!(
+            edge - x0 >= GUTTER_MIN,
+            "the label gutter left of the controls"
+        );
+    }
+
+    /// Segments are as wide as their labels; options that do not fit one
+    /// row wrap into rows of equal count, each row the control's width.
+    #[test]
+    fn segments_wrap_into_rows_of_equal_count() {
+        let mut canvas = crate::testkit::FakeCanvas::default();
+        let mut p = Painter {
+            canvas: &mut canvas,
+            scale: 1.0,
+        };
+        let labels = ["a long label", "b", "c", "another one", "e", "f"];
+        let one = p.segment_rects(&labels, 10.0, 20.0, 600.0);
+        assert!(one.iter().all(|r| r.y == 20.0), "fits one row");
+        assert!(one[0].w > one[1].w, "width from the text");
+        assert_eq!(one[5].right(), 610.0);
+        let two = p.segment_rects(&labels, 10.0, 20.0, 200.0);
+        let rows: Vec<f64> = two.iter().map(|r| r.y).collect();
+        assert_eq!(rows, [20.0, 20.0, 20.0, 50.0, 50.0, 50.0]);
+        assert_eq!((two[2].right(), two[5].right()), (210.0, 210.0));
+        assert_eq!((two[0].x, two[3].x), (10.0, 10.0));
+    }
+
+    /// A long failure keeps its reason whole and fits the panel.
+    #[test]
+    fn long_error_lines_keep_their_reason() {
+        let mut canvas = crate::testkit::FakeCanvas::default();
+        let mut p = Painter {
+            canvas: &mut canvas,
+            scale: 1.0,
+        };
+        let name = "Beschädigte Übertragung aus dem Familienarchiv Großeltern \
+                    Weihnachten 1987 – Scan Teil 1.png";
+        let error = "corrupt image: unexpected end of file";
+        let line = error_line(&mut p, name, error, 592.0);
+        assert!(line.ends_with("Teil 1.png: corrupt image: unexpected end of file"));
+        assert!(line.starts_with("Beschädigte"), "{line}");
+        assert!(p.text_size(&line, TEXT_BODY).0 <= 592.0);
+        assert_eq!(
+            error_line(&mut p, "a.jpg", "broken", 592.0),
+            "a.jpg: broken"
+        );
     }
 
     /// `docs/specs/batch-resize.md` AC-26.

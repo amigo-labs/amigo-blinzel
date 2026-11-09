@@ -21,7 +21,16 @@ use crate::widgets::{self, Painter};
 pub type Inspected = (PathBuf, Result<SourceInfo, String>);
 
 /// Height of one row (logical pixels).
-pub const ROW: f64 = 22.0;
+pub const ROW: f64 = widgets::CHECK_ROW;
+/// The list's inset: above and below the rows, left and right of them.
+pub const INSET_V: f64 = 4.0;
+const INSET_H: f64 = 8.0;
+/// Width of the arrow column and of the remove button.
+const ARROW_W: f64 = 24.0;
+const REMOVE_W: f64 = 24.0;
+/// The old name's share of the name columns (the new name, often a
+/// message, gets the rest).
+const OLD_SHARE: f64 = 0.3;
 
 /// A dropped file and its header (None: still being read).
 struct Row {
@@ -248,23 +257,26 @@ impl BatchFiles {
         job: Option<Job>,
         hover_remove: Option<usize>,
     ) -> Vec<(Rect, usize)> {
+        use widgets::TEXT_BODY;
         self.area = r;
-        p.fill(r, 8.0, widgets::CONTROL);
+        // No fill: the rows sit on the panel, where DIM text passes AA.
+        p.outline(r, 1.0, 8.0, widgets::BORDER);
         if self.rows.is_empty() {
             self.visible = 0;
-            p.outline(r, 1.0, 8.0, widgets::BORDER);
-            p.text_centred(tr(Msg::BatchDrop), 14.0, &r, widgets::DIM);
+            p.text_centred(tr(Msg::BatchDrop), TEXT_BODY, &r, widgets::DIM);
             return vec![];
         }
         let rh = p.px(ROW);
-        let pad = p.px(6.0);
-        self.visible = (((r.h - 2.0 * pad) / rh).floor() as usize).max(1);
+        let (pad_v, pad_h) = (p.px(INSET_V), p.px(INSET_H));
+        self.visible = (((r.h - 2.0 * pad_v) / rh).floor() as usize).max(1);
         self.scroll = self
             .scroll
             .min(self.rows.len().saturating_sub(self.visible));
         let texts = self.texts(job);
-        let x_w = p.px(24.0);
-        let col = (r.w - 2.0 * pad - x_w - p.px(24.0)) / 2.0;
+        let (arrow_w, x_w) = (p.px(ARROW_W), p.px(REMOVE_W));
+        let names = r.w - 2.0 * pad_h - arrow_w - x_w;
+        let old_w = (names * OLD_SHARE).round();
+        let new_w = names - old_w - pad_h;
         let mut removes = Vec::new();
         for (k, (i, (old, new, bad))) in texts
             .iter()
@@ -273,17 +285,22 @@ impl BatchFiles {
             .take(self.visible)
             .enumerate()
         {
-            let y = r.y + pad + k as f64 * rh;
-            let row = Rect::new(r.x + pad, y, r.w - 2.0 * pad, rh);
-            let old = elide(p, old, 12.5, col);
-            p.text_in(&old, 12.5, &row, p.px(4.0), widgets::DIM);
-            let arrow = Rect::new(row.x + col + p.px(4.0), y, p.px(20.0), rh);
-            p.text_centred("→", 12.5, &arrow, widgets::FAINT);
-            let new_r = Rect::new(arrow.right(), y, col, rh);
-            let new = elide(p, new, 12.5, col);
+            let y = r.y + pad_v + k as f64 * rh;
+            let row = Rect::new(r.x + pad_h, y, r.w - 2.0 * pad_h, rh);
+            let old = p.elide_middle(old, TEXT_BODY, old_w);
+            p.text_in(&old, TEXT_BODY, &row, 0.0, widgets::DIM);
+            let arrow = Rect::new(row.x + old_w, y, arrow_w, rh);
+            p.text_centred("→", TEXT_BODY, &arrow, widgets::DIM);
+            let new_r = Rect::new(arrow.right(), y, new_w, rh);
+            // A message reads from its start, a name keeps its end.
+            let new = if *bad {
+                p.elide_end(new, TEXT_BODY, new_w)
+            } else {
+                p.elide_middle(new, TEXT_BODY, new_w)
+            };
             let color = if *bad { widgets::DANGER } else { widgets::FG };
-            p.text_in(&new, 12.5, &new_r, 0.0, color);
-            let x = Rect::new(row.right() - x_w, y + p.px(1.0), x_w, rh - p.px(2.0));
+            p.text_in(&new, TEXT_BODY, &new_r, 0.0, color);
+            let x = Rect::new(row.right() - x_w, y, x_w, rh);
             if hover_remove == Some(i) {
                 p.fill(x, 4.0, widgets::CONTROL_HOVER);
             }
@@ -291,16 +308,17 @@ impl BatchFiles {
             removes.push((x, i));
         }
         if self.rows.len() > self.visible {
-            // Where the shown rows are in the whole list.
-            let track = r.h - 2.0 * pad;
+            // Where the shown rows are in the whole list, in the inset
+            // right of the remove buttons.
+            let track = r.h - 2.0 * pad_v;
             let n = self.rows.len() as f64;
             let bar = Rect::new(
-                r.right() - p.px(4.0),
-                r.y + pad + track * self.scroll as f64 / n,
+                r.right() - pad_h / 2.0 - p.px(1.0),
+                r.y + pad_v + track * self.scroll as f64 / n,
                 p.px(2.0),
                 (track * self.visible as f64 / n).max(p.px(12.0)),
             );
-            p.fill(bar, 1.0, widgets::FAINT);
+            p.fill(bar, 1.0, widgets::DIM);
         }
         removes
     }
@@ -339,28 +357,6 @@ pub fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
-}
-
-/// `text` shortened in the middle to fit `max_w`; the end (numbers,
-/// extension) stays readable.
-fn elide(p: &mut Painter<impl Canvas>, text: &str, size: f64, max_w: f64) -> String {
-    if p.text_size(text, size).0 <= max_w {
-        return text.to_string();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let cut = chars.len().saturating_sub(10);
-    let tail: String = chars[cut..].iter().collect();
-    let (mut lo, mut hi) = (0, cut);
-    while lo < hi {
-        let mid = (lo + hi).div_ceil(2);
-        let s: String = chars[..mid].iter().collect::<String>() + "…" + &tail;
-        if p.text_size(&s, size).0 <= max_w {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    chars[..lo].iter().collect::<String>() + "…" + &tail
 }
 
 #[cfg(test)]
