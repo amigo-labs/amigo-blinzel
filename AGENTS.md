@@ -22,7 +22,7 @@ The design specification lives in **`docs/specs/blinzel.md`**: goal, decisions (
 
 Every implementation task traces back to `docs/specs/blinzel.md` or a feature spec. If a task implies a design decision the design spec does not cover, **stop and update the design spec first**: a row in the decisions table (§2) plus the details in the matching section. Do not improvise architecture.
 
-New features and behavior changes get a **feature spec** `docs/specs/<name>.md` with testable acceptance criteria, written with `/spec`, built with `/spec-build`, accepted with `/spec-check`. Triage, the two kinds of spec and where knowledge goes: `.claude/rules/specs.md`. Bug fixes, refactorings, tooling and docs need no feature spec.
+New features and behavior changes get a **feature spec** `docs/specs/<name>.md` with testable acceptance criteria, written with `/spec`, built with `/spec-build`, accepted with `/spec-check`. Triage, the two kinds of spec and where knowledge goes: "Spec-driven workflow" below; the project facts the skills use: "Spec workflow profile". Bug fixes, refactorings, tooling and docs need no feature spec.
 
 ### 2.2 Compiler as gatekeeper
 
@@ -237,7 +237,7 @@ cargo run --release -p blinzel-bench -- run testdata/generated --check --json be
 cargo run -p blinzel-race -- site docs/race/windows.json docs/site/benchmarks/windows.yml   # after a new race report
 ```
 
-`.claude/gates.json` holds the gate commands: `fast` (Stop hook) and `full` (`/qa`, the Linux job of `.github/workflows/ci.yml` without its two Xvfb steps). The Xvfb steps (viewer smoke test, X11 display profile) and the Windows and macOS jobs (Direct3D/WARP golden test, benchmarks, Metal golden test, app bundle) run in CI only.
+`.agents/gates.json` holds the gate commands: `stop` (Stop hook, seconds), `fast` (before a commit) and `full` (`/qa`, the Linux job of `.github/workflows/ci.yml` without its two Xvfb steps). The Xvfb steps (viewer smoke test, X11 display profile) and the Windows and macOS jobs (Direct3D/WARP golden test, benchmarks, Metal golden test, app bundle) run in CI only.
 
 ---
 
@@ -278,15 +278,94 @@ Do not stop for style choices, local refactors, extra tests, documentation or re
 
 ## 13. Skills
 
+Skills live in `.agents/skills/` — read by Codex, Gemini CLI, Copilot, Cursor and other agents — and are mirrored to `.claude/skills/` for Claude Code. The spec workflow and `qa` are vendored from [amigo-labs/skills](https://github.com/amigo-labs/skills) (`.agents/skills.json`, `node .agents/sync.mjs`); the workflow rules are the managed block "Spec-driven workflow" below, the project facts they rely on the "Spec workflow profile".
+
+Gate commands: `.agents/gates.json`. Hooks (`.claude/settings.json`, Claude Code only, they need Node.js): SessionStart lists the open feature specs, a guard refuses new suppressions (§9), the Stop hook runs the quick `stop` gates (rustfmt, clippy on the changed crates) after a turn that changed code, and the commit gate runs the `fast` gates before `git commit`.
+
+## Spec workflow profile
+
+The project facts the shared spec skills (`spec`, `spec-build`, `spec-check`, `spec-extract`, `spec-fix`, `qa`) look up by these keys.
+
+- **Design spec** — `docs/specs/blinzel.md`: goal, decisions (§2), benchmark gate (§3), architecture, platforms, budgets (§12), measurements (§15). Index: `docs/specs/README.md`.
+- **Decisions** — a row in the decisions table of `docs/specs/blinzel.md` §2, details in the matching section (§2.1). Measurements go to §15.
+- **Code map** — `blinzel-core` (decoders, EXIF/MPF, batch, thumbnails, update, …), `blinzel-jpeg`; the interface `blinzel-ui`: `App` (`app.rs`), commands (`Cmd`), keys (`App::key`), menu (`menu.rs`), dialogs, settings; the platform shells in `blinzel-app`: Windows (`src/`), `src/linux/`, `src/macos/`; strings in `i18n/*.toml`; benchmarks in `blinzel-bench`; CI steps in `.github/workflows/`. Layout in §14.
+- **Spec questions** — Platforms: Windows, macOS, Linux or all — where may they differ, and why? Speed: does it touch the startup or browsing path, which budget applies (`blinzel.md` §12), how is it measured (§7.4)? UI: which menu entry, key (`App::key` in `blinzel-ui/src/app.rs`), dialog or setting, strings for every `i18n/*.toml`? Propose e.g. "logic in `blinzel-core`, the dialog in `blinzel-ui`, shells untouched". Front matter: `platforms: {all | Windows | macOS | Linux, …}`.
+- **AC subject** — "The viewer …".
+- **Performance AC example** — "200 thumbnails from the cache are on screen in under 30 ms (`blinzel --bench`, `thumb_grid_200`, median)".
+- **Tests** — §7: inline `#[cfg(test)]` unit tests, `tests/` integration tests for cross-module flows, golden tests against the CPU reference renderer for rendering, a benchmark for a performance AC; `blinzel-ui`'s `App` runs headless on Linux (`testkit::Harness`). Red run: `cargo test -p <crate> <test_name>`. Manual only for what cannot be automated (purely visual design, a system dialog, Gatekeeper, SmartScreen), recorded as `manual: {who} checked {what}, {date}` (§7.5).
+- **CI-only checks** — the Windows job (Direct3D / WARP golden test, benchmarks) and the macOS job (Metal golden test, app bundle), plus the Linux job's two Xvfb steps (§10). An AC proven only there carries `CI: windows` / `CI: macos` after its form. Code that only Windows or macOS builds (`crates/blinzel-app/src/` outside `linux/`, `src/macos/`) is not compiled by the local gates; `cargo xwin check --target x86_64-pc-windows-msvc` checks the Windows part where it is installed.
+- **Build check** — `cargo check` for the crates the spec touches (§3.4).
+- **Conventions** — §5 (no platform types in `blinzel-core` and `blinzel-ui`, behavior in the shared crates rather than one shell, every user-visible string in every `i18n/*.toml`), §6 (doc comments on public items of the library crates), §9 forbidden patterns, §11 definition of done.
+- **Stopping points** — §3.3 and §12: a new dependency in a `Cargo.toml` (it must pass the benchmark gate, §4), `unsafe` outside a shell, FFI binding or SIMD kernel, a test that would have to be disabled, a decision missing from `blinzel.md` §2, an AC that turns out wrong.
+- **Sizing** — §3.2: one session builds about one M task (~400 changed lines).
+- **Commits** — §2.4: one concept per commit, scopes `core`, `jpeg`, `ui`, `app`, `macos`, `linux`, `windows`, `release`, `site`, `spec`, …; a block touching `blinzel-core`, `blinzel-ui` and a shell is a series of commits, one per scope. Example: `feat(core): crop to an aspect ratio in the batch engine (AC-02, AC-03)`.
+- **Branches** — changes reach `main` only through PRs (§8); feature branch `feat/<spec-name>`.
+
+<!-- amigo-skills:begin spec-workflow -->
+<!-- Managed by .agents/sync.mjs from amigo-labs/skills (agents-md/). Edit it there, not here. -->
+
+## Spec-driven workflow
+
+Features are built spec-driven: first a feature spec `docs/specs/<name>.md` with testable acceptance criteria, then the implementation with tests, then an independent acceptance check. The project specifics (design spec, where decisions go, code map, tests, commits) are in the **spec workflow profile** of this file; the skills read it.
+
+The skills live in `.agents/skills/` (read by Codex, Gemini CLI, Copilot, Cursor, OpenCode and others) and are mirrored to `.claude/skills/` for Claude Code. They are vendored from [amigo-labs/skills](https://github.com/amigo-labs/skills): change them there and run `node .agents/sync.mjs`, never edit the copies here. Skills only this repository has live in `.agents/skills/` too and are mirrored the same way.
+
 | Skill | Purpose |
 | ----- | ------- |
-| `/spec <name>` | Write or revise a feature spec with acceptance criteria and a clarification pass |
-| `/spec-build <name>` | Implement a feature spec test-first, one commit series per AC block, independent verifier loop |
-| `/spec-check <name>` | Independent acceptance against a full gate run; only it sets `status: implemented` |
-| `/spec-extract` | A feature spec from existing code, or the current state of an open spec |
-| `/qa` | Full gate run (`.claude/gates.json`, the Linux part of CI) |
+| `spec <name>` | Write or revise a feature spec with acceptance criteria and a clarification pass |
+| `spec-build <name>` | Implement a feature spec test-first, one commit series per AC block, independent verifier loop |
+| `spec-check <name>` | Independent acceptance against a full gate run; only it sets `status: implemented` |
+| `spec-extract` | Spec from existing code, or current-state analysis of an open spec |
+| `spec-fix <bug>` | Bug fix: root cause, regression test that is red first, minimal fix |
+| `qa` | Full gate run (`.agents/gates.json`, mirrors CI) |
 
-Rules under `.claude/rules/` load with this file. Hooks (`.claude/settings.json`, they need Node.js): SessionStart lists the open feature specs, a guard refuses new suppressions (§9), and the Stop hook runs the fast gates for the areas a turn changed.
+An agent that cannot invoke skills by name reads `.agents/skills/<name>/SKILL.md` and follows it. At the start of a task, an agent without a session-start hook runs `node .agents/skills/qa/scripts/open-specs.mjs` to see the open feature specs.
+
+Two kinds of spec live in `docs/specs/`:
+
+| Kind | Status | Owns |
+| ---- | ------ | ---- |
+| Design spec (named in the profile) | `status: draft`, no acceptance criteria | Architecture, data model, the decisions |
+| Feature spec `docs/specs/<name>.md` | `status: todo` / `implemented`, `## Acceptance criteria` | One feature: what it does, how we prove it |
+
+A feature spec references the design-spec sections it builds on and never contradicts them. A feature that needs an architectural decision (cross-crate or cross-package boundary, file format, new dependency, public API shape) gets a decision where the profile says, in the same commit as the spec. The spec index (profile **Spec index**, default `docs/specs/README.md`) lists the feature specs: order, dependencies, done, and the backlog of gaps not yet written as specs.
+
+### Triage
+
+Classify every new input before touching code:
+
+| Input | Approach |
+| ----- | -------- |
+| New feature or changed behavior ("I want …", "it should …") | Start `spec`, no code before the spec. If the user says "just do it", implement directly. |
+| Request touches an existing feature spec | Revise that spec in `spec`'s revision mode, never create a second one |
+| Unclear whether small change or feature | Exactly one question: "Capture as spec" / "Implement directly" |
+| Bug fix | `spec-fix`: directly, always with a regression test that is red before the fix. If the fix changes specified behavior, revise the spec too. |
+| Refactoring, tooling, docs, questions | Directly, no spec |
+| "Carry on", "build X", "implement the spec" | `spec-build <name>` |
+| "Is X done?", acceptance after manual implementation | `spec-check <name>` |
+| Document existing behavior | `spec-extract <area>` |
+
+Only `spec-check` sets a spec to `status: implemented` — never by hand.
+
+### Keeping knowledge
+
+Project knowledge belongs in the repository, not on one machine:
+
+- **Pitfalls and non-obvious knowledge** → `## Gotchas` in this file. Only what cannot be read from code or git history; no noise.
+- **Architecture decisions** → where the profile's **Decisions** entry says.
+- **Feature-local decisions** → `## Decisions` of the feature spec, with the reason.
+- **Progress of a feature** → `## Evidence` of the feature spec (there is no separate status file).
+- **Never** into an agent's private memory (e.g. Claude Code auto memory): it stays on one machine.
+
+### Quality gates
+
+- **Run the `qa` skill before finishing any coding task** and report the result. The gate commands are in `.agents/gates.json`: `stop` (seconds: formatting, clippy on the changed crates — the Claude Code Stop hook runs it after every turn that changed code), `fast` (before every commit — the Claude Code commit gate refuses a commit while one is red; other agents run `node .agents/skills/qa/scripts/gates.mjs fast` before committing) and `full` (mirrors CI, `node .agents/skills/qa/scripts/gates.mjs full`).
+- **Fix the cause, never lower the gates.** No suppressions (the list is `suppressions` in `.agents/gates.json`), no weakened, skipped or ignored tests. The Claude Code guard hook refuses new suppressions; a justified one is added by the user.
+- **Don't loosen the gate configuration**: `.agents/gates.json`, `.agents/skills/qa/scripts/`, `.claude/settings.json` and `.claude/hooks/` change only on the user's explicit request.
+- Where a gate names a `fix` command (formatting, lint autofix), that fix is allowed; everything else is fixed in the code. Where a gate has a `note`, follow it.
+- `STOP_GATE=off` / `COMMIT_GATE=off` in the environment switch the Claude Code Stop hook / commit gate off, e.g. for a bulk migration — only on the user's request.
+
+<!-- amigo-skills:end spec-workflow -->
 
 ---
 
@@ -298,7 +377,8 @@ docs/specs/<name>.md          Feature specs with acceptance criteria (/spec)
 docs/specs/README.md          Index: order, done, backlog, open items outside the code
 docs/SECRETS.md               The secrets of the workflows
 AGENTS.md                     This file (CLAUDE.md only imports it)
-.claude/                      Skills, rules, hooks, gates.json
+.agents/                      Agent skills (.agents/skills, mirrored to .claude/skills), skills.json + sync.mjs, gates.json
+.claude/                      Claude Code: skills mirror (never edit it), hooks, settings
 
 crates/blinzel-core/          Platform-independent core (decoders, batch, thumbnails, update logic)
 crates/blinzel-jpeg/          Own parallel JPEG decoder

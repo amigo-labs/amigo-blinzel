@@ -1,71 +1,44 @@
-// Shared by the project hooks and the gate scripts. Plain Node without
-// dependencies, so the hooks run in every clone. `.mjs` because a `.js` file
-// would be ESM or CommonJS depending on the nearest package.json.
+// Gate tooling shared by the qa, spec-build and spec-check skills and by the
+// agent adapters (e.g. the Claude Code hooks). Plain Node without
+// dependencies, so it runs in every clone and under every agent. `.mjs`
+// because a `.js` file would be ESM or CommonJS depending on the nearest
+// package.json.
+//
+// Source of truth: https://github.com/amigo-labs/skills (skills/qa/scripts/).
+// A consuming repository vendors it with `node .agents/sync.mjs`; edit it
+// there, not in the copy.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Claude Code writes one JSON document to stdin. On Windows the stream's 'end'
-// does not reliably follow, so parse on every chunk and settle as soon as the
-// document is complete; the idle timeout is only the fallback.
-const STDIN_IDLE_TIMEOUT_MS = 1000;
+/** Where the gate configuration lives, relative to the repository root, in lookup order. */
+export const GATES_FILES = ['.agents/gates.json', '.claude/gates.json'];
 
-export function readStdinJson() {
-  return new Promise(resolve => {
-    let data = '';
-    let settled = false;
-    let timer = null;
-
-    const settle = value => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      try {
-        process.stdin.destroy();
-      } catch {
-        // ignore
-      }
-      resolve(value);
-    };
-    const tryParse = () => {
-      try {
-        return JSON.parse(data);
-      } catch {
-        return undefined;
-      }
-    };
-    const arm = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => settle(tryParse() ?? {}), STDIN_IDLE_TIMEOUT_MS);
-    };
-
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => {
-      data += chunk;
-      arm();
-      if (!/\}\s*$/.test(data)) return;
-      const parsed = tryParse();
-      if (parsed !== undefined) settle(parsed);
-    });
-    process.stdin.on('end', () => settle(tryParse() ?? {}));
-    process.stdin.on('error', () => settle({}));
-    arm();
-  });
+/** The repository root: the scripts sit at <root>/<agent dir>/skills/qa/scripts/. */
+export function repoRootFromScript(scriptUrl) {
+  return resolve(dirname(fileURLToPath(scriptUrl)), '..', '..', '..', '..');
 }
 
-export function projectDir(input) {
-  return process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
-}
-
+/** The gate configuration of a repository, or null when there is none (or it is broken). */
 export function loadGates(dir) {
-  try {
-    return JSON.parse(readFileSync(join(dir, '.claude', 'gates.json'), 'utf8'));
-  } catch {
-    return null;
+  for (const file of GATES_FILES) {
+    let text;
+    try {
+      text = readFileSync(join(dir, file), 'utf8');
+    } catch {
+      continue;
+    }
+    try {
+      return { ...JSON.parse(text), $file: file };
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 const MAX_GATE_OUTPUT = 32 * 1024 * 1024;
@@ -83,7 +56,7 @@ function killTree(child) {
 }
 
 function runGate(dir, gate, timeoutMs) {
-  return new Promise(resolve => {
+  return new Promise(resolvePromise => {
     const started = Date.now();
     let output = '';
     let timedOut = false;
@@ -92,7 +65,7 @@ function runGate(dir, gate, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ status: timedOut ? 'timeout' : status, output, durationMs: Date.now() - started });
+      resolvePromise({ status: timedOut ? 'timeout' : status, output, durationMs: Date.now() - started });
     };
 
     // Detached only outside Windows, for the process group the timeout kills:
@@ -141,7 +114,7 @@ export function runGates(dir, gates, { timeoutMs, onSettled = () => {} }) {
   const results = gates.map(() => undefined);
   let running = 0;
 
-  return new Promise(resolve => {
+  return new Promise(resolvePromise => {
     const finish = (index, result) => {
       results[index] = { gate: gates[index], ...result };
       onSettled(results[index]);
@@ -173,7 +146,7 @@ export function runGates(dir, gates, { timeoutMs, onSettled = () => {} }) {
       for (const index of gates.keys()) {
         if (!results[index]) finish(index, { status: 'skipped', output: '', durationMs: 0, blockedBy: null });
       }
-      resolve(results);
+      resolvePromise(results);
     };
 
     schedule();
@@ -195,12 +168,16 @@ function git(dir, args) {
   return result.status === 0 ? result.stdout : null;
 }
 
+function nulSeparated(buffer) {
+  return (buffer?.toString('utf8').split('\0') ?? []).filter(Boolean).map(path => path.replaceAll('\\', '/'));
+}
+
 export function headCommit(dir) {
   return git(dir, ['rev-parse', 'HEAD'])?.toString('utf8').trim() ?? null;
 }
 
-/** Repository-relative paths (forward slashes) of every uncommitted change. */
-function uncommittedPaths(dir) {
+/** Repository-relative paths (forward slashes) of every uncommitted change, or null outside git. */
+export function uncommittedPaths(dir) {
   const status = git(dir, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
   if (status === null) return null;
   const paths = [];
@@ -212,7 +189,14 @@ function uncommittedPaths(dir) {
     // Renames and copies carry their original path as the next entry
     if (entry[0] === 'R' || entry[0] === 'C') paths.push(entries[++index]);
   }
-  return paths.filter(Boolean);
+  return paths.filter(Boolean).map(path => path.replaceAll('\\', '/'));
+}
+
+/** Paths staged for the next commit; with `allTracked` also the unstaged changes of tracked files (`git commit -a`). */
+export function commitPaths(dir, { allTracked = false } = {}) {
+  const paths = new Set(nulSeparated(git(dir, ['diff', '--cached', '--name-only', '-z'])));
+  if (allTracked) for (const path of nulSeparated(git(dir, ['diff', '--name-only', '-z']))) paths.add(path);
+  return [...paths];
 }
 
 /**
@@ -236,16 +220,13 @@ export function treeState(dir) {
 }
 
 /**
- * Paths changed in this session: everything uncommitted plus what the commits
- * since `baseHead` touched. Without a base only the uncommitted paths count.
+ * Paths changed since `baseHead`: everything uncommitted plus what the commits
+ * since then touched. Without a base only the uncommitted paths count.
  */
 export function changedPaths(dir, baseHead) {
   const paths = new Set(uncommittedPaths(dir) ?? []);
-  if (baseHead) {
-    const committed = git(dir, ['diff', '--name-only', '-z', baseHead, 'HEAD']);
-    for (const path of committed?.toString('utf8').split('\0') ?? []) if (path) paths.add(path);
-  }
-  return [...paths].map(path => path.replaceAll('\\', '/'));
+  if (baseHead) for (const path of nulSeparated(git(dir, ['diff', '--name-only', '-z', baseHead, 'HEAD']))) paths.add(path);
+  return [...paths];
 }
 
 /** Whether a gate concerns the given changes: no `paths` means always. */
@@ -254,43 +235,110 @@ export function gateApplies(gate, paths) {
   return paths.some(path => gate.paths.some(prefix => path.startsWith(prefix)));
 }
 
-function stateFile(dir, sessionId) {
-  const key = createHash('sha256')
-    .update(`${dir}\0${sessionId ?? 'unknown'}`)
-    .digest('hex')
-    .slice(0, 24);
-  return join(tmpdir(), 'claude-gates', `${key}.json`);
+/** The `name` of a Cargo.toml's [package] section, or null for a workspace-only manifest. */
+function packageName(manifest) {
+  const lines = manifest.replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex(line => line.trim() === '[package]');
+  if (start < 0) return null;
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim().startsWith('[')) break;
+    const match = line.match(/^\s*name\s*=\s*"([^"]+)"/);
+    if (match) return match[1];
+  }
+  return null;
 }
 
-export function loadState(dir, sessionId) {
-  try {
-    return JSON.parse(readFileSync(stateFile(dir, sessionId), 'utf8'));
-  } catch {
-    return {};
+/** The Cargo package a repository path belongs to: the nearest Cargo.toml with a [package] above it. */
+function cargoPackageOf(dir, path, cache) {
+  let folder = posix.dirname(path);
+  while (true) {
+    if (!cache.has(folder)) {
+      let name = null;
+      try {
+        name = packageName(readFileSync(join(dir, folder, 'Cargo.toml'), 'utf8'));
+      } catch {
+        // no manifest here
+      }
+      cache.set(folder, name);
+    }
+    if (cache.get(folder)) return cache.get(folder);
+    if (folder === '.' || folder === '') return null;
+    folder = posix.dirname(folder);
   }
 }
 
-export function saveState(dir, sessionId, state) {
-  const folder = join(tmpdir(), 'claude-gates');
-  if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
-  writeFileSync(stateFile(dir, sessionId), JSON.stringify(state));
+/** The Cargo packages the given paths belong to, without `exclude`. Root files (Cargo.toml, Cargo.lock) belong to none. */
+export function cargoPackages(dir, paths, exclude = []) {
+  const cache = new Map();
+  const names = new Set();
+  for (const path of paths) {
+    if (!path.endsWith('.rs') && !path.endsWith('Cargo.toml')) continue;
+    const name = cargoPackageOf(dir, path, cache);
+    if (name && !exclude.includes(name)) names.add(name);
+  }
+  return [...names].sort();
+}
+
+/**
+ * Fills `{cargo-packages}` in gate commands with `-p <name>` for every Cargo
+ * package the changed paths belong to (minus the gate's `excludePackages`).
+ * A gate whose placeholder stays empty is dropped: nothing of it changed.
+ */
+export function expandGates(dir, gates, paths) {
+  const out = [];
+  for (const gate of gates) {
+    if (!gate.command.includes('{cargo-packages}')) {
+      out.push(gate);
+      continue;
+    }
+    const names = cargoPackages(dir, paths, gate.excludePackages ?? []);
+    if (names.length > 0) out.push({ ...gate, command: gate.command.replaceAll('{cargo-packages}', names.map(name => `-p ${name}`).join(' ')) });
+  }
+  return out;
+}
+
+function greenFile(dir) {
+  return join(tmpdir(), 'agent-gates', `green-${createHash('sha256').update(dir).digest('hex').slice(0, 16)}.json`);
+}
+
+/** Remembers that every gate of a list was green on this tree, so the commit gate need not run it again. */
+export function recordGreen(dir, list, hash) {
+  try {
+    let record = {};
+    try {
+      record = JSON.parse(readFileSync(greenFile(dir), 'utf8'));
+    } catch {
+      // first record
+    }
+    record[list] = hash;
+    const folder = dirname(greenFile(dir));
+    if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
+    writeFileSync(greenFile(dir), JSON.stringify(record));
+  } catch {
+    // only an optimisation
+  }
+}
+
+/** The tree hash on which every gate of a list was last green, or null. */
+export function lastGreen(dir, list) {
+  try {
+    return JSON.parse(readFileSync(greenFile(dir), 'utf8'))[list] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Whether the spec skills commit without asking: on unless the developer sets
- * SPEC_AUTOCOMMIT=false (e.g. under `env` in .claude/settings.local.json).
- * Committing on someone's behalf is up to that person, so this is never read
- * from a tracked file.
+ * SPEC_AUTOCOMMIT=false in their environment (for Claude Code e.g. under `env`
+ * in .claude/settings.local.json). Committing on someone's behalf is up to
+ * that person, so this is never read from a tracked file.
  */
 export function commitMode(env = process.env) {
   const value = env.SPEC_AUTOCOMMIT;
   if (value === undefined || value === '' || value === 'true') return { autoCommit: true };
   if (value === 'false') return { autoCommit: false };
   return { autoCommit: true, problem: `invalid SPEC_AUTOCOMMIT=${JSON.stringify(value)} (allowed: true, false)` };
-}
-
-export function print(output) {
-  process.stdout.write(JSON.stringify(output));
 }
 
 /** The lines of a level-2 section up to the next level-2 heading. */

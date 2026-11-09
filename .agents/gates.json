@@ -1,0 +1,112 @@
+{
+  "$comment": "Quality gates for the qa, spec-build and spec-check skills (node .agents/skills/qa/scripts/gates.mjs fast|full) and the Claude Code hooks in .claude/hooks/. `full` runs the Linux job of .github/workflows/ci.yml without its two Xvfb steps (the viewer smoke test and the X11 display-profile test need a display server); those and the Windows and macOS jobs run in CI only (AGENTS.md §10); `stop` runs in the Claude Code Stop hook after every turn that changed code and must take seconds (`{cargo-packages}` = `-p` for each changed crate, minus `excludePackages`); `fast` runs before every commit (Claude Code commit gate) and in spec-build after each block; both are filtered by `paths` (prefixes of changed repository paths). `needs` lists the ids a gate waits for; gates without needs between them run in parallel. Optional per gate: `fix` (auto-fix command), `note` (guidance when it is red).",
+  "stop": [
+    {
+      "id": "stop-fmt",
+      "name": "rustfmt",
+      "cwd": ".",
+      "command": "cargo fmt --all --check",
+      "fix": "cargo fmt --all",
+      "paths": [
+        "crates/",
+        "Cargo.toml"
+      ],
+      "needs": []
+    },
+    {
+      "id": "stop-clippy",
+      "name": "clippy (changed crates)",
+      "cwd": ".",
+      "command": "cargo clippy {cargo-packages} --all-targets -- -D warnings",
+      "paths": [
+        "crates/"
+      ],
+      "excludePackages": [],
+      "needs": []
+    }
+  ],
+  "fast": [
+    {
+      "id": "rust-fmt",
+      "name": "rustfmt",
+      "cwd": ".",
+      "command": "cargo fmt --all --check",
+      "fix": "cargo fmt --all",
+      "paths": [
+        "crates/",
+        "Cargo.toml"
+      ],
+      "needs": []
+    },
+    {
+      "id": "rust-clippy",
+      "name": "clippy",
+      "cwd": ".",
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "paths": [
+        "crates/",
+        "i18n/",
+        "third_party/",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/"
+      ],
+      "needs": []
+    }
+  ],
+  "full": [
+    {
+      "id": "rust-fmt",
+      "name": "rustfmt",
+      "cwd": ".",
+      "command": "cargo fmt --all --check",
+      "fix": "cargo fmt --all",
+      "needs": []
+    },
+    {
+      "id": "rust-clippy",
+      "name": "clippy",
+      "cwd": ".",
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "needs": []
+    },
+    {
+      "id": "rust-test",
+      "name": "cargo test",
+      "cwd": ".",
+      "command": "cargo test --workspace",
+      "needs": [
+        "rust-clippy"
+      ]
+    },
+    {
+      "id": "notices",
+      "name": "third-party notices current",
+      "cwd": ".",
+      "command": "cargo run --locked -p blinzel-release -- notices --check",
+      "fix": "cargo run -p blinzel-release -- notices",
+      "needs": [
+        "rust-clippy"
+      ],
+      "note": "Red when Cargo.lock changed without regenerating the license notices: run the fix command and commit the regenerated THIRD-PARTY-NOTICES*.txt with the change — review them, don't revert them."
+    },
+    {
+      "id": "agent-skills",
+      "name": "agent skills in sync",
+      "cwd": ".",
+      "command": "node .agents/sync.mjs --check",
+      "note": "Shared skills are edited in amigo-labs/skills and synced with `node .agents/sync.mjs`; this repository's own skills are edited in .agents/skills, then `node .agents/sync.mjs --mirror`.",
+      "needs": []
+    }
+  ],
+  "suppressionExtensions": [
+    ".rs"
+  ],
+  "suppressions": [
+    "#[allow(",
+    "#![allow(",
+    "#[expect(",
+    "#![expect(",
+    "#[ignore"
+  ]
+}

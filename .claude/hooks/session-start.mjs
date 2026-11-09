@@ -1,4 +1,4 @@
-// SessionStart: remembers the state of the working tree the session started
+// Claude Code SessionStart hook: remembers the state of the working tree the session started
 // with. The Stop gate only checks once the tree differs from it -- otherwise
 // a question asked in a repository that is red already would be blocked for
 // changes Claude never made. The start commit lets the Stop gate tell which
@@ -7,7 +7,7 @@
 // It also hands the session the state of the open feature specs, so "carry
 // on" or a new feature request finds its spec without searching first.
 
-import { headCommit, loadState, openSpecs, print, projectDir, readStdinJson, saveState, treeState } from './lib.mjs';
+import { headCommit, loadState, openSpecs, print, projectDir, readStdinJson, saveState, treeState } from './hook-lib.mjs';
 
 try {
   const input = await readStdinJson();
