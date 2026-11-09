@@ -42,22 +42,32 @@ fn uses_the_generated_monogram() {
     }
 }
 
+/// Windows' 20, 24 and 40 px (the tray at 125 % and 150 %) have no PNG:
+/// the mark fills them like every other size instead of sitting in a
+/// transparent border, and stays crisp (nearest neighbour, no blended
+/// colours).
 #[test]
-fn sizes_without_a_png_centre_the_small_mark_unscaled() {
+fn sizes_without_a_png_scale_the_small_mark_to_fill() {
     for (size, inner) in [(20, 16), (24, 16), (40, 32)] {
         let px = icon::rgba(size);
         let src = icon::rgba(inner);
-        let offset = (size - inner) / 2;
+        // The plate reaches all four edges at their middle, as in `inner`.
+        let mid = size / 2;
+        for (x, y) in [(mid, 0), (mid, size - 1), (0, mid), (size - 1, mid)] {
+            assert_eq!(pixel(&px, size, x, y)[3], 255, "{size} px at ({x}, {y})");
+        }
+        // Every pixel is the source pixel under its centre.
         for y in 0..size {
             for x in 0..size {
-                let inside =
-                    (offset..offset + inner).contains(&x) && (offset..offset + inner).contains(&y);
-                let want = if inside {
-                    pixel(&src, inner, x - offset, y - offset)
-                } else {
-                    [0; 4]
-                };
-                assert_eq!(pixel(&px, size, x, y), want, "{size} px at ({x}, {y})");
+                let (sx, sy) = (
+                    (2 * x + 1) * inner / (2 * size),
+                    (2 * y + 1) * inner / (2 * size),
+                );
+                assert_eq!(
+                    pixel(&px, size, x, y),
+                    pixel(&src, inner, sx, sy),
+                    "{size} px at ({x}, {y})"
+                );
             }
         }
     }

@@ -143,7 +143,7 @@ Behavior: [jpeg-decoder.md](jpeg-decoder.md). Measurements: [section 15](#jpeg-d
   - A needed LUT is built in parallel with decoding (4–7 ms, cold with DLL loading). Display P3 image (24 MP) cold: first GDI image as without a profile; resident handoff with profile 24–26 ms. The `--resident` start preloads `mscms`.
   - Profiles are read by the probe for JPEG, PNG, WebP, TIFF, JPEG XL (the color space `jxl-oxide` renders into; sRGB yields no profile), and by our own HEIF container reader for HEIC and AVIF (`colr`/`prof`, nclx with P3 primaries as a generated profile), also when WIC decodes. Grayscale and CMYK profiles yield no transform.
   - Behavior: [color-management.md](color-management.md).
-- **App icon:** `build.rs` packs the pixel monogram from `assets/brand/` (§2) as ICO with 16, 20, 24, 32, 40, 48, 64 and 256 px: DIBs up to 64 px, the generated PNG for 256 px; 20, 24 and 40 px centre the 16 or 32 px mark unscaled, as the generator does, so no size is blurred. Window, taskbar, tray and Start menu shortcut use it.
+- **App icon:** `build.rs` packs the pixel monogram from `assets/brand/` (§2) as ICO with 16, 20, 24, 32, 40, 48, 64 and 256 px: DIBs up to 64 px, the generated PNG for 256 px; 20, 24 and 40 px (the tray at 125 % and 150 %) scale the 16 or 32 px mark up to fill them, nearest neighbour, so no size is blurred and none sits in a transparent border that makes it look smaller than the icons beside it. Window, taskbar, tray and Start menu shortcut use it.
 
 ## 6. UI and window behavior
 
