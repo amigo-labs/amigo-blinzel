@@ -107,8 +107,8 @@ const PAD: f64 = 24.0;
 const WIDTH: f64 = 640.0;
 const RADIUS: f64 = 12.0;
 const MARGIN: f64 = 8.0;
-/// Title row and the list's header row (count, "Remove all"); also the
-/// progress and status rows of a run.
+/// Title row and the list's header row (count, "Remove all"); also a
+/// run's headline and the header of its error list.
 const HEAD_H: f64 = 24.0;
 const HINT_H: f64 = 16.0;
 const BUTTON_H: f64 = 32.0;
@@ -149,13 +149,24 @@ struct Run {
 }
 
 impl Run {
-    /// Rows for failures: the most a run shows while it lasts, so the
-    /// panel keeps its size; afterwards the ones there are.
+    /// Rows of the error list: the most a run can show, reserved from the
+    /// start and kept after it, so the sheet never changes its size.
     fn error_rows(&self) -> usize {
-        if self.summary.is_some() {
-            self.errors.len()
-        } else {
-            ERRORS_SHOWN.min(self.total)
+        ERRORS_SHOWN.min(self.total).max(1)
+    }
+
+    /// The headline: how far it is, or how it went.
+    fn headline(&self) -> String {
+        match &self.summary {
+            Some(s) if s.skipped > 0 => trf(
+                Msg::BatchCancelled,
+                &[("done", &s.done), ("total", &self.total)],
+            ),
+            Some(s) => trf(Msg::BatchDone, &[("done", &s.done), ("failed", &s.failed)]),
+            None => trf(
+                Msg::BatchProgress,
+                &[("done", &(self.done + self.failed)), ("total", &self.total)],
+            ),
         }
     }
 }
@@ -609,9 +620,11 @@ impl BatchDialog {
         let (head, ctrl, check, row) = (p.px(HEAD_H), p.px(CONTROL_H), p.px(CHECK_ROW), p.px(ROW));
         let w = p.px(WIDTH).min(client.0 - 2.0 * margin);
         let inner = w - 2.0 * pad;
-        // Title and list header above, the footer below: in every mode.
+        // The title above, the footer below: in every mode. Editing puts
+        // the list header under the title, a run its headline.
         let top = pad + head + tight + head + tight;
         let bottom = pad + p.px(BUTTON_H) + pad;
+        let inset = 2.0 * p.px(batch_files::INSET_V);
         let quality = self.has_quality();
         let edit = self
             .run
@@ -621,7 +634,6 @@ impl BatchDialog {
             (None, Some(e)) => {
                 // The list takes the whole rows the window leaves.
                 let fixed = top + group + e.body + bottom;
-                let inset = 2.0 * p.px(batch_files::INSET_V);
                 let fit = ((client.1 - 2.0 * margin - fixed - inset) / row).floor();
                 let rows = self
                     .files
@@ -631,7 +643,12 @@ impl BatchDialog {
                 let list_h = rows as f64 * row + inset;
                 (fixed + list_h, list_h)
             }
-            (Some(run), _) => (top + head + row * run.error_rows() as f64 + bottom, 0.0),
+            (Some(run), _) => {
+                // Title · headline and bar · error list · buttons.
+                let status = group + head + gap + p.px(BAR_H);
+                let errors = group + head + tight + row * run.error_rows() as f64 + inset;
+                (pad + head + status + errors + bottom, 0.0)
+            }
             (None, None) => (top + bottom, 0.0),
         };
         let panel = Rect::new(
@@ -646,26 +663,29 @@ impl BatchDialog {
         let mut y = panel.y + pad;
         let title = Rect::new(x0, y, inner, head);
         p.text_in(tr(Msg::BatchTitle), TEXT_TITLE, &title, 0.0, widgets::FG);
-        y += head + tight;
-        // The files come first: their count, and "Remove all" at the
-        // list's right edge.
-        let count = trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]);
-        let count_r = Rect::new(x0, y, inner, head);
-        p.text_in(&count, TEXT_BODY, &count_r, 0.0, widgets::FG);
+        y += head;
         let hover = self.hover;
-        if self.run.is_none() && !self.files.is_empty() {
-            let clear = tr(Msg::BatchClear);
-            let (cw, _) = p.text_size(clear, TEXT_BODY);
-            let cr = Rect::new(x0 + inner - cw - gap, y, cw + gap, head);
-            let color = if hover == Some(Hit::Clear) {
-                widgets::FG
-            } else {
-                widgets::ACCENT
-            };
-            p.text_in(clear, TEXT_BODY, &cr, gap, color);
-            hits.push((cr, Hit::Clear));
+        if self.run.is_none() {
+            // The files come first: their count, and "Remove all" at the
+            // list's right edge.
+            y += tight;
+            let count = trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]);
+            let count_r = Rect::new(x0, y, inner, head);
+            p.text_in(&count, TEXT_BODY, &count_r, 0.0, widgets::FG);
+            if !self.files.is_empty() {
+                let clear = tr(Msg::BatchClear);
+                let (cw, _) = p.text_size(clear, TEXT_BODY);
+                let cr = Rect::new(x0 + inner - cw - gap, y, cw + gap, head);
+                let color = if hover == Some(Hit::Clear) {
+                    widgets::FG
+                } else {
+                    widgets::ACCENT
+                };
+                p.text_in(clear, TEXT_BODY, &cr, gap, color);
+                hits.push((cr, Hit::Clear));
+            }
+            y += head + tight;
         }
-        y += head + tight;
 
         let footer = Rect::new(
             x0,
@@ -859,32 +879,49 @@ impl BatchDialog {
                 status(&mut p, &text, color, &footer, room);
             }
             (Some(run), _) => {
-                let finished = run.summary.is_some();
+                // The headline says how far it is (how it went), the bar
+                // under it shows the same; the details follow.
+                y += group;
+                let headline = p.elide_end(&run.headline(), TEXT_TITLE, inner);
+                let hr = Rect::new(x0, y, inner, head);
+                p.text_in(&headline, TEXT_TITLE, &hr, 0.0, widgets::FG);
+                y += head + gap;
+                let bar = Rect::new(x0, y, inner, p.px(BAR_H));
                 let handled = run.done + run.failed;
-                let bar_h = p.px(BAR_H);
-                let bar = Rect::new(x0, y + ((head - bar_h) / 2.0).round(), inner, bar_h);
                 p.progress(handled as f64 / run.total.max(1) as f64, bar);
-                y += head;
-                // The failures, in rows reserved while the run lasts.
-                for (name, error) in &run.errors {
-                    let line = error_line(&mut p, name, error, inner);
-                    let r = Rect::new(x0, y, inner, row);
-                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER);
-                    y += row;
+                y += bar.h + group;
+
+                // The failures: a labelled list of fixed height, with a
+                // note when there are more than it shows.
+                let er = Rect::new(x0, y, inner, head);
+                p.text_in(tr(Msg::BatchErrors), TEXT_BODY, &er, 0.0, widgets::DIM);
+                if run.failed > run.errors.len() {
+                    let n = run.errors.len();
+                    let more = trf(Msg::BatchErrorsFirst, &[("n", &n), ("failed", &run.failed)]);
+                    let (mw, _) = p.text_size(&more, TEXT_BODY);
+                    let mr = Rect::new(er.right() - mw, y, mw, head);
+                    p.text_in(&more, TEXT_BODY, &mr, 0.0, widgets::DIM);
                 }
-                // How far it is (or how it went), left of the buttons.
-                let text = match &run.summary {
-                    Some(s) if s.skipped > 0 => trf(
-                        Msg::BatchCancelled,
-                        &[("done", &s.done), ("total", &run.total)],
-                    ),
-                    Some(s) => trf(Msg::BatchDone, &[("done", &s.done), ("failed", &s.failed)]),
-                    None => trf(
-                        Msg::BatchProgress,
-                        &[("done", &handled), ("total", &run.total)],
-                    ),
-                };
-                if finished {
+                y += head + tight;
+                let list_h = row * run.error_rows() as f64 + inset;
+                let list = Rect::new(x0, y, inner, list_h);
+                let radius = batch_files::FRAME_RADIUS;
+                p.edge_outline(list, 1.0, radius, widgets::BORDER);
+                if run.errors.is_empty() {
+                    p.text_centred(tr(Msg::BatchNoErrors), TEXT_BODY, &list, widgets::DIM);
+                }
+                let inset_h = p.px(batch_files::INSET_H);
+                let line_w = inner - 2.0 * inset_h;
+                let mut ly = y + inset / 2.0;
+                for (name, error) in &run.errors {
+                    let line = error_line(&mut p, name, error, line_w);
+                    let r = Rect::new(x0 + inset_h, ly, line_w, row);
+                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER);
+                    ly += row;
+                }
+
+                // The footer holds only the buttons.
+                if run.summary.is_some() {
                     let (close, open) = (tr(Msg::BatchClose), tr(Msg::BatchOpenFolder));
                     let (clw, ow) = (p.button_width(close), p.button_width(open));
                     let clr = Rect::new(footer.right() - clw, footer.y, clw, footer.h);
@@ -896,7 +933,6 @@ impl BatchDialog {
                         hits.push((or, Hit::OpenFolder));
                     }
                     hits.push((clr, Hit::Close));
-                    status(&mut p, &text, widgets::FG, &footer, or.x - group - x0);
                 } else {
                     let cancel = tr(Msg::BatchCancel);
                     let cw = p.button_width(cancel);
@@ -904,7 +940,6 @@ impl BatchDialog {
                     let cancelling = run.cancel.load(Ordering::Relaxed);
                     p.button(cancel, false, hover == Some(Hit::Cancel), !cancelling, cr);
                     hits.push((cr, Hit::Cancel));
-                    status(&mut p, &text, widgets::FG, &footer, cr.x - group - x0);
                 }
             }
             (None, None) => {}
@@ -1425,6 +1460,77 @@ mod tests {
             drawn(&mut d, (960.0, 640.0));
             assert_eq!(d.cancel_button(), Some(cancel), "after {} errors", i + 1);
         }
+    }
+
+    /// A run reads top down: its count as a headline under the title,
+    /// the bar, the errors; the footer holds only buttons. The sheet keeps
+    /// its size when the run ends.
+    #[test]
+    fn a_run_leads_with_its_count_and_keeps_its_size() {
+        let mut d = dialog_with(10);
+        let (tx, rx) = std::sync::mpsc::channel();
+        d.started(10, rx, Arc::new(AtomicBool::new(false)));
+        let texts = |d: &mut BatchDialog| {
+            let mut canvas = crate::testkit::FakeCanvas::default();
+            d.draw(&mut canvas, (960.0, 640.0), 1.0);
+            let f = canvas.frame;
+            f.texts
+                .into_iter()
+                .zip(f.text_positions)
+                .collect::<Vec<_>>()
+        };
+        let shown = texts(&mut d);
+        let cancel = d.cancel_button().unwrap();
+        let progress = trf(Msg::BatchProgress, &[("done", &0), ("total", &10)]);
+        let (_, at) = shown
+            .iter()
+            .find(|(t, _)| *t == progress)
+            .expect("the count");
+        let (_, title) = shown
+            .iter()
+            .find(|(t, _)| t == tr(Msg::BatchTitle))
+            .unwrap();
+        assert!(at.1 > title.1 && (at.1 as f64) < title.1 as f64 + 2.0 * HEAD_H);
+        assert!(shown.iter().any(|(t, _)| t == tr(Msg::BatchNoErrors)));
+        let in_footer = |shown: &[(String, (f32, f32))], r: Rect| {
+            shown
+                .iter()
+                .filter(|(_, (_, y))| *y as f64 >= r.y && (*y as f64) < r.bottom())
+                .map(|(t, _)| t.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(in_footer(&shown, cancel), [tr(Msg::BatchCancel)]);
+
+        for i in 0..6 {
+            tx.send(RunMsg::Progress(Progress::Failed {
+                index: i,
+                source: format!("/photos/{i}.jpg").into(),
+                error: "broken".into(),
+            }))
+            .unwrap();
+        }
+        tx.send(RunMsg::Finished(Summary {
+            done: 4,
+            failed: 6,
+            skipped: 0,
+        }))
+        .unwrap();
+        d.poll();
+        let shown = texts(&mut d);
+        let close = d.drawn_at(Hit::Close).unwrap();
+        assert_eq!(close.bottom(), cancel.bottom(), "the sheet keeps its size");
+        let more = trf(Msg::BatchErrorsFirst, &[("n", &4), ("failed", &6)]);
+        assert!(
+            shown.iter().any(|(t, _)| *t == more),
+            "a note on the hidden errors"
+        );
+        let errors = shown
+            .iter()
+            .filter(|(t, _)| t.ends_with(": broken"))
+            .count();
+        assert_eq!(errors, ERRORS_SHOWN);
+        let footer = in_footer(&shown, close);
+        assert_eq!(footer, [tr(Msg::BatchOpenFolder), tr(Msg::BatchClose)]);
     }
 
     /// A long failure keeps its reason whole and fits the panel.

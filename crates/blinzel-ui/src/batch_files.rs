@@ -24,7 +24,9 @@ pub type Inspected = (PathBuf, Result<SourceInfo, String>);
 pub const ROW: f64 = widgets::CHECK_ROW;
 /// The list's inset: above and below the rows, left and right of them.
 pub const INSET_V: f64 = 4.0;
-const INSET_H: f64 = 8.0;
+pub(crate) const INSET_H: f64 = 8.0;
+/// The corner of the list's frame (and of the batch's error list).
+pub(crate) const FRAME_RADIUS: f64 = 8.0;
 /// Width of the arrow column and of the remove button.
 const ARROW_W: f64 = 24.0;
 const REMOVE_W: f64 = 24.0;
@@ -265,7 +267,7 @@ impl BatchFiles {
         use widgets::TEXT_BODY;
         self.area = r;
         // No fill: the rows sit on the panel, where DIM text passes AA.
-        p.edge_outline(r, 1.0, 8.0, widgets::BORDER);
+        p.edge_outline(r, 1.0, FRAME_RADIUS, widgets::BORDER);
         if self.rows.is_empty() {
             self.visible = 0;
             p.text_centred(tr(Msg::BatchDrop), TEXT_BODY, &r, widgets::DIM);
