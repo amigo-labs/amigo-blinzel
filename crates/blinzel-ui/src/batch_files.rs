@@ -150,6 +150,11 @@ impl BatchFiles {
         any
     }
 
+    /// Some header is still being read.
+    pub fn reading(&self) -> bool {
+        self.rows.iter().any(|r| r.info.is_none())
+    }
+
     /// Every header read and at least one file to resize.
     pub fn ready(&self) -> bool {
         self.rows.iter().all(|r| r.info.is_some())
@@ -260,7 +265,7 @@ impl BatchFiles {
         use widgets::TEXT_BODY;
         self.area = r;
         // No fill: the rows sit on the panel, where DIM text passes AA.
-        p.outline(r, 1.0, 8.0, widgets::BORDER);
+        p.edge_outline(r, 1.0, 8.0, widgets::BORDER);
         if self.rows.is_empty() {
             self.visible = 0;
             p.text_centred(tr(Msg::BatchDrop), TEXT_BODY, &r, widgets::DIM);

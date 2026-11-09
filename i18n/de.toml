@@ -135,6 +135,12 @@ batch_open_folder = "Ordner öffnen"
 batch_progress = "{done} von {total}"
 batch_done = "{done} gespeichert, {failed} fehlgeschlagen"
 batch_cancelled = "Abgebrochen nach {done} von {total}"
+batch_need_files = "Zuerst Bilder hinzufügen"
+batch_wait_reading = "Dateien werden gelesen…"
+batch_need_readable = "Kein lesbares Bild"
+batch_need_size = "Größe von 1 bis 100000 eingeben"
+batch_need_pattern = "Namensmuster korrigieren"
+batch_need_folder = "Ordner angeben"
 
 menu_open_with = "Öffnen mit…"
 menu_edit_with = "Bearbeiten mit…"
@@ -161,3 +167,7 @@ open_system_settings = "Systemeinstellungen öffnen"
 [messages.images_count]
 one = "{n} Bild"
 other = "{n} Bilder"
+
+[messages.batch_copies]
+one = "{n} Kopie in „{folder}“"
+other = "{n} Kopien in „{folder}“"

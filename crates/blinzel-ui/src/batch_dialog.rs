@@ -18,6 +18,7 @@ use blinzel_i18n::{Msg, PluralMsg, tr, trf, trp};
 
 use crate::backend::{Canvas, Key};
 use crate::batch_files::{self, BatchFiles, Inspected, ROW, file_name};
+use crate::gfx::Rgba;
 use crate::widgets::{self, CHECK_ROW, CONTROL_H, Painter, TEXT_BODY, TEXT_SMALL, TEXT_TITLE};
 
 /// Messages from the running batch.
@@ -120,9 +121,10 @@ const VALUE_W: f64 = 32.0;
 const GUTTER_MIN: f64 = 96.0;
 const GUTTER_MAX: f64 = 160.0;
 /// The list shows at least this many rows (fewer only when the window
-/// is too small) and at most that many.
+/// is too small); a taller window gives all its spare height to the list.
 const LIST_MIN_ROWS: usize = 4;
-const LIST_MAX_ROWS: usize = 12;
+/// A run keeps (and shows) its first failures, this many.
+const ERRORS_SHOWN: usize = 4;
 /// The labels of the gutter, top to bottom.
 const LABELS: [Msg; 6] = [
     Msg::BatchSize,
@@ -144,6 +146,18 @@ struct Run {
     cancel: Arc<AtomicBool>,
     rx: Receiver<RunMsg>,
     summary: Option<Summary>,
+}
+
+impl Run {
+    /// Rows for failures: the most a run shows while it lasts, so the
+    /// panel keeps its size; afterwards the ones there are.
+    fn error_rows(&self) -> usize {
+        if self.summary.is_some() {
+            self.errors.len()
+        } else {
+            ERRORS_SHOWN.min(self.total)
+        }
+    }
 }
 
 pub struct BatchDialog {
@@ -352,7 +366,7 @@ impl BatchDialog {
                 }
                 RunMsg::Progress(Progress::Failed { source, error, .. }) => {
                     run.failed += 1;
-                    if run.errors.len() < 4 {
+                    if run.errors.len() < ERRORS_SHOWN {
                         run.errors.push((file_name(&source), error));
                     }
                 }
@@ -549,6 +563,40 @@ impl BatchDialog {
             && !(FORMATS[self.format] == Some(Codec::Webp) && self.lossless)
     }
 
+    /// Not PNG: a quality row (the slider, or WebP's lossless switch).
+    fn has_quality(&self) -> bool {
+        FORMATS[self.format] != Some(Codec::Png)
+    }
+
+    /// What Start will do (the number of copies), or why it cannot: the
+    /// message for the footer's status. Ok exactly when Start runs.
+    fn readiness(&mut self) -> Result<usize, Msg> {
+        if self.files.is_empty() {
+            return Err(Msg::BatchNeedFiles);
+        }
+        if self.files.reading() {
+            return Err(Msg::BatchWaitReading);
+        }
+        if !self.files.ready() {
+            return Err(Msg::BatchNeedReadable);
+        }
+        if self.size().is_none() {
+            return Err(Msg::BatchNeedSize);
+        }
+        if naming::validate(&self.pattern).is_err() {
+            return Err(Msg::BatchNeedPattern);
+        }
+        // Size and pattern are fine: only the folder is left.
+        let Some(job) = self.job() else {
+            return Err(Msg::BatchNeedFolder);
+        };
+        // A name that cannot be made comes from the pattern.
+        self.files
+            .items(job)
+            .map(|items| items.len())
+            .ok_or(Msg::BatchNeedPattern)
+    }
+
     /// Draws the dialog centred in `client` (physical pixels) and
     /// remembers where its controls are.
     pub fn draw(&mut self, canvas: &mut impl Canvas, client: (f64, f64), scale: f64) {
@@ -564,7 +612,11 @@ impl BatchDialog {
         // Title and list header above, the footer below: in every mode.
         let top = pad + head + tight + head + tight;
         let bottom = pad + p.px(BUTTON_H) + pad;
-        let edit = self.run.is_none().then(|| Edit::measure(&mut p, inner));
+        let quality = self.has_quality();
+        let edit = self
+            .run
+            .is_none()
+            .then(|| Edit::measure(&mut p, inner, quality));
         let (h, list_h) = match (&self.run, &edit) {
             (None, Some(e)) => {
                 // The list takes the whole rows the window leaves.
@@ -574,15 +626,12 @@ impl BatchDialog {
                 let rows = self
                     .files
                     .len()
-                    .clamp(LIST_MIN_ROWS, LIST_MAX_ROWS)
+                    .max(LIST_MIN_ROWS)
                     .min(fit.max(1.0) as usize);
                 let list_h = rows as f64 * row + inset;
                 (fixed + list_h, list_h)
             }
-            (Some(run), _) => (
-                top + head + head + row * run.errors.len() as f64 + bottom,
-                0.0,
-            ),
+            (Some(run), _) => (top + head + row * run.error_rows() as f64 + bottom, 0.0),
             (None, None) => (top + bottom, 0.0),
         };
         let panel = Rect::new(
@@ -717,25 +766,35 @@ impl BatchDialog {
                         .map(|(i, r)| (r, Hit::Format(i))),
                 );
 
-                label(&mut p, Msg::BatchQuality, y, ctrl);
+                // Quality: none for PNG. WebP's lossless switch comes
+                // first (column 1), its slider in column 2.
                 let value_w = p.px(VALUE_W);
-                let slider = Rect::new(cx, y, col2 - cx - group - value_w - gap, ctrl);
-                if self.lossy() {
-                    p.slider((self.quality as f64 - 1.0) / 99.0, slider);
-                    hits.push((slider, Hit::Slider));
-                    // The number, right-aligned after the track.
-                    let v = self.quality.to_string();
-                    let (vw, _) = p.text_size(&v, TEXT_BODY);
-                    let vr = Rect::new(slider.right() + gap + value_w - vw, y, vw, ctrl);
-                    p.text_in(&v, TEXT_BODY, &vr, 0.0, widgets::FG);
+                let webp = FORMATS[self.format] == Some(Codec::Webp);
+                let (sx, right) = if webp {
+                    (col2, cx + cw)
+                } else {
+                    (cx, col2 - group)
+                };
+                let slider = Rect::new(sx, y, right - sx - gap - value_w, ctrl);
+                if quality {
+                    label(&mut p, Msg::BatchQuality, y, ctrl);
+                    if self.lossy() {
+                        p.slider((self.quality as f64 - 1.0) / 99.0, slider);
+                        hits.push((slider, Hit::Slider));
+                        // The number, right-aligned after the track.
+                        let v = self.quality.to_string();
+                        let (vw, _) = p.text_size(&v, TEXT_BODY);
+                        let vr = Rect::new(right - vw, y, vw, ctrl);
+                        p.text_in(&v, TEXT_BODY, &vr, 0.0, widgets::FG);
+                    }
+                    if webp {
+                        let lossless = tr(Msg::BatchLossless);
+                        let cb = p.checkbox(lossless, self.lossless, true, cx, y + check_dy);
+                        hits.push((cb, Hit::Lossless));
+                    }
+                    y += ctrl + gap;
                 }
                 self.slider = slider;
-                if FORMATS[self.format] == Some(Codec::Webp) {
-                    let lossless = tr(Msg::BatchLossless);
-                    let cb = p.checkbox(lossless, self.lossless, true, col2, y + check_dy);
-                    hits.push((cb, Hit::Lossless));
-                }
-                y += ctrl + gap;
 
                 label(&mut p, Msg::BatchOptions, y, check);
                 let cb = p.checkbox(tr(Msg::BatchSharpen), self.sharpen, true, cx, y);
@@ -778,16 +837,26 @@ impl BatchDialog {
                 p.button("…", false, hover == Some(Hit::PickFolder), true, pick);
                 hits.push((pick, Hit::PickFolder));
 
-                // Footer: Start, the one primary action, rightmost.
-                let ok = self.job().is_some() && self.files.ready();
+                // Footer: Start, the one primary action, rightmost; left
+                // of the buttons what it will do, or why it cannot.
+                let ready = self.readiness();
                 let (start, cancel) = (tr(Msg::BatchStart), tr(Msg::BatchCancel));
                 let (sw, cw) = (p.button_width(start), p.button_width(cancel));
                 let sr = Rect::new(footer.right() - sw, footer.y, sw, footer.h);
                 let cr = Rect::new(sr.x - gap - cw, footer.y, cw, footer.h);
                 p.button(cancel, false, hover == Some(Hit::Cancel), true, cr);
-                p.button(start, true, hover == Some(Hit::Start), ok, sr);
+                p.button(start, true, hover == Some(Hit::Start), ready.is_ok(), sr);
                 hits.push((cr, Hit::Cancel));
                 hits.push((sr, Hit::Start));
+                let room = cr.x - group - x0;
+                let (text, color) = match ready {
+                    Ok(n) => (copies(&mut p, n, self.folder.trim(), room), widgets::DIM),
+                    Err(m @ (Msg::BatchNeedFiles | Msg::BatchWaitReading)) => {
+                        (tr(m).to_string(), widgets::DIM)
+                    }
+                    Err(m) => (tr(m).to_string(), widgets::DANGER),
+                };
+                status(&mut p, &text, color, &footer, room);
             }
             (Some(run), _) => {
                 let finished = run.summary.is_some();
@@ -796,7 +865,15 @@ impl BatchDialog {
                 let bar = Rect::new(x0, y + ((head - bar_h) / 2.0).round(), inner, bar_h);
                 p.progress(handled as f64 / run.total.max(1) as f64, bar);
                 y += head;
-                let status = match &run.summary {
+                // The failures, in rows reserved while the run lasts.
+                for (name, error) in &run.errors {
+                    let line = error_line(&mut p, name, error, inner);
+                    let r = Rect::new(x0, y, inner, row);
+                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER);
+                    y += row;
+                }
+                // How far it is (or how it went), left of the buttons.
+                let text = match &run.summary {
                     Some(s) if s.skipped > 0 => trf(
                         Msg::BatchCancelled,
                         &[("done", &s.done), ("total", &run.total)],
@@ -807,15 +884,6 @@ impl BatchDialog {
                         &[("done", &handled), ("total", &run.total)],
                     ),
                 };
-                let status_r = Rect::new(x0, y, inner, head);
-                p.text_in(&status, TEXT_BODY, &status_r, 0.0, widgets::FG);
-                y += head;
-                for (name, error) in &run.errors {
-                    let line = error_line(&mut p, name, error, inner);
-                    let r = Rect::new(x0, y, inner, row);
-                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER);
-                    y += row;
-                }
                 if finished {
                     let (close, open) = (tr(Msg::BatchClose), tr(Msg::BatchOpenFolder));
                     let (clw, ow) = (p.button_width(close), p.button_width(open));
@@ -828,6 +896,7 @@ impl BatchDialog {
                         hits.push((or, Hit::OpenFolder));
                     }
                     hits.push((clr, Hit::Close));
+                    status(&mut p, &text, widgets::FG, &footer, or.x - group - x0);
                 } else {
                     let cancel = tr(Msg::BatchCancel);
                     let cw = p.button_width(cancel);
@@ -835,6 +904,7 @@ impl BatchDialog {
                     let cancelling = run.cancel.load(Ordering::Relaxed);
                     p.button(cancel, false, hover == Some(Hit::Cancel), !cancelling, cr);
                     hits.push((cr, Hit::Cancel));
+                    status(&mut p, &text, widgets::FG, &footer, cr.x - group - x0);
                 }
             }
             (None, None) => {}
@@ -852,7 +922,7 @@ struct Edit {
 }
 
 impl Edit {
-    fn measure(p: &mut Painter<impl Canvas>, inner: f64) -> Edit {
+    fn measure(p: &mut Painter<impl Canvas>, inner: f64, quality: bool) -> Edit {
         let widest = LABELS
             .iter()
             .map(|m| p.text_size(tr(*m), TEXT_BODY).0)
@@ -871,13 +941,13 @@ impl Edit {
         let formats_h = segments_h(p, &BatchDialog::format_labels());
         let (tight, gap, group) = (p.px(GAP_TIGHT), p.px(GAP_ROW), p.px(GAP_GROUP));
         let (ctrl, check) = (p.px(CONTROL_H), p.px(CHECK_ROW));
-        // Size: modes, values. Output: format, quality, two option
-        // rows, name and hint, folder. As drawn in `BatchDialog::draw`.
+        // Size: modes, values. Output: format, quality (not for PNG), two
+        // option rows, name and hint, folder. As drawn in `BatchDialog::draw`.
         let size = modes_h + gap + ctrl;
+        let quality_h = if quality { ctrl + gap } else { 0.0 };
         let output = formats_h
             + gap
-            + ctrl
-            + gap
+            + quality_h
             + 2.0 * (check + gap)
             + ctrl
             + tight
@@ -905,6 +975,26 @@ fn error_line(p: &mut Painter<impl Canvas>, name: &str, error: &str, w: f64) -> 
     } else {
         p.elide_end(&full, TEXT_BODY, w)
     }
+}
+
+/// "{n} copies into {folder}" in `w`: a long folder is shortened in the
+/// middle, so the count and the folder's end stay readable.
+fn copies(p: &mut Painter<impl Canvas>, n: usize, folder: &str, w: f64) -> String {
+    let text = |folder: &str| trp(PluralMsg::BatchCopies, n as u64, &[("folder", &folder)]);
+    let full = text(folder);
+    let over = p.text_size(&full, TEXT_BODY).0 - w;
+    if over <= 0.0 {
+        return full;
+    }
+    let room = p.text_size(folder, TEXT_BODY).0 - over;
+    let short = p.elide_middle(folder, TEXT_BODY, room.max(0.0));
+    p.elide_end(&text(&short), TEXT_BODY, w)
+}
+
+/// The footer's status: one line left in `footer`, at most `w` wide.
+fn status(p: &mut Painter<impl Canvas>, text: &str, color: Rgba, footer: &Rect, w: f64) {
+    let line = p.elide_end(text, TEXT_BODY, w.max(0.0));
+    p.text_in(&line, TEXT_BODY, footer, 0.0, color);
 }
 
 #[cfg(test)]
@@ -1137,9 +1227,16 @@ mod tests {
             let rows = (0..48)
                 .filter(|&i| d.drawn_at(Hit::Remove(i)).is_some())
                 .count();
-            assert!((1..=LIST_MAX_ROWS).contains(&rows), "{rows} rows");
+            assert!(rows >= 1, "{rows} rows");
+            // The list takes the height that is left: the panel ends less
+            // than a row above the window's margin.
+            let bottom = start.bottom() + PAD;
+            assert!(
+                bottom > client.1 - MARGIN - ROW,
+                "{client:?}: panel ends at {bottom}, {rows} rows"
+            );
             if client.1 > 1000.0 {
-                assert_eq!(rows, LIST_MAX_ROWS, "a tall window shows the most rows");
+                assert!(rows > 12, "a tall window gives the list its height: {rows}");
             }
         }
         // A short list keeps its least height; the panel shrinks with it.
@@ -1173,9 +1270,11 @@ mod tests {
         let col2 = d.drawn_at(Hit::KeepIcc).unwrap().x;
         assert_eq!(d.drawn_at(Hit::StripGps).unwrap().x, col2);
         assert_eq!(d.drawn_at(Hit::NoEnlarge).unwrap().x, col2);
+        // WebP: the lossless switch first, its slider in the second column.
         d.format = 3;
         drawn(&mut d, (1200.0, 800.0));
-        assert_eq!(d.drawn_at(Hit::Lossless).unwrap().x, col2);
+        assert_eq!(d.drawn_at(Hit::Lossless).unwrap().x, edge);
+        assert_eq!(d.drawn_at(Hit::Slider).unwrap().x, col2);
         // The panel's inner left edge: its right edge less the inner width.
         let x0 = d.drawn_at(Hit::PickFolder).unwrap().right() - (WIDTH - 2.0 * PAD);
         assert!(
@@ -1203,6 +1302,129 @@ mod tests {
         assert_eq!(rows, [20.0, 20.0, 20.0, 50.0, 50.0, 50.0]);
         assert_eq!((two[2].right(), two[5].right()), (210.0, 210.0));
         assert_eq!((two[0].x, two[3].x), (10.0, 10.0));
+        // One column grid: the second row's dividers under the first's.
+        assert_eq!((two[1].x, two[2].x), (two[4].x, two[5].x));
+        assert!(two[0].w > two[1].w, "the widest label sets its column");
+        // A short last row keeps the columns and ends at the edge.
+        let five = p.segment_rects(&labels[..5], 10.0, 20.0, 200.0);
+        assert_eq!(five[3].x, five[0].x);
+        assert_eq!(five[4].x, five[1].x);
+        assert_eq!(five[4].right(), 210.0);
+    }
+
+    /// The texts drawn left of Cancel and Start, with their colours.
+    fn footer_status(d: &mut BatchDialog) -> (String, Rgba) {
+        let mut canvas = crate::testkit::FakeCanvas::default();
+        d.draw(&mut canvas, (1200.0, 800.0), 1.0);
+        let start = d.drawn_at(Hit::Start).unwrap();
+        let f = &canvas.frame;
+        let i = (0..f.texts.len())
+            .rev()
+            .find(|&i| {
+                let (x, y) = f.text_positions[i];
+                y as f64 >= start.y && (y as f64) < start.bottom() && (x as f64) < start.x - 120.0
+            })
+            .expect("a status left of the buttons");
+        (f.texts[i].clone(), f.text_colors[i])
+    }
+
+    /// The footer says what Start will do, or why it cannot, and Start
+    /// is enabled exactly when it says what it will do.
+    #[test]
+    fn the_footer_states_what_start_will_do() {
+        let mut d = dialog_with(3);
+        assert_eq!(d.readiness(), Ok(3));
+        let (text, color) = footer_status(&mut d);
+        assert_eq!(
+            text,
+            trp(PluralMsg::BatchCopies, 3, &[("folder", &"resized")])
+        );
+        assert_eq!(color, widgets::DIM);
+        let blocked = |d: &mut BatchDialog, msg: Msg| {
+            assert_eq!(d.readiness(), Err(msg));
+            assert_eq!(d.key(Key::Enter), Outcome::Unchanged, "{msg:?}");
+            let (text, color) = footer_status(d);
+            assert_eq!(text, tr(msg));
+            color
+        };
+        d.first.clear();
+        assert_eq!(blocked(&mut d, Msg::BatchNeedSize), widgets::DANGER);
+        d.first = "1920".into();
+        d.pattern = "{bad".into();
+        assert_eq!(blocked(&mut d, Msg::BatchNeedPattern), widgets::DANGER);
+        d.pattern = "{name}".into();
+        d.folder = " ".into();
+        assert_eq!(blocked(&mut d, Msg::BatchNeedFolder), widgets::DANGER);
+        d.folder = "resized".into();
+        assert!(matches!(d.key(Key::Enter), Outcome::Start(..)));
+
+        let mut d = BatchDialog::new();
+        assert_eq!(blocked(&mut d, Msg::BatchNeedFiles), widgets::DIM);
+        d.add(vec!["/photos/broken.jpg".into()]);
+        assert_eq!(blocked(&mut d, Msg::BatchWaitReading), widgets::DIM);
+        let (tx, rx) = std::sync::mpsc::channel();
+        d.inspecting(rx);
+        tx.send(("/photos/broken.jpg".into(), Err("broken".into())))
+            .unwrap();
+        d.poll();
+        assert_eq!(blocked(&mut d, Msg::BatchNeedReadable), widgets::DANGER);
+    }
+
+    /// A long folder is shortened in the middle; the count stays.
+    #[test]
+    fn a_long_folder_keeps_the_count_and_its_end() {
+        let mut canvas = crate::testkit::FakeCanvas::default();
+        let mut p = Painter {
+            canvas: &mut canvas,
+            scale: 1.0,
+        };
+        let folder = "/home/someone/Pictures/2026/Summer holiday/exports/small";
+        let line = copies(&mut p, 47, folder, 300.0);
+        assert!(p.text_size(&line, TEXT_BODY).0 <= 300.0, "{line}");
+        assert!(line.starts_with("47 "), "{line}");
+        assert!(line.contains("…") && line.contains("small"), "{line}");
+    }
+
+    /// PNG has no quality row (no label without a control); WebP keeps
+    /// the row for its lossless switch even without the slider.
+    #[test]
+    fn the_quality_row_is_there_only_with_a_quality_setting() {
+        let mut d = dialog_with(3);
+        let quality = tr(Msg::BatchQuality);
+        let labels = |d: &mut BatchDialog| {
+            let mut canvas = crate::testkit::FakeCanvas::default();
+            d.draw(&mut canvas, (1200.0, 800.0), 1.0);
+            canvas.frame.texts.iter().filter(|t| *t == quality).count()
+        };
+        assert_eq!(labels(&mut d), 1);
+        d.format = 2;
+        assert_eq!(labels(&mut d), 0, "PNG");
+        assert!(d.drawn_at(Hit::Slider).is_none() && d.drawn_at(Hit::Lossless).is_none());
+        d.format = 3;
+        d.lossless = true;
+        assert_eq!(labels(&mut d), 1, "lossless WebP");
+        assert!(d.drawn_at(Hit::Slider).is_none() && d.drawn_at(Hit::Lossless).is_some());
+    }
+
+    /// A running batch keeps its panel still while errors arrive.
+    #[test]
+    fn errors_during_a_run_do_not_move_the_panel() {
+        let mut d = dialog_with(10);
+        let (tx, rx) = std::sync::mpsc::channel();
+        d.started(10, rx, Arc::new(AtomicBool::new(false)));
+        drawn(&mut d, (960.0, 640.0));
+        let cancel = d.cancel_button().unwrap();
+        for i in 0..6 {
+            tx.send(RunMsg::Progress(Progress::Failed {
+                index: i,
+                source: format!("/photos/{i}.jpg").into(),
+                error: "broken".into(),
+            }))
+            .unwrap();
+            d.poll();
+            drawn(&mut d, (960.0, 640.0));
+            assert_eq!(d.cancel_button(), Some(cancel), "after {} errors", i + 1);
+        }
     }
 
     /// A long failure keeps its reason whole and fits the panel.

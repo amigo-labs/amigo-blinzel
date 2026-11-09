@@ -135,6 +135,12 @@ batch_open_folder = "Abrir pasta"
 batch_progress = "{done} de {total}"
 batch_done = "{done} salvas, {failed} com falha"
 batch_cancelled = "Cancelado após {done} de {total}"
+batch_need_files = "Adicione imagens primeiro"
+batch_wait_reading = "Lendo os arquivos…"
+batch_need_readable = "Nenhuma imagem legível"
+batch_need_size = "Digite um tamanho de 1 a 100000"
+batch_need_pattern = "Corrija o padrão do nome"
+batch_need_folder = "Informe uma pasta"
 
 menu_open_with = "Abrir com…"
 menu_edit_with = "Editar com…"
@@ -161,3 +167,7 @@ open_system_settings = "Abrir Ajustes do Sistema"
 [messages.images_count]
 one = "{n} imagem"
 other = "{n} imagens"
+
+[messages.batch_copies]
+one = "{n} cópia em “{folder}”"
+other = "{n} cópias em “{folder}”"

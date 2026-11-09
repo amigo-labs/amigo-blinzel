@@ -135,6 +135,12 @@ batch_open_folder = "打开文件夹"
 batch_progress = "{done} / {total}"
 batch_done = "已保存 {done} 个，失败 {failed} 个"
 batch_cancelled = "已在 {done} / {total} 时取消"
+batch_need_files = "请先添加图片"
+batch_wait_reading = "正在读取文件…"
+batch_need_readable = "没有可读取的图片"
+batch_need_size = "请输入 1 到 100000 之间的尺寸"
+batch_need_pattern = "请修正文件名模式"
+batch_need_folder = "请指定文件夹"
 
 menu_open_with = "打开方式…"
 menu_edit_with = "编辑方式…"
@@ -160,3 +166,6 @@ open_system_settings = "打开系统设置"
 
 [messages.images_count]
 other = "{n} 张图片"
+
+[messages.batch_copies]
+other = "{n} 份副本存入「{folder}」"

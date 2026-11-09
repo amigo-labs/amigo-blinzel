@@ -25,9 +25,11 @@ pub const DANGER: Rgba = Rgba(1.0, 0.45, 0.42, 1.0);
 pub const CONTROL_H: f64 = 30.0;
 /// Height of a check box row and of a list row.
 pub const CHECK_ROW: f64 = 22.0;
-/// The type scale: dialog title, body text, hints.
+/// The type scale's dialog title.
 pub const TEXT_TITLE: f64 = 18.0;
+/// The type scale's body text: labels, controls, rows, buttons, status.
 pub const TEXT_BODY: f64 = 13.0;
+/// The type scale's hints.
 pub const TEXT_SMALL: f64 = 12.0;
 /// Room left and right of a segment's label.
 const SEGMENT_PAD: f64 = 12.0;
@@ -100,10 +102,24 @@ impl<C: Canvas> Painter<'_, C> {
         }]);
     }
 
+    /// An outline drawn inside `rect` (inset by half its stroke), so its
+    /// ink ends on the same pixel as a filled control of that rectangle.
+    pub fn edge_outline(&mut self, rect: Rect, thickness: f64, radius: f64, color: Rgba) {
+        let half = thickness * self.scale / 2.0;
+        let inner = Rect::new(
+            rect.x + half,
+            rect.y + half,
+            rect.w - 2.0 * half,
+            rect.h - 2.0 * half,
+        );
+        self.outline(inner, thickness, (radius - thickness / 2.0).max(0.0), color);
+    }
+
     /// Where [`Painter::segmented`] puts each option in a control at
     /// `(x, y)` that is `w` wide: each segment as wide as its label needs,
     /// the spare width shared out equally; options that do not fit one row
-    /// wrap into rows with the same number of options.
+    /// wrap into rows with the same number of options, on one column grid
+    /// (each column as wide as its widest label), so the rows line up.
     pub fn segment_rects(&mut self, options: &[&str], x: f64, y: f64, w: f64) -> Vec<Rect> {
         let pad = self.px(SEGMENT_PAD);
         let natural: Vec<f64> = options
@@ -111,27 +127,44 @@ impl<C: Canvas> Painter<'_, C> {
             .map(|o| self.text_size(o, TEXT_BODY).0 + 2.0 * pad)
             .collect();
         let n = natural.len().max(1);
+        let columns = |per: usize| -> Vec<f64> {
+            (0..per)
+                .map(|c| {
+                    natural
+                        .iter()
+                        .skip(c)
+                        .step_by(per)
+                        .fold(0.0, |a: f64, &b| a.max(b))
+                })
+                .collect()
+        };
         let per = (1..=n)
             .map(|rows| n.div_ceil(rows))
-            .find(|&per| natural.chunks(per).all(|c| c.iter().sum::<f64>() <= w))
+            .find(|&per| columns(per).iter().sum::<f64>() <= w)
             .unwrap_or(1);
+        let cols = columns(per);
+        let spare = (w - cols.iter().sum::<f64>()).max(0.0) / per as f64;
+        // The column edges every row shares; the last ends at the right.
+        let mut edges = vec![x];
+        for c in &cols[..per - 1] {
+            let last = *edges.last().unwrap_or(&x);
+            edges.push((last + c + spare).round());
+        }
+        edges.push(x + w);
         let h = self.px(CONTROL_H);
-        let mut out = Vec::with_capacity(natural.len());
-        for (row, chunk) in natural.chunks(per).enumerate() {
-            let spare = (w - chunk.iter().sum::<f64>()).max(0.0) / chunk.len() as f64;
-            let ry = y + h * row as f64;
-            let mut left = x;
-            for (i, nat) in chunk.iter().enumerate() {
-                let right = if i + 1 == chunk.len() {
+        (0..natural.len())
+            .map(|i| {
+                let (row, col) = (i / per, i % per);
+                // A short last row stretches its last option to the edge.
+                let right = if i + 1 == natural.len() {
                     x + w
                 } else {
-                    (left + nat + spare).round()
+                    edges[col + 1]
                 };
-                out.push(Rect::new(left, ry, right - left, h));
-                left = right;
-            }
-        }
-        out
+                let left = edges[col];
+                Rect::new(left, y + h * row as f64, right - left, h)
+            })
+            .collect()
     }
 
     /// A choice of one option ([`Painter::segment_rects`]); returns each
@@ -185,7 +218,7 @@ impl<C: Canvas> Painter<'_, C> {
                 line((cx - k / 3.0, cy + k * 0.7), (cx + k, cy - k * 0.8)),
             ]);
         } else {
-            self.outline(box_r, 1.2, 4.0, if enabled { DIM } else { FAINT });
+            self.edge_outline(box_r, 1.2, 4.0, if enabled { DIM } else { FAINT });
         }
         let (_, lh) = self.text_size(label, TEXT_BODY);
         let row = self.px(CHECK_ROW);
@@ -206,7 +239,7 @@ impl<C: Canvas> Painter<'_, C> {
         } else {
             (DIM, 1.0)
         };
-        self.outline(r, thick, 5.0, border);
+        self.edge_outline(r, thick, 5.0, border);
         let pad = self.px(8.0);
         self.text_in(text, TEXT_BODY, &r, pad, FG);
         if focused {
@@ -245,7 +278,7 @@ impl<C: Canvas> Painter<'_, C> {
     pub fn button(&mut self, label: &str, primary: bool, hover: bool, enabled: bool, r: Rect) {
         let ink = match (enabled, primary) {
             (false, _) => {
-                self.outline(r, 1.0, 6.0, BORDER);
+                self.edge_outline(r, 1.0, 6.0, BORDER);
                 DIM
             }
             (true, true) => {

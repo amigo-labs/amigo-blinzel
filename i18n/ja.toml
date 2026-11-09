@@ -135,6 +135,12 @@ batch_open_folder = "フォルダーを開く"
 batch_progress = "{done} / {total}"
 batch_done = "{done} 件保存、{failed} 件失敗"
 batch_cancelled = "{done} / {total} 件でキャンセルしました"
+batch_need_files = "先に画像を追加してください"
+batch_wait_reading = "ファイルを読み込み中…"
+batch_need_readable = "読み込める画像がありません"
+batch_need_size = "1〜100000 のサイズを入力してください"
+batch_need_pattern = "ファイル名のパターンを修正してください"
+batch_need_folder = "フォルダーを指定してください"
 
 menu_open_with = "プログラムから開く…"
 menu_edit_with = "プログラムで編集…"
@@ -160,3 +166,6 @@ open_system_settings = "システム設定を開く"
 
 [messages.images_count]
 other = "{n} 枚の画像"
+
+[messages.batch_copies]
+other = "{n} 枚のコピーを「{folder}」へ"
