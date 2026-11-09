@@ -98,11 +98,11 @@ BEGIN
     BLOCK "040904b0"
     BEGIN
       VALUE "CompanyName", "amigo-labs"
-      VALUE "FileDescription", "amigo-blinzel"
+      VALUE "FileDescription", "Blinzel"
       VALUE "FileVersion", "{version}"
       VALUE "InternalName", "blinzel"
       VALUE "OriginalFilename", "blinzel.exe"
-      VALUE "ProductName", "amigo-blinzel"
+      VALUE "ProductName", "Blinzel"
       VALUE "ProductVersion", "{version}"
     END
   END

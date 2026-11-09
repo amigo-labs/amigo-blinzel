@@ -265,7 +265,7 @@ mod tests {
         );
         assert_eq!(
             blinzel_i18n::tr_in(blinzel_i18n::FALLBACK, Msg::ErrorOs),
-            "amigo-blinzel requires Windows 11 version 24H2 or newer."
+            "Blinzel requires Windows 11 version 24H2 or newer."
         );
     }
 

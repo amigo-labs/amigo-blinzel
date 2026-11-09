@@ -5,7 +5,10 @@
 use std::path::{Path, PathBuf};
 
 use super::{registry, shortcut};
+use crate::DISPLAY_NAME;
 
+/// Folders, registry keys and the sign-in value; the name people see is
+/// [`DISPLAY_NAME`].
 pub const PRODUCT: &str = "amigo-blinzel";
 pub const PUBLISHER: &str = "amigo-labs";
 pub const EXE_NAME: &str = "blinzel.exe";
@@ -84,6 +87,11 @@ impl Layout {
     }
 
     pub fn shortcut(&self) -> PathBuf {
+        self.start_menu.join(format!("{DISPLAY_NAME}.lnk"))
+    }
+
+    /// The shortcut as versions up to 1.5 named it.
+    fn legacy_shortcut(&self) -> PathBuf {
         self.start_menu.join(format!("{PRODUCT}.lnk"))
     }
 
@@ -121,6 +129,7 @@ pub fn install(
     }
     std::fs::create_dir_all(&layout.start_menu).map_err(io("create", &layout.start_menu))?;
     shortcut::create(&layout.shortcut(), &exe, description)?;
+    let _ = std::fs::remove_file(layout.legacy_shortcut());
     register(layout, &exe, version, description)?;
     if layout.notify_shell {
         notify_associations_changed();
@@ -150,7 +159,7 @@ fn register(layout: &Layout, exe: &Path, version: &str, description: &str) -> Re
     let classes = &layout.classes;
 
     let prog = registry::Key::create(&format!(r"{classes}\{PROG_ID}"))?;
-    prog.set_str("", PRODUCT)?;
+    prog.set_str("", DISPLAY_NAME)?;
     registry::Key::create(&format!(r"{classes}\{PROG_ID}\DefaultIcon"))?.set_str("", &icon)?;
     registry::Key::create(&format!(r"{classes}\{PROG_ID}\shell\open\command"))?
         .set_str("", &open)?;
@@ -160,7 +169,7 @@ fn register(layout: &Layout, exe: &Path, version: &str, description: &str) -> Re
     let supported = registry::Key::create(&format!(r"{app}\SupportedTypes"))?;
     let caps = format!(r"{}\Capabilities", layout.app_key);
     let caps_key = registry::Key::create(&caps)?;
-    caps_key.set_str("ApplicationName", PRODUCT)?;
+    caps_key.set_str("ApplicationName", DISPLAY_NAME)?;
     caps_key.set_str("ApplicationDescription", description)?;
     caps_key.set_str("ApplicationIcon", &icon)?;
     let assoc = registry::Key::create(&format!(r"{caps}\FileAssociations"))?;
@@ -177,7 +186,7 @@ fn register(layout: &Layout, exe: &Path, version: &str, description: &str) -> Re
 
     let size_kb = std::fs::metadata(exe).map(|m| m.len() / 1024).unwrap_or(0) as u32;
     let u = registry::Key::create(&layout.uninstall)?;
-    u.set_str("DisplayName", PRODUCT)?;
+    u.set_str("DisplayName", DISPLAY_NAME)?;
     u.set_str("DisplayVersion", version)?;
     u.set_str("Publisher", PUBLISHER)?;
     u.set_str("DisplayIcon", &icon)?;
@@ -220,6 +229,7 @@ pub fn uninstall(layout: &Layout) -> Result<(), String> {
     note(registry::delete_tree(&layout.uninstall));
     note(registry::delete_value(&layout.run, PRODUCT));
     let _ = std::fs::remove_file(layout.shortcut());
+    let _ = std::fs::remove_file(layout.legacy_shortcut());
     for dir in [&layout.dir, &layout.cache] {
         if dir.exists() {
             note(std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display())));
@@ -287,7 +297,7 @@ mod tests {
         assert_eq!(
             l.shortcut(),
             Path::new(
-                r"C:\Users\a\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\amigo-blinzel.lnk"
+                r"C:\Users\a\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Blinzel.lnk"
             )
         );
         assert_eq!(

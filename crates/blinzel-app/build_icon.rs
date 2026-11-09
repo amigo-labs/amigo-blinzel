@@ -40,19 +40,23 @@ fn decode(data: &[u8]) -> (u32, Vec<u8>) {
 }
 
 /// Straight-alpha RGBA pixels at `size` × `size`: the generated PNG, or for
-/// a size it lacks (Windows' 20, 24 and 40 px) the small mark at the
-/// largest whole scale that fits, centred on transparency, exactly as the
-/// generator places its grid, so no size is blurred by scaling.
+/// a size it lacks (Windows' 20, 24 and 40 px, the tray at 125 % and
+/// 150 %) the next smaller small mark scaled up to fill it, nearest
+/// neighbour sampled at pixel centres: crisp, and as large as the icons
+/// beside it. A centred, unscaled mark left a transparent border there.
 pub fn rgba(size: u32) -> Vec<u8> {
     if let Some(data) = png(size) {
         return decode(data).1;
     }
     let inner = size / GRID * GRID;
     let (w, src) = decode(png(inner).unwrap_or_else(|| panic!("no monogram for {size} px")));
-    let (n, w, offset) = (size as usize, w as usize, ((size - inner) / 2) as usize);
-    let mut out = vec![0u8; n * n * 4];
-    for y in 0..w {
-        out[((y + offset) * n + offset) * 4..][..w * 4].copy_from_slice(&src[y * w * 4..][..w * 4]);
+    let (n, w) = (size as usize, w as usize);
+    let at = |i: usize| (2 * i + 1) * w / (2 * n);
+    let mut out = Vec::with_capacity(n * n * 4);
+    for y in 0..n {
+        for x in 0..n {
+            out.extend_from_slice(&src[(at(y) * w + at(x)) * 4..][..4]);
+        }
     }
     out
 }
