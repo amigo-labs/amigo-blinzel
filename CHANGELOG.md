@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.7.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.6.0...v1.7.0) (2026-11-10)
+
+
+### Features
+
+* **ui:** batch dialog footer states what Start will do ([61f692b](https://github.com/amigo-labs/amigo-blinzel/commit/61f692b044f9a08864f4e3c9415b3957c00bbeac))
+* **ui:** batch dialog header holds the title, count and Remove all ([d933852](https://github.com/amigo-labs/amigo-blinzel/commit/d933852386d16170e6382a36d58b4b6ccd04ed08))
+* **ui:** batch dialog on a label gutter with a measured height ([21f0644](https://github.com/amigo-labs/amigo-blinzel/commit/21f0644a1290a5116bcc00fc324042a2408e671a))
+* **ui:** batch run sheet leads with its count as a headline ([3091a8b](https://github.com/amigo-labs/amigo-blinzel/commit/3091a8b98cd6cbccc88823635bcc416f782e453e))
+* **ui:** UI surfaces reworked in crumora tournaments ([3f2e98a](https://github.com/amigo-labs/amigo-blinzel/commit/3f2e98abd2bb83c0d29125871b8896b60d536dc2))
+
+
+### Bug Fixes
+
+* re-sync agent skills (acceptance-criteria headings in any case) ([701db34](https://github.com/amigo-labs/amigo-blinzel/commit/701db34229ca0b7f2c560fde3c54b8d1b533a00b))
+* re-sync agent skills (commit gate, spec-build completion) ([2a038a3](https://github.com/amigo-labs/amigo-blinzel/commit/2a038a343d1f5946372db61a33e544545327870f))
+* **ui:** batch dialog tests hold the language while comparing text ([7c82792](https://github.com/amigo-labs/amigo-blinzel/commit/7c82792e7fc2cf5837ba68c5f49c20f54db6af68))
+
 ## [1.6.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.5.0...v1.6.0) (2026-11-09)
 
 
