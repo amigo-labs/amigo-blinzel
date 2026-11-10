@@ -392,6 +392,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dropped_files_and_folders_fill_the_list() {
+        let _lang = crate::testkit::fallback_language();
         let dir = std::env::temp_dir().join(format!("blinzel-batch-files-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();

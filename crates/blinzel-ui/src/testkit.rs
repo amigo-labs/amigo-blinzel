@@ -673,6 +673,16 @@ fn identity_lut(src: Option<&Profile>, _: Option<&Profile>) -> Option<Lut3d> {
 /// Harness tests share globals (the UI language): one at a time.
 static SERIAL: Mutex<()> = Mutex::new(());
 
+/// The harness lock with the UI language at its fallback, for tests
+/// outside a [`Harness`] that compare translated text: a Harness test
+/// switching the language meanwhile would change the strings under them.
+/// Hold it for the whole test and never together with a `Harness`.
+pub(crate) fn fallback_language() -> MutexGuard<'static, ()> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    blinzel_i18n::set_lang(blinzel_i18n::FALLBACK);
+    serial
+}
+
 /// An [`App`] over the fake backend and a temp folder, at 96 dpi with an
 /// 800 × 600 client area. Settings are saved to `<temp>/config`.
 pub(crate) struct Harness {

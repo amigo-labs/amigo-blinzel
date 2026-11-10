@@ -1376,6 +1376,7 @@ mod tests {
     /// is enabled exactly when it says what it will do.
     #[test]
     fn the_footer_states_what_start_will_do() {
+        let _lang = crate::testkit::fallback_language();
         let mut d = dialog_with(3);
         assert_eq!(d.readiness(), Ok(3));
         let (text, color) = footer_status(&mut d);
@@ -1417,6 +1418,7 @@ mod tests {
     /// A long folder is shortened in the middle; the count stays.
     #[test]
     fn a_long_folder_keeps_the_count_and_its_end() {
+        let _lang = crate::testkit::fallback_language();
         let mut canvas = crate::testkit::FakeCanvas::default();
         let mut p = Painter {
             canvas: &mut canvas,
@@ -1434,6 +1436,7 @@ mod tests {
     /// format moves a control or changes the list's height.
     #[test]
     fn the_slider_is_there_only_for_lossy_output_and_nothing_moves() {
+        let _lang = crate::testkit::fallback_language();
         let mut d = dialog_with(48);
         let (quality, note) = (tr(Msg::BatchQuality), tr(Msg::BatchNoQuality));
         let count = |d: &mut BatchDialog, text: &str| {
@@ -1476,6 +1479,7 @@ mod tests {
     /// under it and gets the band a separate count row would take.
     #[test]
     fn the_header_holds_the_title_the_count_and_remove_all() {
+        let _lang = crate::testkit::fallback_language();
         let mut d = dialog_with(48);
         let mut canvas = crate::testkit::FakeCanvas::default();
         d.draw(&mut canvas, (960.0, 640.0), 1.0);
@@ -1532,6 +1536,7 @@ mod tests {
     /// its size when the run ends.
     #[test]
     fn a_run_leads_with_its_count_and_keeps_its_size() {
+        let _lang = crate::testkit::fallback_language();
         let mut d = dialog_with(10);
         let (tx, rx) = std::sync::mpsc::channel();
         d.started(10, rx, Arc::new(AtomicBool::new(false)));
