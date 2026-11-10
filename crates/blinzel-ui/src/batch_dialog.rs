@@ -107,9 +107,13 @@ const PAD: f64 = 24.0;
 const WIDTH: f64 = 640.0;
 const RADIUS: f64 = 12.0;
 const MARGIN: f64 = 8.0;
-/// Title row and the list's header row (count, "Remove all"); also a
-/// run's headline and the header of its error list.
+/// The header row (title, count, "Remove all"); also a run's headline
+/// and the header of its error list.
 const HEAD_H: f64 = 24.0;
+/// Where the baseline sits, as a share of the line height the canvas
+/// measures (cosmic-text centres a sans font's glyphs in 1.3 × size
+/// lines: baseline at 0.76), to set smaller text on the title's baseline.
+const ASCENT: f64 = 0.76;
 const HINT_H: f64 = 16.0;
 const BUTTON_H: f64 = 32.0;
 const BAR_H: f64 = 8.0;
@@ -574,11 +578,6 @@ impl BatchDialog {
             && !(FORMATS[self.format] == Some(Codec::Webp) && self.lossless)
     }
 
-    /// Not PNG: a quality row (the slider, or WebP's lossless switch).
-    fn has_quality(&self) -> bool {
-        FORMATS[self.format] != Some(Codec::Png)
-    }
-
     /// What Start will do (the number of copies), or why it cannot: the
     /// message for the footer's status. Ok exactly when Start runs.
     fn readiness(&mut self) -> Result<usize, Msg> {
@@ -620,16 +619,12 @@ impl BatchDialog {
         let (head, ctrl, check, row) = (p.px(HEAD_H), p.px(CONTROL_H), p.px(CHECK_ROW), p.px(ROW));
         let w = p.px(WIDTH).min(client.0 - 2.0 * margin);
         let inner = w - 2.0 * pad;
-        // The title above, the footer below: in every mode. Editing puts
-        // the list header under the title, a run its headline.
-        let top = pad + head + tight + head + tight;
+        // The header above, the footer below: in every mode. Editing puts
+        // the list right under its header, a run its headline.
+        let top = pad + head + tight;
         let bottom = pad + p.px(BUTTON_H) + pad;
         let inset = 2.0 * p.px(batch_files::INSET_V);
-        let quality = self.has_quality();
-        let edit = self
-            .run
-            .is_none()
-            .then(|| Edit::measure(&mut p, inner, quality));
+        let edit = self.run.is_none().then(|| Edit::measure(&mut p, inner));
         let (h, list_h) = match (&self.run, &edit) {
             (None, Some(e)) => {
                 // The list takes the whole rows the window leaves.
@@ -661,30 +656,44 @@ impl BatchDialog {
         p.outline(panel, 1.0, RADIUS, widgets::BORDER);
         let x0 = panel.x + pad;
         let mut y = panel.y + pad;
-        let title = Rect::new(x0, y, inner, head);
-        p.text_in(tr(Msg::BatchTitle), TEXT_TITLE, &title, 0.0, widgets::FG);
-        y += head;
         let hover = self.hover;
+        // The title, and while editing on the same line at the right, the
+        // file count and "Remove all" on the title's baseline: the header
+        // of the list right under it.
+        let mut title_w = inner;
+        let title_text = tr(Msg::BatchTitle);
+        let (_, title_h) = p.text_size(title_text, TEXT_TITLE);
+        let title_top = y + (head - title_h) / 2.0;
         if self.run.is_none() {
-            // The files come first: their count, and "Remove all" at the
-            // list's right edge.
-            y += tight;
-            let count = trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]);
-            let count_r = Rect::new(x0, y, inner, head);
-            p.text_in(&count, TEXT_BODY, &count_r, 0.0, widgets::FG);
+            let on_baseline = |p: &mut Painter<_>, text: &str, x: f64, color: Rgba| {
+                let (_, h) = p.text_size(text, TEXT_BODY);
+                let top = title_top + ASCENT * (title_h - h);
+                p.text(text, TEXT_BODY, x, top, color);
+            };
+            let mut right = x0 + inner;
             if !self.files.is_empty() {
                 let clear = tr(Msg::BatchClear);
                 let (cw, _) = p.text_size(clear, TEXT_BODY);
-                let cr = Rect::new(x0 + inner - cw - gap, y, cw + gap, head);
+                let cr = Rect::new(right - cw - gap, y, cw + gap, head);
                 let color = if hover == Some(Hit::Clear) {
                     widgets::FG
                 } else {
                     widgets::ACCENT
                 };
-                p.text_in(clear, TEXT_BODY, &cr, gap, color);
+                on_baseline(&mut p, clear, right - cw, color);
                 hits.push((cr, Hit::Clear));
+                right -= cw + group;
             }
-            y += head + tight;
+            let count = trp(PluralMsg::ImagesCount, self.files.len() as u64, &[]);
+            let (nw, _) = p.text_size(&count, TEXT_BODY);
+            on_baseline(&mut p, &count, right - nw, widgets::DIM);
+            title_w = (right - nw - group - x0).max(0.0);
+        }
+        let title = p.elide_end(title_text, TEXT_TITLE, title_w);
+        p.text(&title, TEXT_TITLE, x0, title_top, widgets::FG);
+        y += head;
+        if self.run.is_none() {
+            y += tight;
         }
 
         let footer = Rect::new(
@@ -786,34 +795,32 @@ impl BatchDialog {
                         .map(|(i, r)| (r, Hit::Format(i))),
                 );
 
-                // Quality: none for PNG. WebP's lossless switch comes
-                // first (column 1), its slider in column 2.
+                // Quality, a row for every format: column 1 holds the value
+                // (the slider and its number, or why there is none), column
+                // 2 WebP's lossless switch, as on the size row.
                 let value_w = p.px(VALUE_W);
-                let webp = FORMATS[self.format] == Some(Codec::Webp);
-                let (sx, right) = if webp {
-                    (col2, cx + cw)
+                let right = col2 - group;
+                let slider = Rect::new(cx, y, right - cx - gap - value_w, ctrl);
+                label(&mut p, Msg::BatchQuality, y, ctrl);
+                if self.lossy() {
+                    p.slider((self.quality as f64 - 1.0) / 99.0, slider);
+                    hits.push((slider, Hit::Slider));
+                    // The number, right-aligned after the track.
+                    let v = self.quality.to_string();
+                    let (vw, _) = p.text_size(&v, TEXT_BODY);
+                    let vr = Rect::new(right - vw, y, vw, ctrl);
+                    p.text_in(&v, TEXT_BODY, &vr, 0.0, widgets::FG);
                 } else {
-                    (cx, col2 - group)
-                };
-                let slider = Rect::new(sx, y, right - sx - gap - value_w, ctrl);
-                if quality {
-                    label(&mut p, Msg::BatchQuality, y, ctrl);
-                    if self.lossy() {
-                        p.slider((self.quality as f64 - 1.0) / 99.0, slider);
-                        hits.push((slider, Hit::Slider));
-                        // The number, right-aligned after the track.
-                        let v = self.quality.to_string();
-                        let (vw, _) = p.text_size(&v, TEXT_BODY);
-                        let vr = Rect::new(right - vw, y, vw, ctrl);
-                        p.text_in(&v, TEXT_BODY, &vr, 0.0, widgets::FG);
-                    }
-                    if webp {
-                        let lossless = tr(Msg::BatchLossless);
-                        let cb = p.checkbox(lossless, self.lossless, true, cx, y + check_dy);
-                        hits.push((cb, Hit::Lossless));
-                    }
-                    y += ctrl + gap;
+                    let note = p.elide_end(tr(Msg::BatchNoQuality), TEXT_BODY, right - cx);
+                    let nr = Rect::new(cx, y, right - cx, ctrl);
+                    p.text_in(&note, TEXT_BODY, &nr, 0.0, widgets::DIM);
                 }
+                if FORMATS[self.format] == Some(Codec::Webp) {
+                    let lossless = tr(Msg::BatchLossless);
+                    let cb = p.checkbox(lossless, self.lossless, true, col2, y + check_dy);
+                    hits.push((cb, Hit::Lossless));
+                }
+                y += ctrl + gap;
                 self.slider = slider;
 
                 label(&mut p, Msg::BatchOptions, y, check);
@@ -957,7 +964,7 @@ struct Edit {
 }
 
 impl Edit {
-    fn measure(p: &mut Painter<impl Canvas>, inner: f64, quality: bool) -> Edit {
+    fn measure(p: &mut Painter<impl Canvas>, inner: f64) -> Edit {
         let widest = LABELS
             .iter()
             .map(|m| p.text_size(tr(*m), TEXT_BODY).0)
@@ -976,13 +983,13 @@ impl Edit {
         let formats_h = segments_h(p, &BatchDialog::format_labels());
         let (tight, gap, group) = (p.px(GAP_TIGHT), p.px(GAP_ROW), p.px(GAP_GROUP));
         let (ctrl, check) = (p.px(CONTROL_H), p.px(CHECK_ROW));
-        // Size: modes, values. Output: format, quality (not for PNG), two
-        // option rows, name and hint, folder. As drawn in `BatchDialog::draw`.
+        // Size: modes, values. Output: format, quality, two option rows,
+        // name and hint, folder. As drawn in `BatchDialog::draw`.
         let size = modes_h + gap + ctrl;
-        let quality_h = if quality { ctrl + gap } else { 0.0 };
         let output = formats_h
             + gap
-            + quality_h
+            + ctrl
+            + gap
             + 2.0 * (check + gap)
             + ctrl
             + tight
@@ -1305,11 +1312,13 @@ mod tests {
         let col2 = d.drawn_at(Hit::KeepIcc).unwrap().x;
         assert_eq!(d.drawn_at(Hit::StripGps).unwrap().x, col2);
         assert_eq!(d.drawn_at(Hit::NoEnlarge).unwrap().x, col2);
-        // WebP: the lossless switch first, its slider in the second column.
+        // WebP: the slider where it always is, its lossless switch in the
+        // second column, like "don't enlarge" on the size row.
+        let slider = d.drawn_at(Hit::Slider);
         d.format = 3;
         drawn(&mut d, (1200.0, 800.0));
-        assert_eq!(d.drawn_at(Hit::Lossless).unwrap().x, edge);
-        assert_eq!(d.drawn_at(Hit::Slider).unwrap().x, col2);
+        assert_eq!(d.drawn_at(Hit::Lossless).unwrap().x, col2);
+        assert_eq!(d.drawn_at(Hit::Slider), slider);
         // The panel's inner left edge: its right edge less the inner width.
         let x0 = d.drawn_at(Hit::PickFolder).unwrap().right() - (WIDTH - 2.0 * PAD);
         assert!(
@@ -1420,25 +1429,81 @@ mod tests {
         assert!(line.contains("…") && line.contains("small"), "{line}");
     }
 
-    /// PNG has no quality row (no label without a control); WebP keeps
-    /// the row for its lossless switch even without the slider.
+    /// The slider is there only for lossy output; PNG and lossless WebP
+    /// say why there is none in its place. The quality row stays, so no
+    /// format moves a control or changes the list's height.
     #[test]
-    fn the_quality_row_is_there_only_with_a_quality_setting() {
-        let mut d = dialog_with(3);
-        let quality = tr(Msg::BatchQuality);
-        let labels = |d: &mut BatchDialog| {
+    fn the_slider_is_there_only_for_lossy_output_and_nothing_moves() {
+        let mut d = dialog_with(48);
+        let (quality, note) = (tr(Msg::BatchQuality), tr(Msg::BatchNoQuality));
+        let count = |d: &mut BatchDialog, text: &str| {
             let mut canvas = crate::testkit::FakeCanvas::default();
-            d.draw(&mut canvas, (1200.0, 800.0), 1.0);
-            canvas.frame.texts.iter().filter(|t| *t == quality).count()
+            d.draw(&mut canvas, (960.0, 640.0), 1.0);
+            canvas.frame.texts.iter().filter(|t| *t == text).count()
         };
-        assert_eq!(labels(&mut d), 1);
+        let still = |d: &BatchDialog| {
+            let rows = (0..48).filter(|&i| d.drawn_at(Hit::Remove(i)).is_some());
+            (
+                rows.count(),
+                d.drawn_at(Hit::Format(3)),
+                d.drawn_at(Hit::Sharpen),
+                d.drawn_at(Hit::Start),
+            )
+        };
+        assert_eq!((count(&mut d, quality), count(&mut d, note)), (1, 0));
+        assert!(d.drawn_at(Hit::Slider).is_some() && d.drawn_at(Hit::Lossless).is_none());
+        let jpeg = still(&d);
         d.format = 2;
-        assert_eq!(labels(&mut d), 0, "PNG");
+        assert_eq!((count(&mut d, quality), count(&mut d, note)), (1, 1), "PNG");
         assert!(d.drawn_at(Hit::Slider).is_none() && d.drawn_at(Hit::Lossless).is_none());
+        assert_eq!(still(&d), jpeg, "PNG");
         d.format = 3;
+        assert_eq!(count(&mut d, note), 0, "lossy WebP");
+        assert!(d.drawn_at(Hit::Slider).is_some() && d.drawn_at(Hit::Lossless).is_some());
+        assert_eq!(still(&d), jpeg, "lossy WebP");
         d.lossless = true;
-        assert_eq!(labels(&mut d), 1, "lossless WebP");
+        assert_eq!(
+            (count(&mut d, quality), count(&mut d, note)),
+            (1, 1),
+            "lossless WebP"
+        );
         assert!(d.drawn_at(Hit::Slider).is_none() && d.drawn_at(Hit::Lossless).is_some());
+        assert_eq!(still(&d), jpeg, "lossless WebP");
+    }
+
+    /// The title, the file count and "Remove all" share one header line,
+    /// the count and the link at its right edge; the list starts right
+    /// under it and gets the band a separate count row would take.
+    #[test]
+    fn the_header_holds_the_title_the_count_and_remove_all() {
+        let mut d = dialog_with(48);
+        let mut canvas = crate::testkit::FakeCanvas::default();
+        d.draw(&mut canvas, (960.0, 640.0), 1.0);
+        let at = |text: &str| {
+            let f = &canvas.frame;
+            let i = f.texts.iter().position(|t| t == text).unwrap();
+            (f.text_positions[i], f.text_colors[i])
+        };
+        let title = at(tr(Msg::BatchTitle)).0;
+        let count = trp(PluralMsg::ImagesCount, 48, &[]);
+        let ((cx, cy), color) = at(&count);
+        assert_eq!(color, widgets::DIM);
+        let ((lx, ly), _) = at(tr(Msg::BatchClear));
+        assert!(title.0 < cx && cx < lx, "title, count, Remove all");
+        assert_eq!(cy, ly, "one baseline");
+        let clear = d.drawn_at(Hit::Clear).unwrap();
+        assert!(title.1 >= clear.y as f32 && title.1 < clear.bottom() as f32);
+        assert_eq!(clear.right(), d.drawn_at(Hit::Start).unwrap().right());
+        // The first row lies one tight gap plus the list's inset under the
+        // header row.
+        let first = d.drawn_at(Hit::Remove(0)).unwrap();
+        let inset = batch_files::INSET_V;
+        assert_eq!(first.y, clear.bottom() + GAP_TIGHT + inset);
+        // 960 × 640 shows more than the list's least rows of the 48.
+        let rows = (0..48)
+            .filter(|&i| d.drawn_at(Hit::Remove(i)).is_some())
+            .count();
+        assert!(rows > LIST_MIN_ROWS, "{rows} rows");
     }
 
     /// A running batch keeps its panel still while errors arrive.
