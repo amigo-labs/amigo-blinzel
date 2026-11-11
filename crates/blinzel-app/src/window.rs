@@ -48,6 +48,8 @@ const TIMER_HOTKEY: usize = 3;
 static HOTKEY_TRIES: AtomicU32 = AtomicU32::new(0);
 /// A message for the notice toast; LPARAM is a `Box<String>`.
 pub const WM_NOTICE: u32 = WM_APP + 4;
+/// How long a notice stays on the window, in milliseconds.
+const NOTICE_MS: u32 = 3500;
 
 /// Runs `f` on the app state unless it is already borrowed (re-entrant
 /// message); `None` then.
@@ -500,8 +502,10 @@ fn handle(
         WM_NOTICE => {
             let text = unsafe { Box::from_raw(lp.0 as *mut String) };
             app.show_notice(*text);
+            // `wParam` is how long the notice stays, 0 for the usual time.
+            let ms = if wp.0 == 0 { NOTICE_MS } else { wp.0 as u32 };
             unsafe {
-                SetTimer(Some(hwnd), TIMER_NOTICE, 3500, None);
+                SetTimer(Some(hwnd), TIMER_NOTICE, ms, None);
             }
             done
         }
@@ -781,22 +785,32 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             vec![]
         }
         Action::About => {
-            use blinzel_i18n::{Msg, tr, trf};
-            let text = crate::platform::wide(trf(
+            use blinzel_i18n::{Msg, trf};
+            // In the viewer's own notice, like the Linux and macOS shells:
+            // a system message box is the only window that would not look
+            // like the rest of the app. Twice the usual time, there is a
+            // version and an address to read.
+            let text = trf(
                 Msg::AboutBody,
                 &[
                     ("version", &crate::setup::version()),
                     ("url", &crate::setup::install::URL),
                 ],
-            ));
-            let caption = crate::platform::wide(tr(Msg::MenuAbout));
+            );
+            let ptr = Box::into_raw(Box::new(text)) as isize;
             unsafe {
-                MessageBoxW(
+                // SAFETY: WM_NOTICE takes ownership of the boxed String; it
+                // is freed here when the message could not be posted.
+                if PostMessageW(
                     Some(hwnd),
-                    windows::core::PCWSTR(text.as_ptr()),
-                    windows::core::PCWSTR(caption.as_ptr()),
-                    MB_ICONINFORMATION | MB_OK | platform::message_box_direction(),
-                );
+                    WM_NOTICE,
+                    WPARAM(2 * NOTICE_MS as usize),
+                    LPARAM(ptr),
+                )
+                .is_err()
+                {
+                    drop(Box::from_raw(ptr as *mut String));
+                }
             }
             vec![]
         }
