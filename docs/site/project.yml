@@ -43,6 +43,20 @@ highlights:
       en: image formats with our own decoders, on every platform
       de: Bildformate mit eigenen Decodern, auf jeder Plattform
 
+screenshots:
+  - src: screenshots/viewer-filmstrip.jpg
+    alt:
+      en: A photo fills the window, with the filmstrip of the folder's images along the bottom and nothing else but the menu button and the window controls
+      de: Ein Foto füllt das Fenster, unten der Filmstreifen mit den Bildern des Ordners, sonst nur der Menü-Knopf und die Fensterknöpfe
+  - src: screenshots/grid.jpg
+    alt:
+      en: The grid shows a folder as thumbnails, with the current image outlined
+      de: Das Raster zeigt einen Ordner als Vorschaubilder, das aktuelle Bild ist umrandet
+  - src: screenshots/viewer.jpg
+    alt:
+      en: The plain viewer — the window takes the shape of the image, with no toolbars
+      de: Der reine Viewer – das Fenster nimmt die Form des Bildes an, ohne Werkzeugleisten
+
 features:
   - title: { en: Viewing, de: Betrachten }
     text:
