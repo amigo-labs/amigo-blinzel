@@ -240,7 +240,7 @@ jobs:
         run: |
           files="dist/*"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "amigo-blinzel ${TAG#v}" --generate-notes
+            gh release create "$TAG" --draft --title "Blinzel ${TAG#v}" --generate-notes
           fi
           gh release upload "$TAG" --clobber $files
-          gh release edit "$TAG" --draft=false --latest --title "amigo-blinzel ${TAG#v}"
+          gh release edit "$TAG" --draft=false --latest --title "Blinzel ${TAG#v}"
