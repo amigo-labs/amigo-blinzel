@@ -27,7 +27,7 @@ This spec records what the code does today.
 
 - What each setting does — because the feature specs that own them describe it (localization, color management, resident mode, updates, screenshots, platform shells)
 - A settings dialog — because all settings are menu entries or file-only
-- Migrating or versioning the file — because unknown keys are ignored and missing keys get defaults
+- Migrating or versioning the file — because unknown keys are ignored and missing keys get defaults; the one exception is `auto_update` → `updates` (AC-17), because the update choice must tell a made choice from none
 - Settings shared between users or synced between machines — because the file is per user
 
 ## Acceptance criteria
@@ -48,14 +48,14 @@ This spec records what the code does today.
 - [x] AC-14 (event, CI: windows): When the window closes or hides on Windows, then its normal (not maximized) rect and whether it is maximized are saved as `window` and `maximized`; Linux and macOS never write these keys.
 - [x] AC-15 (event): When the viewer exits normally, then it writes the settings file once more, unless it is a hidden resident instance on Windows.
 - [x] AC-16 (always): The settings file has no key `ram_budget_mb`: the viewer never writes it, and a file from an older version that contains it loads like any other unknown key (AC-04).
-- [ ] AC-17 (always): The update choice is stored as `updates = "auto"`, `"notify"` or `"off"`, written only once the user has chosen; an unknown value counts as not chosen. A file from an older version with `auto_update = true` or `false` and no `updates` reads as `"auto"` or `"off"`, and the next write stores `updates` in its place and no `auto_update`.
+- [ ] AC-17 (always): The update choice is stored as `updates = "auto"`, `"notify"` or `"off"`, and the file holds `updates` only after the user chose, a silent setup stored it (`updates.md` AC-32), or it replaced an old `auto_update`; an unknown value counts as not chosen. A file from an older version with `auto_update = true` or `false` and no `updates` reads as `"auto"` or `"off"`, and the next write stores `updates` in its place and no `auto_update`.
 
 ## Technical notes
 
 - Model: `blinzel_core::settings::Settings` (`parse`, `to_text`); file access: `blinzel_ui::settings_store` (`path`, `load`, `save`); folders: `blinzel_ui::dirs::config` (and `dirs::cache`, which holds caches such as thumbnails and, on Windows, the remembered display profile).
 - Format: a TOML subset, one `key = value` per line; strings in double quotes, booleans `true`/`false`, integers; `window = left,top,right,bottom`. The first pass cuts every line at the first `#`; `background`, `screenshot_dir` and `editor` are read in a second pass from the raw line because they may contain `#`. `to_text` writes every key in a fixed order under a `# amigo-blinzel settings` header, `window` and `maximized` only when a rect is set, `screenshot_dir` and `editor` only when set.
 - Writes are whole-file `std::fs::write` after `create_dir_all`; errors are ignored.
-- Readers: the shells read the file once at startup (language before anything else); `App::reload_settings` re-reads it when a hidden resident instance wakes; the updaters re-read `auto_update` before checking.
+- Readers: the shells read the file once at startup (language before anything else); `App::reload_settings` re-reads it when a hidden resident instance wakes; the updaters re-read the update choice (`updates`) before checking.
 - `ram_budget_mb` was parsed and written but nothing read it; it is gone from `Settings` (AC-16).
 
 ## Edge cases
