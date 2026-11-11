@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: todo
 created: 2026-11-02
 size: S
 platforms: all
@@ -33,7 +33,7 @@ This spec records what the code does today.
 ## Acceptance criteria
 
 - [x] AC-01 (always): The settings file is `settings.toml` in `%APPDATA%\amigo-blinzel` on Windows, `~/Library/Application Support/amigo-blinzel` on macOS, and `$XDG_CONFIG_HOME/amigo-blinzel` on Linux (`~/.config/amigo-blinzel` if `XDG_CONFIG_HOME` is unset or empty).
-- [x] AC-02 (error): If the settings file is missing or unreadable, then the viewer starts with the defaults: `view_mode = "fit-image-to-window"`, `no_upscale = true`, `language = "auto"`, `single_instance = true`, `prefetch_ahead = 4`, `prefetch_behind = 2`, `background = "#1E1E1E"`, `auto_update = true`, `resident = false`, `color_management = true`, `filmstrip = false`, `maximized = false`, `screenshot_hotkey = true`, `screenshot_save = true`, `screenshot_open = true`, `screenshot_edit = false`, and no `window`, `screenshot_dir` or `editor`.
+- [ ] AC-02 (error): If the settings file is missing or unreadable, then the viewer starts with the defaults: `view_mode = "fit-image-to-window"`, `no_upscale = true`, `language = "auto"`, `single_instance = true`, `prefetch_ahead = 4`, `prefetch_behind = 2`, `background = "#1E1E1E"`, no `updates` (the update choice: not yet made, which means "install automatically", `updates.md` AC-13), `resident = false`, `color_management = true`, `filmstrip = false`, `maximized = false`, `screenshot_hotkey = true`, `screenshot_save = true`, `screenshot_open = true`, `screenshot_edit = false`, and no `window`, `screenshot_dir` or `editor`.
 - [x] AC-03 (always): Every setting the viewer writes reads back unchanged, including negative window coordinates and paths that contain `#` or spaces.
 - [x] AC-04 (error): If the file contains unknown keys (also keys of older versions such as `screenshot_clipboard` or `ram_budget_mb`), section headers, lines without `=`, trailing `# comments` or values of the wrong type, then those lines are ignored, every invalid value keeps its default, and all valid lines still apply.
 - [x] AC-05 (error): If `prefetch_ahead` or `prefetch_behind` is larger than 32, then 32 is used.
@@ -41,13 +41,14 @@ This spec records what the code does today.
 - [x] AC-07 (always): `language = "auto"` and `language = ""` both mean the system language.
 - [x] AC-08 (error): If `language` names a language that is not shipped, then the viewer uses the system language and keeps the value in the file until the user picks a language in the menu.
 - [x] AC-09 (error): If `background` is not `#RRGGBB` in hex, or `screenshot_dir` / `editor` is empty, unquoted or contains a quote, then the default is used.
-- [x] AC-10 (event): When the user changes a setting from the menu (view mode, "Don't enlarge small images", filmstrip, language, every entry under Menu → Settings) or picks an editor or a screenshot folder, then the file is written at once with all current settings.
+- [ ] AC-10 (event): When the user changes a setting from the menu (view mode, "Don't enlarge small images", filmstrip, language, every entry under Menu → Settings), confirms or changes the update choice (first-start question, About dialog) or picks an editor or a screenshot folder, then the file is written at once with all current settings.
 - [x] AC-11 (error): If the picked editor or screenshot folder path contains a quote, CR or LF, then it is not stored.
 - [x] AC-12 (error): If the file cannot be written, then the viewer keeps running with the changed setting in memory and shows no message.
-- [x] AC-13 (always): Menu → Settings offers "Keep ready in the background" (Windows and macOS), "Open images in the same window", "Use colour profiles (ICC)", "Install updates automatically", "Choose editor…" and, on Windows and macOS, the screenshot key ("Print key takes screenshots", on macOS "⌘⇧1 takes screenshots"), "Save screenshots in the folder", "Open screenshots in the viewer", "Open screenshots in the editor" and "Screenshot folder…"; each check item is checked when its setting is on (the screenshot key only while resident mode is on too); `prefetch_ahead`, `prefetch_behind` and `background` can only be changed in the file.
+- [ ] AC-13 (always): Menu → Settings offers "Keep ready in the background" (Windows and macOS), "Open images in the same window", "Use colour profiles (ICC)", "Choose editor…" and, on Windows and macOS, the screenshot key ("Print key takes screenshots", on macOS "⌘⇧1 takes screenshots"), "Save screenshots in the folder", "Open screenshots in the viewer", "Open screenshots in the editor" and "Screenshot folder…"; each check item is checked when its setting is on (the screenshot key only while resident mode is on too); `prefetch_ahead`, `prefetch_behind` and `background` can only be changed in the file.
 - [x] AC-14 (event, CI: windows): When the window closes or hides on Windows, then its normal (not maximized) rect and whether it is maximized are saved as `window` and `maximized`; Linux and macOS never write these keys.
 - [x] AC-15 (event): When the viewer exits normally, then it writes the settings file once more, unless it is a hidden resident instance on Windows.
 - [x] AC-16 (always): The settings file has no key `ram_budget_mb`: the viewer never writes it, and a file from an older version that contains it loads like any other unknown key (AC-04).
+- [ ] AC-17 (always): The update choice is stored as `updates = "auto"`, `"notify"` or `"off"`, written only once the user has chosen; an unknown value counts as not chosen. A file from an older version with `auto_update = true` or `false` and no `updates` reads as `"auto"` or `"off"`, and the next write stores `updates` in its place and no `auto_update`.
 
 ## Technical notes
 
@@ -79,7 +80,7 @@ This spec records what the code does today.
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
 | AC-01 | `the_settings_folder_follows_each_platforms_convention`, `this_platforms_settings_folder_is_the_one_tested` (`crates/blinzel-ui/src/dirs.rs`) | verified | 2c26c2f |
-| AC-02 | `a_missing_file_means_the_documented_defaults` (`crates/blinzel-core/src/settings.rs`), `a_missing_or_unreadable_file_loads_the_defaults` (`crates/blinzel-ui/src/settings_store.rs`) | verified | f66b7c5 |
+| AC-02 |      | open   |        |
 | AC-03 | `roundtrip` (`crates/blinzel-core/src/settings.rs`) | verified | — |
 | AC-04 | `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply`, `tolerates_garbage`, `old_screenshot_clipboard_key_is_ignored` (`crates/blinzel-core/src/settings.rs`) | verified | f66b7c5 |
 | AC-05 | `tolerates_garbage` (`crates/blinzel-core/src/settings.rs`) | verified | cd47be9 |
@@ -87,13 +88,14 @@ This spec records what the code does today.
 | AC-07 | `auto_and_empty_language_both_mean_the_system_language` (`crates/blinzel-core/src/settings.rs`) | verified | f66b7c5 |
 | AC-08 | `an_unknown_language_shows_the_system_language_and_stays_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | 5e84e1e |
 | AC-09 | `invalid_background_and_paths_keep_their_defaults` (`crates/blinzel-core/src/settings.rs`) | verified | f66b7c5 |
-| AC-10 | `a_setting_changed_in_the_menu_writes_the_file_at_once_with_all_settings` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | 5e84e1e |
+| AC-10 |      | open   |        |
 | AC-11 | `a_picked_path_with_a_quote_or_line_break_is_not_stored` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | 5e84e1e |
 | AC-12 | `an_unwritable_file_keeps_the_change_in_memory_without_a_message` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | 5e84e1e |
-| AC-13 | `menu_settings_offers_each_platforms_entries`, `each_check_item_is_checked_when_its_setting_is_on`, `prefetch_and_background_can_only_be_changed_in_the_file` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | 5e84e1e |
+| AC-13 |      | open   |        |
 | AC-14 | `remembers_the_normal_rect_and_whether_it_is_maximized` (`crates/blinzel-app/tests/placement.rs`), CI: windows, green in CI run 186 on 0b5dc42; `the_window_placement_is_written_only_once_a_rect_is_known` (`crates/blinzel-core/src/settings.rs`), `the_app_never_writes_the_window_placement_itself` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | c1d52c9 |
 | AC-15 | `exiting_writes_the_settings_once_more`, `only_a_hidden_instance_on_windows_skips_the_write_on_exit` (`crates/blinzel-ui/src/app_settings_tests.rs`) | verified | 5e84e1e |
 | AC-16 | `ram_budget_mb_is_neither_read_nor_written`, `unknown_keys_and_invalid_lines_are_ignored_and_valid_lines_apply` (`crates/blinzel-core/src/settings.rs`) | verified | f66b7c5 |
+| AC-17 |      | open   |        |
 
 ## Summary
 
@@ -118,3 +120,4 @@ This spec records what the code does today.
 - AC-14 "Linux and macOS never write these keys": `to_text` wrote `maximized = false` into every file. It now writes `maximized` only together with `window`, which only the Windows shell sets (`remember_placement` on close and hide); a `maximized` without a rect had no effect anyway (`restore_placement` ignores it).
 - AC-14, Windows part: `blinzel_app::window::remember_placement` now takes `&mut Settings` instead of the App and is public, so `tests/placement.rs` checks it on a real (test) window, maximized with `ShowWindow(SW_MAXIMIZE)`. The test runs only in the Windows CI job (`cargo test --workspace --release`); it could not even be compiled here (no MSVC tools for the C dependencies' build scripts), so its first CI run is the proof.
 - AC-15 has no red run of the behavior: its tests call `App::save_settings_on_exit`, which did not exist before (the red run was the compile error); what it does is what the shells did before.
+- 2026-11-11: revised for the update choice (`updates.md`, revision 2026-11-11; `blinzel.md` §2 "Updates"). `auto_update` gives way to `updates` with three values (AC-17, new), written only once the user has chosen, so a missing key tells a first start from a made choice; the Settings menu loses "Install updates automatically", whose place is the About dialog. AC-02, AC-10 and AC-13 reworded and back to `open`; the spec goes back to `status: todo`.

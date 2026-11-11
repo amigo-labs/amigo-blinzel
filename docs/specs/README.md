@@ -23,10 +23,11 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 12 | [resident-mode](resident-mode.md) | 21 / 23 | 15 | 1 | the Windows CI run of AC-13's tests of the default item "Show" and the re-add after `TaskbarCreated`; the manual check AC-23 (measurement); then `/spec-check` |
 | 13 | [screenshots](screenshots.md) | 21 / 23 | 8 | 1 | the Windows CI run of AC-03's notice test (`route_hint`); the manual check AC-21; then `/spec-check` |
 | 14 | [installation](installation.md) | 18 / 21 | 12 | 3 | the manual checks AC-10 (setup window), AC-11 (no Direct3D), AC-21 (SmartScreen, Gatekeeper); then `/spec-check` |
-| 15 | [updates](updates.md) | 22 / 23 | 3 | 1 | the manual check AC-23 (a published release on a clean VM); then `/spec-check` |
+| 15 | [updates](updates.md) | 19 / 33 | 4 | 1 | revised 2026-11-11 for the update choice: `/spec-build updates` (AC-12, AC-13, AC-15, AC-24 … AC-33, with `settings` AC-02, AC-10, AC-13, AC-17); the manual check AC-23; then `/spec-check` |
+| 15a | [settings](settings.md) | 13 / 17 | 1 | 0 | revised 2026-11-11 with `updates` (the `updates` key, the menu without "Install updates automatically"); built together with `updates`, then `/spec-check` |
 | 16 | [release](release.md) | 15 / 18 | 9 | 3 | the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`, shown in the v1.4.0 release run 41591512319); then `/spec-check` |
 | 17 | [competitive-benchmark](competitive-benchmark.md) | 15 / 20 | 3 | 5 | the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
-| | **Total** | **293 / 332** | | | |
+| | **Total** | **303 / 359** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
@@ -34,7 +35,6 @@ Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, 
 
 | Spec | Completed |
 | ---- | --------- |
-| [settings](settings.md) (16 / 16 ACs proven, AC-14 by the Windows CI job) | 2026-11-02 |
 | [localization](localization.md) (17 / 17 ACs proven, AC-10 and AC-16 by the Windows CI job) | 2026-11-02 |
 | [benchmark-gate](benchmark-gate.md) (19 / 19 ACs proven, AC-04, AC-05, AC-16 … AC-19 by the Windows CI job) | 2026-11-02 |
 | [image-formats](image-formats.md) (24 / 24 ACs proven, AC-16 and AC-23 by the macOS CI job, AC-21 and AC-22 by the Windows CI job) | 2026-11-03 |

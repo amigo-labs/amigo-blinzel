@@ -3,7 +3,7 @@ status: todo
 created: 2026-11-02
 size: L
 platforms: all
-design: [blinzel.md §2, blinzel.md §9, blinzel.md §10, blinzel.md §12 (M7, M10, M11), blinzel.md §13]
+design: [blinzel.md §2, blinzel.md §9, blinzel.md §10 "Update choice", blinzel.md §10, blinzel.md §12 (M7, M10, M11), blinzel.md §13]
 ---
 
 # Self-updater
@@ -12,11 +12,14 @@ design: [blinzel.md §2, blinzel.md §9, blinzel.md §10, blinzel.md §12 (M7, M
 
 Installed copies update themselves silently in the background (`blinzel.md` §2, "Updates"): at most once a day they ask GitHub for the latest release, download this platform's build, verify it and put it in place, active from the next start. Releases carry no code signing certificate from a CA (`blinzel.md` §2, "Signature"), so the project's own Ed25519 signature of `SHA256SUMS` is the only proof of origin. The decisions (versions, release JSON, checksums, signature, schedule, start counter) are platform-independent in `blinzel-core::update`; each shell downloads and swaps files its own way. This spec records what the code does today (reverse engineered on 2026-11-02).
 
+**Revision 2026-11-11 — update choice.** The owner wants the user to decide how updates are handled, the same way in all amigo-labs desktop apps (amigo-pincel and amigo-krake `desktop-app`): on the first start of an installed copy a question offers three choices — install automatically, only notify, never check. The choice can be changed later in an About dialog that shows the version and every update option; the Settings menu entry "Install updates automatically" goes away, and About becomes a dialog instead of a timed notice. Decision in `blinzel.md` §2 ("Updates") and §10. AC-12, AC-13 and AC-15 changed; AC-24 to AC-33 are new. The settings side (the `updates` key, the menu without the old entry) is revised in `settings.md`.
+
 ## Scope
 
 ### In scope
 
-- The automatic check, its schedule and the `auto_update` setting
+- The automatic check, its schedule and the update choice (`updates`: install automatically, notify, never check)
+- The first-start question, the "notify" announcement and the About dialog with the version and the update options
 - "Check for updates" in the menu
 - Choosing the release and the asset for this platform and architecture
 - Verifying the signature and the checksum
@@ -28,6 +31,9 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 - Producing and signing the release files — because that is release automation (`docs/specs/release.md`)
 - Pre-releases and release channels — because `Version::parse` rejects any tag other than `x.y.z` and drafts and pre-releases are skipped
 - Delta updates — because the download is always the whole executable or bundle
+- An update question inside the Windows setup — because macOS has no setup and Linux installs from the command line; one first-start question serves every platform alike (owner, 2026-11-11)
+- Asking copies that already ran an earlier version — because they made their choice with the old menu entry; their stored on / off is kept (owner, 2026-11-11)
+- Skipping a version for good, or postponing for a time span — because "notify" announces each version once and "Check for updates" offers it again at any time
 
 ## Acceptance criteria
 
@@ -50,10 +56,24 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 
 - [ ] AC-10 (state): While the last automatic check is less than 24 hours old, no automatic check runs; a last check in the future (clock changed) counts as due.
 - [ ] AC-11 (event): When an installed copy starts, then the automatic check runs on a background thread no earlier than 10 s after start, and the time of the check is saved before it contacts GitHub, so a failed check is not repeated within 24 hours.
-- [ ] AC-12 (state): While a Windows instance keeps running (resident mode), it re-reads the setting and tests every hour whether a check is due; on Linux and macOS a process tests once, 10 s after start.
-- [ ] AC-13 (option): Where `auto_update` is off (menu Settings → "Install updates automatically"), no automatic check runs; the setting is on by default and the menu entry toggles and saves it.
+- [ ] AC-12 (state): While a Windows instance keeps running (resident mode), it re-reads the update choice and tests every hour whether a check is due; on Linux and macOS a process tests once, 10 s after start.
+- [ ] AC-13 (option): Where the update choice is "never check", no automatic check runs and nothing is announced; "install automatically" applies until the user has chosen, and Menu → Settings has no "Install updates automatically" entry.
 - [ ] AC-14 (state): While the running process is not the installed copy (Windows: not `%LOCALAPPDATA%\Programs\amigo-blinzel\blinzel.exe`; Linux: not the executable `--install` placed; macOS: not inside an `.app` bundle), it never checks automatically, and "Check for updates" reports `Update failed:` with the reason that it is not installed.
-- [ ] AC-15 (event): When "Check for updates" is chosen in the menu (macOS also in the application menu), then a check runs at once in the background regardless of the schedule and `auto_update`, and its result appears as a notice: up to date, `Version <v> is downloaded and active from the next start.`, or `Update failed: <reason>`.
+- [ ] AC-15 (event): When "Check for updates" is chosen in the menu (macOS also in the application menu) or in the About dialog, then the About dialog opens (if it is not open) and a check runs at once in the background regardless of the schedule and the update choice; the dialog shows its result: up to date, `Version <v> is downloaded and active from the next start.`, or `Update failed: <reason>`.
+
+
+### Update choice
+
+- [ ] AC-24 (event): When an installed copy starts and no update choice is stored, then after the first frame a question drawn in the viewer's own look asks how Blinzel should handle updates, with the choices "Install automatically (recommended)", "Notify me when an update is available" and "Never check for updates", the first preselected, and a Confirm button; the arrow keys move the selection, Enter confirms.
+- [ ] AC-25 (always): The question never delays the first frame: a first start shows its first frame (image or empty window) before the question, and `--exit-after-first-frame` exits without it.
+- [ ] AC-26 (event): When the user confirms the question, then the chosen option is stored and the question never shows again; when the user closes it without confirming (Escape or the close button), nothing is stored, "install automatically" applies for this run, and the question shows again at the next start.
+- [ ] AC-27 (state): While the first-start question is open, no automatic check runs; once it is closed, a check that came due meanwhile runs at once.
+- [ ] AC-28 (always): A copy that is not installed (AC-14) never shows the question, and neither does an installed copy that already ran a version before the update choice — its settings file holds `auto_update`, or it has an update state file (AC-22); `auto_update = true` reads as "install automatically", `false` as "never check".
+- [ ] AC-29 (event): When an automatic check finds a newer version while the update choice is "notify" and that version was not announced before, then nothing is downloaded and the viewer shows "Blinzel <version> is available" with Install and Later; Install downloads, verifies and puts it in place like a manual check and reports the outcome as AC-15 does; Install or Later marks that version as announced, so later checks do not announce it again, while a still newer version is announced.
+- [ ] AC-30 (state): While the About dialog is open in an installed copy, it shows the running version, the version that is downloaded and active from the next start (if any), the three update choices with the stored one selected, a Check for updates button and the project address; selecting a choice stores it at once and takes effect without a restart (a due check runs, AC-10). In a copy that is not installed it shows the version, the address and the reason it receives no updates instead of the choices.
+- [ ] AC-31 (event): When About is chosen in the menu (macOS: the application menu's "About Blinzel"), then the About dialog opens; Escape or the close button closes it, and while it is open keys do not reach the viewer behind it.
+- [ ] AC-32 (event, CI: windows): When the setup runs silently (`--install --silent`, as winget does) and no update choice is stored, then "install automatically" is stored and the first start shows no question; an interactive setup stores nothing.
+- [ ] AC-33 (always): Every text of the question, the announcement and the About dialog exists in every language under `i18n/`.
 
 ### Putting it in place
 
@@ -85,6 +105,13 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 | Scenario | Expected behavior |
 | -------- | ----------------- |
 | No network or GitHub unreachable | The check fails quietly; the next automatic try is 24 h later |
+| First start opened by double-clicking an image | The image shows first; the question appears over it |
+| First start of a hidden resident instance (signed in at login, Windows) | No question while no window shows; it appears the first time the window shows |
+| A second start hands its file to the running instance while the question is open | The file opens behind the question; no second question |
+| The announcement is open when the viewer exits | That version counts as not announced; the next due check announces it again |
+| The user picks "notify" while a downloaded update already waits for the next start | The waiting update still becomes active at the next start |
+| The settings file cannot be written when the user confirms | The choice applies for this run; the question shows again at the next start |
+| `updates` holds an unknown value | Read as "install automatically", like a missing choice (`settings.md`) |
 | GitHub answers with a status other than 200 (Windows) or curl fails | `HTTP <status> from <host>` / `curl: <message>`; nothing changes |
 | A download is larger than its limit | `download too large`; nothing is put in place |
 | The new version crashes before its first frame | Three counted starts, then the fourth restores the previous version |
@@ -112,10 +139,10 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 | AC-09 | `hashes_with_cng` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-10 | `checks_at_most_daily` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-11 | `the_automatic_check_waits_and_saves_its_time_first`, `a_running_instance_looks_every_hour_and_checks_daily` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
-| AC-12 | `a_running_instance_looks_every_hour_and_checks_daily` (`crates/blinzel-core/src/update.rs`), `a_process_looks_once_ten_seconds_after_start` (`crates/blinzel-app/src/selfupdate.rs`), Linux CI; `a_running_instance_looks_every_hour` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
-| AC-13 | `auto_update_off_checks_nothing` (`crates/blinzel-core/src/update.rs`), `a_missing_file_means_the_documented_defaults` (`crates/blinzel-core/src/settings.rs`), `install_updates_automatically_is_on_by_default_and_saved_when_toggled` (`crates/blinzel-ui/src/app_settings_tests.rs`), Linux CI | built |        |
+| AC-12 |      | open   |        |
+| AC-13 |      | open   |        |
 | AC-14 | `a_copy_that_is_not_installed_never_checks` (`crates/blinzel-app/src/selfupdate.rs`), `a_copy_outside_the_installation_does_not_update` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `a_copy_outside_a_bundle_does_not_update` (`crates/blinzel-app/src/macos/update.rs`), macOS CI; `a_copy_outside_the_installation_does_not_update` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
-| AC-15 | `check_for_updates_asks_the_shell_to_check` (`crates/blinzel-ui/src/app_settings_tests.rs`), `a_manual_check_ignores_the_schedule`, `a_manual_check_reports_its_result` (`crates/blinzel-app/src/selfupdate.rs`), Linux CI; `check_for_updates_is_in_the_application_menu` (`crates/blinzel-app/src/macos/shell.rs`), macOS CI | built |        |
+| AC-15 |      | open   |        |
 | AC-16 | `swaps_and_restores` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-17 | `swap_keeps_the_previous_executable` (`crates/blinzel-app/src/linux/update.rs`), Linux CI | built |        |
 | AC-18 | `the_unpacked_bundle_takes_the_running_bundles_name`, `a_downloaded_zip_is_unpacked_next_to_the_bundle` (`crates/blinzel-app/src/macos/update.rs`), macOS CI | built |        |
@@ -124,6 +151,16 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 | AC-21 | `a_start_without_a_trial_deletes_the_previous_copies` (`crates/blinzel-app/src/linux/update.rs`), Linux CI; `forgetting_deletes_the_previous_and_bad_bundles` (`crates/blinzel-app/src/macos/update.rs`), macOS CI; `a_start_without_a_trial_deletes_the_previous_copies` (`crates/blinzel-app/src/update.rs`), Windows CI | built |        |
 | AC-22 | `state_round_trips` (`crates/blinzel-core/src/update.rs`), Linux CI | built |        |
 | AC-23 |      | open   |        |
+| AC-24 |      | open   |        |
+| AC-25 |      | open   |        |
+| AC-26 |      | open   |        |
+| AC-27 |      | open   |        |
+| AC-28 |      | open   |        |
+| AC-29 |      | open   |        |
+| AC-30 |      | open   |        |
+| AC-31 |      | open   |        |
+| AC-32 |      | open   |        |
+| AC-33 |      | open   |        |
 
 ## Decisions
 
@@ -137,3 +174,4 @@ Installed copies update themselves silently in the background (`blinzel.md` §2,
 - **The start-up half of the rollback became testable** (AC-19..AC-21): `selfupdate::start` (Linux and macOS) and `update::start` (Windows) take the running version, the arguments and a `spawn` for the restart, so a test runs the counted starts, the rollback and the clean-up on a real installation in a temporary folder and reads the restart command (program and arguments) without starting it; `on_start` passes `std::env::args_os()` and spawns. Windows' `on_first_frame` hands its work to `first_frame(&Layout)`, tested against a private HKCU branch like `tests/setup.rs`. macOS's swap is `put_in_place` (the unpacking with `ditto` stays in `install`).
 - **macOS tests call `rollback` and `forget_previous` directly**, not `selfupdate::start`: its `state_file` is the real `~/Library/Caches` folder, and the shared `start` is already tested on Linux with the same code.
 - **Block 3 tests were green at once** (AC-18..AC-21), like blocks 1 and 2; the Linux tests each went red with the code broken on purpose (the arguments not passed on, no restart, no exit after the rollback, no clean-up, clean-up during the trial, the counted start not saved, the rollback's state not saved, no `.bad` copy, a rollback without a previous executable, `.bad` not deleted, the swap copying over the installed file). The Windows tests (`update.rs`) and the macOS tests (`macos/update.rs`, including a zip packed by the real `/usr/bin/ditto`) were type-checked and clippy-checked locally for their targets; their first CI run is the proof.
+- **2026-11-11: revised for the update choice (owner).** The user picks on the first start how updates are handled — install automatically, notify, never check — and changes it in an About dialog that shows the version and every update option. AC-12, AC-13 and AC-15 reworded and back to `open` (their former tests cover the old wording: `auto_update_off_checks_nothing`, `install_updates_automatically_is_on_by_default_and_saved_when_toggled`, `check_for_updates_asks_the_shell_to_check`, `a_manual_check_reports_its_result`, …); AC-24 to AC-33 new. Owner's answers: ask on the first start, not in the setup; three choices; nobody asked → automatic (silent setup, copies from earlier versions); "notify" announces each version once; closing the question without a choice asks again at the next start; the About dialog holds the version and the update options. The same feature lands in amigo-pincel and amigo-krake (`desktop-app`) with the same three choices and texts. Size: the revision alone is about M (core: the three-way choice and the announced version; ui: question, announcement, About dialog; shells: About and the silent setup).
