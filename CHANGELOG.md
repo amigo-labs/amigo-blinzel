@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/amigo-labs/amigo-blinzel/compare/v1.7.0...v1.7.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **windows:** show About in the viewer's own notice, not a system message box ([38f55ec](https://github.com/amigo-labs/amigo-blinzel/commit/38f55ecd603478f9f9c6dba69c2e6ff63daf2aeb))
+* **windows:** show About in the viewer's own notice, not a system message box ([4c78a31](https://github.com/amigo-labs/amigo-blinzel/commit/4c78a31449b032d370cbed26bb5ede105e61813d))
+
 ## [1.7.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.6.0...v1.7.0) (2026-11-10)
 
 
