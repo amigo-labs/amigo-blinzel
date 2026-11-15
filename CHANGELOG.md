@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.7.1...v1.8.0) (2026-11-15)
+
+
+### Features
+
+* **core:** default background is the shared theme's bg (AC-11) ([026f774](https://github.com/amigo-labs/amigo-blinzel/commit/026f774d5d83035257d22a81a9be9dab375b56c9))
+* **ui:** interface colours, radii and sizes from the shared amigo theme (AC-01, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10) ([7c6c876](https://github.com/amigo-labs/amigo-blinzel/commit/7c6c87694d670e9d25ab62c3b4f41cf87c7935e5))
+* **ui:** the file name pattern's hint is muted text (AC-04) ([1475650](https://github.com/amigo-labs/amigo-blinzel/commit/147565092a36552c0dd872635879fa18c3f59b5a))
+* **ui:** the shared amigo theme, dark palette ([99e655e](https://github.com/amigo-labs/amigo-blinzel/commit/99e655ea04e65739ebb384d62f7f240e9cab4992))
+* **windows:** setup window in the shared theme's palette (AC-08, AC-12) ([44a4073](https://github.com/amigo-labs/amigo-blinzel/commit/44a40736081414d0a3be59813b561a4150ae1d9c))
+
+
+### Bug Fixes
+
+* **ui:** fields and unchecked check boxes are outlined with border_strong (AC-05) ([56f9e58](https://github.com/amigo-labs/amigo-blinzel/commit/56f9e58b2e6c0f7af9935d6494f5f45d095b0f6a))
+
 ## [1.7.1](https://github.com/amigo-labs/amigo-blinzel/compare/v1.7.0...v1.7.1) (2026-11-11)
 
 
