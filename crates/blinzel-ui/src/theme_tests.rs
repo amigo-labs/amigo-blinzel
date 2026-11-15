@@ -240,6 +240,7 @@ fn the_adapter_names_the_dark_palettes_roles() {
     assert_eq!(palette::PANEL, rgb(DARK.surface));
     assert_eq!(palette::MENU, rgb(DARK.surface_raised));
     assert_eq!(palette::BORDER, rgb(DARK.border));
+    assert_eq!(palette::BORDER_STRONG, rgb(DARK.border_strong));
     assert_eq!(palette::FG, rgb(DARK.text));
     assert_eq!(palette::DIM, rgb(DARK.text_secondary));
     assert_eq!(palette::FAINT, rgb(DARK.text_muted));
@@ -372,7 +373,7 @@ fn buttons_take_their_fills_from_the_theme() {
     }
 }
 
-/// AC-05: a field is `surface_raised` with a `border` outline; focused
+/// AC-05: a field is `surface_raised` with a `border_strong` outline; focused
 /// the outline is `focus`, invalid `danger`.
 #[test]
 fn a_field_is_outlined_by_its_state() {
@@ -385,14 +386,14 @@ fn a_field_is_outlined_by_its_state() {
         assert_eq!(o.len(), 1);
         o[0].1
     };
-    assert_eq!(outline(false, false), palette::BORDER);
+    assert_eq!(outline(false, false), palette::BORDER_STRONG);
     assert_eq!(outline(true, false), palette::FOCUS);
     assert_eq!(outline(false, true), palette::DANGER);
     assert_eq!(outline(true, true), palette::DANGER);
 }
 
 /// AC-05, AC-06: a check box. Checked: `accent_solid` with an
-/// `on_accent` check; unchecked: `surface_raised` with a `border`
+/// `on_accent` check; unchecked: `surface_raised` with a `border_strong`
 /// outline; checked but disabled (edge case): the check stays, in
 /// `text_muted` on `surface_raised`.
 #[test]
@@ -411,7 +412,7 @@ fn a_check_box_shows_its_state_in_theme_colours() {
         p.checkbox("Sharpen", false, true, 0.0, 0.0);
     });
     assert_eq!(fills(&f.shapes), [(theme::RADIUS_XS, palette::CONTROL)]);
-    assert_eq!(outlines(&f.shapes)[0].1, palette::BORDER);
+    assert_eq!(outlines(&f.shapes)[0].1, palette::BORDER_STRONG);
     assert!(lines(&f.shapes).is_empty());
 
     let f = drawn(|p| {
@@ -599,7 +600,11 @@ fn the_dark_palette_passes_wcag_aa() {
     }
     let c = contrast(p.on_accent, p.accent_solid);
     assert!(c >= 4.5, "on_accent on accent_solid: {c:.2}");
-    for (name, line) in [("accent", p.accent), ("focus", p.focus)] {
+    for (name, line) in [
+        ("accent", p.accent),
+        ("focus", p.focus),
+        ("border_strong", p.border_strong),
+    ] {
         let c = contrast(line, p.surface);
         assert!(c >= 3.0, "{name} on surface: {c:.2}");
     }

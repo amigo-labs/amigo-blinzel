@@ -9,8 +9,8 @@ use crate::backend::Canvas;
 use crate::gfx::{Rgba, Shape};
 
 pub use crate::palette::{
-    ACCENT, ACCENT_HOVER, ACCENT_INK, ACCENT_SOLID, BORDER, CONTROL, CONTROL_HOVER, DANGER,
-    DANGER_INK, DIM, FAINT, FG, FOCUS, ON_ACCENT, PANEL, SCRIM,
+    ACCENT, ACCENT_HOVER, ACCENT_INK, ACCENT_SOLID, BORDER, BORDER_STRONG, CONTROL, CONTROL_HOVER,
+    DANGER, DANGER_INK, DIM, FAINT, FG, FOCUS, ON_ACCENT, PANEL, SCRIM,
 };
 use crate::theme;
 
@@ -209,7 +209,7 @@ impl<C: Canvas> Painter<'_, C> {
             self.fill(box_r, RADIUS_INNER, ACCENT_SOLID);
         } else {
             self.fill(box_r, RADIUS_INNER, CONTROL);
-            self.edge_outline(box_r, 1.0, RADIUS_INNER, BORDER);
+            self.edge_outline(box_r, 1.0, RADIUS_INNER, BORDER_STRONG);
         }
         if on {
             let s = self.scale;
@@ -243,7 +243,7 @@ impl<C: Canvas> Painter<'_, C> {
         } else if focused {
             (FOCUS, 1.5)
         } else {
-            (BORDER, 1.0)
+            (BORDER_STRONG, 1.0)
         };
         self.edge_outline(r, thick, RADIUS, border);
         let pad = self.px(8.0);

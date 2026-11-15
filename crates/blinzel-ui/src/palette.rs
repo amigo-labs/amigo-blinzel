@@ -30,6 +30,9 @@ pub const PANEL: Rgba = rgb(DARK.surface);
 pub const MENU: Rgba = rgb(DARK.surface_raised);
 /// The outline of panels, menus and controls at rest (`border`).
 pub const BORDER: Rgba = rgb(DARK.border);
+/// The outline of a field and of an unchecked check box (`border_strong`):
+/// the boundary a person has to find, 3 : 1 against the surface.
+pub const BORDER_STRONG: Rgba = rgb(DARK.border_strong);
 /// Primary text (`text`).
 pub const FG: Rgba = rgb(DARK.text);
 /// Secondary text (`text_secondary`).
