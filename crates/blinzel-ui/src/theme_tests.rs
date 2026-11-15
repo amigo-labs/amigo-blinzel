@@ -202,6 +202,31 @@ fn the_former_blue_is_gone() {
     }
 }
 
+/// AC-08, AC-12: the Windows setup window (built only on Windows, so
+/// read as source here) names no colour of its own but black and white:
+/// its ground, text and buttons come from [`crate::palette`].
+#[test]
+fn the_setup_window_takes_its_colours_from_the_palette() {
+    let code = read(&repo().join("crates/blinzel-app/src/setup/ui.rs"));
+    let own: Vec<[f32; 3]> = colour_literals(&code)
+        .into_iter()
+        .filter(|c| *c != [0.0; 3] && *c != [1.0; 3])
+        .collect();
+    assert!(own.is_empty(), "{own:?}");
+    for role in [
+        "palette::PANEL",
+        "palette::FG",
+        "palette::DIM",
+        "palette::ACCENT_SOLID",
+        "palette::ACCENT_HOVER",
+        "palette::ON_ACCENT",
+        "palette::CONTROL",
+        "palette::CONTROL_HOVER",
+    ] {
+        assert!(code.contains(role), "{role}");
+    }
+}
+
 // ------------------------------------------------------ roles (AC-04 – AC-07)
 
 /// AC-04 to AC-07: each name of the adapter is its role of the dark

@@ -81,18 +81,18 @@ This spec moves those colours, radii and control sizes onto the shared theme's d
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 |      | open   |        |
-| AC-02 |      | open   |        |
-| AC-03 |      | open   |        |
-| AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
-| AC-06 |      | open   |        |
-| AC-07 |      | open   |        |
-| AC-08 |      | open   |        |
-| AC-09 |      | open   |        |
-| AC-10 |      | open   |        |
-| AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
+| AC-01 | `theme_module_is_generated_for_the_project_accent` (`crates/blinzel-ui/src/theme_tests.rs`); `cargo fmt --all --check`; `node scripts/theme.ts ../amigo-blinzel/docs/site/project.yml --check --rust …` in amigo-labs/website (branch `feat/theme-rustfmt`): "up to date" | built |  |
+| AC-02 | `site_data_workflow_checks_the_theme_module` (`crates/blinzel-ui/src/theme_tests.rs`); CI: site-data | built |  |
+| AC-03 | `no_colour_literal_outside_the_adapter`, `colour_literals_are_found_also_over_several_lines`, `rgb_converts_a_hex_colour`, `the_adapter_names_the_dark_palettes_roles` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-04 | `the_adapter_names_the_dark_palettes_roles`, `a_dialog_is_a_surface_panel_with_a_border`, `the_popup_menu_is_a_raised_surface` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-05 | `buttons_take_their_fills_from_the_theme`, `a_field_is_outlined_by_its_state`, `a_check_box_shows_its_state_in_theme_colours`, `the_chosen_segment_is_an_accent_fill` (`crates/blinzel-ui/src/theme_tests.rs`); error text in `danger_ink`: `the_footer_states_what_start_will_do` (`crates/blinzel-ui/src/batch_dialog.rs`), `unreadable_files_show_their_reason_in_red` (`crates/blinzel-ui/src/app_batch_tests.rs`) | built |  |
+| AC-06 | `buttons_take_their_fills_from_the_theme`, `a_check_box_shows_its_state_in_theme_colours`, `the_chosen_segment_is_an_accent_fill`, `slider_and_progress_fill_with_the_accent` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-07 | `the_grid_marks_with_the_accent`, `the_filmstrip_frames_the_current_image_with_the_accent`, `the_selection_frame_and_the_loupes_pixel_are_accent` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-08 | `the_former_blue_is_gone`, `the_setup_window_takes_its_colours_from_the_palette` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-09 | `sizes_come_from_the_theme`, `a_dialog_is_a_surface_panel_with_a_border`, `the_popup_menu_is_a_raised_surface`, `buttons_take_their_fills_from_the_theme` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-10 | `the_dark_palette_passes_wcag_aa`, `contrast_follows_the_wcag_formula` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
+| AC-11 | `the_default_background_is_the_themes_bg` (`crates/blinzel-ui/src/theme_tests.rs`); `a_stored_background_wins_over_the_themes_default`, `a_missing_file_means_the_documented_defaults`, `invalid_background_and_paths_keep_their_defaults` (`crates/blinzel-core/src/settings.rs`) | built |  |
+| AC-12 | `the_setup_window_takes_its_colours_from_the_palette` (`crates/blinzel-ui/src/theme_tests.rs`, reads the source); type-check and clippy of the Windows shell from Linux (`cargo clippy -p blinzel-app --no-default-features --tests --target x86_64-pc-windows-msvc -- -D warnings`, AGENTS.md Gotchas): clean; CI: windows builds and runs it | built |  |
 | AC-13 |      | open   |        |
 | AC-14 |      | open   |        |
 
@@ -102,3 +102,21 @@ This spec moves those colours, radii and control sizes onto the shared theme's d
 - The system's UI font stays (no bundled Inter): startup time is the product (`blinzel.md` §5).
 - Elements drawn over the picture keep their black and white with alpha: they sit on arbitrary pixels, where a theme surface colour guarantees nothing.
 - The `background` default follows the theme's `bg`, but a stored value wins: the file has always written every key, so existing users keep what they see.
+- The adapter is `crates/blinzel-ui/src/palette.rs` (`rgb`, `rgba` and one constant per role); `widgets.rs` re-exports the names its call sites read. `popup.rs`, `browse.rs`, `chrome.rs`, `app.rs` and the setup window use the same constants.
+- Red run (2026-11-15, the adapter still holding the old colours): `cargo test -p blinzel-ui --lib theme_tests` failed 13 of 21 tests, among them `the_adapter_names_the_dark_palettes_roles`, `no_colour_literal_outside_the_adapter`, `the_former_blue_is_gone`, `buttons_take_their_fills_from_the_theme`, `a_field_is_outlined_by_its_state`, `the_popup_menu_is_a_raised_surface` (radius 8 instead of 12) and `the_default_background_is_the_themes_bg`. Green at once, because they test the helpers or the generated values: `rgb_converts_a_hex_colour`, `colour_literals_are_found_also_over_several_lines`, `contrast_follows_the_wcag_formula`, `the_dark_palette_passes_wcag_aa`, `theme_module_is_generated_for_the_project_accent`.
+- Panels and the popup menu are opaque: no test and nothing in the look needed the former 1.5 % transparency.
+- A check box and a segment inside its track have `RADIUS_XS` (4), a list frame inside a panel and the screenshot hint `RADIUS_MD` (8): the theme's own components (`components.css`) round a 16 px box and nested parts that way; `RADIUS_SM` on them would read as a circle. Button, field and the segmented control's track have `RADIUS_SM`.
+- A primary button under the pointer is `accent_solid` under a veil of white at 12 %: the palette has no lighter accent role, and white with alpha is the one colour allowed outside the adapter (AC-03). The Windows setup window does the same (AC-12 "lighter under the pointer").
+- Every disabled button, primary or not, is `surface_raised` with a `border` outline and `text_muted` (edge case "a disabled primary button"); a disabled check box label is `text_muted` too (AC-04).
+- A field at rest and an unchecked check box are outlined with `border`, as AC-05 says. Before, the outline was the secondary text colour, for a 3 : 1 boundary; `border` on `surface` has less. The theme's CSS components use `border_strong` there — a question for the light-palette spec, not decided here.
+- The track of a slider and of a progress bar is `hover`, the slider's knob `text`.
+- The link "Remove all" is `accent_ink`, the theme's role for accent text; AC-07 names lines and marks only. The contrast test covers `accent_ink` as well.
+- A marked thumbnail's badge is an `accent` disc with an `on_accent` check (white on the red accent has 3.3 : 1).
+- The hint and the error message in an empty window are `text_secondary` on the background.
+- A thumbnail not loaded yet is a `surface` tile, a thumbnail under the pointer lies on `hover`. The band behind the filmstrip stays black at 30 %: it darkens whatever `background` the user chose.
+- The close button's reds (window buttons are out of scope) moved into the adapter as `CLOSE_HOVER` / `CLOSE_PRESSED`, unchanged, so the source test of AC-03 holds without an exception list.
+- The loupe's frame stays white at 10 % (the loupe is out of scope); the screenshot overlay's size tag and hint keep using the panel and text constants and so became `surface` with `text`.
+- The dialog's header row is as high as the title's line (`TEXT_TITLE.line`, 26) instead of 24, so the 20 px title is not cut by its row.
+- The setup window's buttons take `RADIUS_SM` too; its close button and glyph stay as they are.
+- New public API of `blinzel-ui`: the modules `theme` (generated) and `palette`; `widgets::{RADIUS, RADIUS_INNER, RADIUS_FRAME, RADIUS_PANEL, ACCENT_INK, ACCENT_SOLID, ACCENT_HOVER, ON_ACCENT, FOCUS, DANGER_INK}`. `widgets::ACCENT_FILL` is gone (now `ACCENT_SOLID`), `widgets::DANGER` is the outline colour and `DANGER_INK` the text colour.
+- AC-12 has no test that runs the setup window: it builds only on Windows. `the_setup_window_takes_its_colours_from_the_palette` reads its source on every platform; the Windows CI job compiles it.

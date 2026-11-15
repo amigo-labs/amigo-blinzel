@@ -1,4 +1,5 @@
-//! The setup window: frameless and dark like the viewer, drawn with its
+//! The setup window: frameless and in the viewer's theme
+//! (`blinzel_ui::palette`), drawn with its
 //! renderer and DirectWrite text. It asks, installs, then offers the
 //! default-apps settings (Windows does not let apps make themselves the
 //! default) or starting the viewer.
@@ -31,6 +32,7 @@ use super::{Layout, install_now};
 use crate::gfx::text::Text;
 use crate::gfx::{Gfx, Renderer, Rgba, Shape, SwapChain};
 use crate::platform::wide;
+use blinzel_ui::{palette, widgets};
 
 /// Exit codes of the interactive setup.
 pub const EXIT_OK: i32 = 0;
@@ -47,10 +49,6 @@ const BUTTON_H: f64 = 34.0;
 const GAP: f64 = 12.0;
 const CLOSE_W: f64 = 46.0;
 const CLOSE_H: f64 = 32.0;
-
-const BACKGROUND: [u8; 3] = [0x1E, 0x1E, 0x1E];
-const ACCENT: Rgba = Rgba(0.0, 0.47, 0.84, 1.0);
-const ACCENT_HOVER: Rgba = Rgba(0.10, 0.55, 0.92, 1.0);
 
 /// Shows a message box (also where Direct3D is unavailable).
 pub fn message(text: &str, error: bool) {
@@ -332,25 +330,37 @@ impl Ui {
         };
         let s = self.scale;
         let ctx = self.gfx.context.clone();
-        self.renderer
-            .begin(&ctx, &rtv, self.client, Rgba::from_u8(BACKGROUND, 1.0));
+        self.renderer.begin(&ctx, &rtv, self.client, palette::PANEL);
 
         let mut shapes = Vec::new();
         for (b, r) in self.buttons() {
             let hot = self.hover == Some(b);
+            // The window's close button keeps the platform's red.
             let color = match b {
-                Btn::Primary if hot => ACCENT_HOVER,
-                Btn::Primary => ACCENT,
-                Btn::Secondary => Rgba(1.0, 1.0, 1.0, if hot { 0.16 } else { 0.09 }),
-                Btn::Close if hot => Rgba(0.769, 0.169, 0.110, 1.0),
+                Btn::Primary => palette::ACCENT_SOLID,
+                Btn::Secondary if hot => palette::CONTROL_HOVER,
+                Btn::Secondary => palette::CONTROL,
+                Btn::Close if hot => palette::CLOSE_HOVER,
                 Btn::Close => continue,
             };
-            let radius = if b == Btn::Close { 0.0 } else { 4.0 * s as f32 };
+            let radius = if b == Btn::Close {
+                0.0
+            } else {
+                (widgets::RADIUS * s) as f32
+            };
             shapes.push(Shape::Fill {
                 rect: r,
                 radius,
                 color,
             });
+            if b == Btn::Primary && hot {
+                // Lighter under the pointer.
+                shapes.push(Shape::Fill {
+                    rect: r,
+                    radius,
+                    color: palette::ACCENT_HOVER,
+                });
+            }
         }
         // The close glyph, as in the viewer's caption.
         let (_, cr) = self.buttons()[0];
@@ -374,28 +384,32 @@ impl Ui {
 
         let (title, body, primary, secondary) = self.texts();
         let max_w = (self.client.0 as f64 - 2.0 * PAD * s) as f32;
-        let white = Rgba(1.0, 1.0, 1.0, 0.96);
         let mut y = (PAD + 6.0) * s;
         if let Ok(t) = self
             .text
             .get_weighted(&title, (22.0 * s) as f32, max_w, true)
         {
-            self.renderer
-                .draw_text(&ctx, &t.srv, ((PAD * s) as f32, y as f32), t.size, white);
+            self.renderer.draw_text(
+                &ctx,
+                &t.srv,
+                ((PAD * s) as f32, y as f32),
+                t.size,
+                palette::FG,
+            );
             y += t.size.1 as f64 + 10.0 * s;
         }
         if let Ok(t) = self
             .text
             .get_weighted(&body, (14.0 * s) as f32, max_w, false)
         {
-            let dim = Rgba(1.0, 1.0, 1.0, 0.80);
+            let at = ((PAD * s) as f32, y as f32);
             self.renderer
-                .draw_text(&ctx, &t.srv, ((PAD * s) as f32, y as f32), t.size, dim);
+                .draw_text(&ctx, &t.srv, at, t.size, palette::DIM);
         }
         for (b, r) in self.buttons() {
-            let label = match b {
-                Btn::Primary => primary,
-                Btn::Secondary => secondary,
+            let (label, ink) = match b {
+                Btn::Primary => (primary, palette::ON_ACCENT),
+                Btn::Secondary => (secondary, palette::FG),
                 Btn::Close => continue,
             };
             if let Ok(t) = self
@@ -406,7 +420,7 @@ impl Ui {
                     (r.x + (r.w - t.size.0 as f64) / 2.0) as f32,
                     (r.y + (r.h - t.size.1 as f64) / 2.0) as f32,
                 );
-                self.renderer.draw_text(&ctx, &t.srv, pos, t.size, white);
+                self.renderer.draw_text(&ctx, &t.srv, pos, t.size, ink);
             }
         }
         let _ = self.swap.present();
