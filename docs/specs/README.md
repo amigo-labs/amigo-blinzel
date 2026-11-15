@@ -27,8 +27,8 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 15a | [settings](settings.md) | 13 / 17 | 1 | 0 | revised 2026-11-11 with `updates` (the `updates` key, the menu without "Install updates automatically"); built together with `updates`, then `/spec-check` |
 | 16 | [release](release.md) | 15 / 18 | 9 | 3 | the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`, shown in the v1.4.0 release run 41591512319); then `/spec-check` |
 | 17 | [competitive-benchmark](competitive-benchmark.md) | 15 / 20 | 3 | 5 | the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
-| 18 | [amigo-theme](amigo-theme.md) | 0 / 14 | 2 | 1 | new 2026-11-15 (the shared amigo theme, dark palette): `/spec-build amigo-theme`; the manual check AC-14 (look in the running viewer); then `/spec-check` |
-| | **Total** | **301 / 373** | | | |
+| 18 | [amigo-theme](amigo-theme.md) | 13 / 14 | 3 | 1 | built 2026-11-15 (the shared amigo theme, dark palette; released in 1.8.0): the manual check AC-14 (look in the running viewer); then `/spec-check` |
+| | **Total** | **314 / 373** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 

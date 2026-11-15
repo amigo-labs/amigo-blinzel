@@ -66,7 +66,8 @@ pub const DANGER: Rgba = rgb(DARK.danger);
 /// Error text (`danger_ink`).
 pub const DANGER_INK: Rgba = rgb(DARK.danger_ink);
 
-/// The close button under the pointer and pressed. Not a theme colour:
-/// window buttons follow the platforms' convention.
+/// The close button under the pointer. Not a theme colour: window buttons
+/// follow the platforms' convention.
 pub const CLOSE_HOVER: Rgba = Rgba(0.769, 0.169, 0.110, 1.0);
+/// The close button while pressed; like [`CLOSE_HOVER`] not a theme colour.
 pub const CLOSE_PRESSED: Rgba = Rgba(0.698, 0.157, 0.102, 1.0);
