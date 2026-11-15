@@ -2,15 +2,19 @@ name: Site data
 
 # Validates docs/site/ (the page on amigo-labs.dev) against the website's
 # schema and fails when assets/brand/ (the app icons made from the pixel
-# monogram) no longer matches docs/site/project.yml. Regenerate with
+# monogram) or crates/blinzel-ui/src/theme.rs (the shared amigo theme as a
+# Rust module) no longer matches docs/site/project.yml. Regenerate in
+# amigo-labs/website with
 # `node scripts/monogram.ts amigo-labs/amigo-blinzel --out ../amigo-blinzel/assets/brand`
-# in amigo-labs/website.
+# and
+# `node scripts/theme.ts amigo-labs/amigo-blinzel --out <scratch folder> --rust ../amigo-blinzel/crates/blinzel-ui/src/theme.rs`.
 
 on:
   pull_request:
     paths:
       - "docs/site/**"
       - "assets/brand/**"
+      - "crates/blinzel-ui/src/theme.rs"
       - ".github/workflows/site-data.yml"
   workflow_dispatch:
 
@@ -20,3 +24,5 @@ permissions:
 jobs:
   site-data:
     uses: amigo-labs/website/.github/workflows/validate-project.yml@main
+    with:
+      theme-rust: crates/blinzel-ui/src/theme.rs
