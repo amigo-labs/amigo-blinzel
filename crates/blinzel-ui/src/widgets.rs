@@ -1,5 +1,5 @@
 //! Controls drawn by the UI itself (the batch dialog): one look on every
-//! platform, dark like the menus. Each draw call returns the rectangle it
+//! platform, in the colours of the shared amigo theme ([`crate::palette`]). Each draw call returns the rectangle it
 //! used, so a dialog can lay itself out from top to bottom and remember
 //! where to hit-test.
 
@@ -8,29 +8,31 @@ use blinzel_core::geom::Rect;
 use crate::backend::Canvas;
 use crate::gfx::{Rgba, Shape};
 
-/// Dims the viewer behind a modal panel.
-pub const SCRIM: Rgba = Rgba(0.0, 0.0, 0.0, 0.45);
-pub const PANEL: Rgba = Rgba(0.15, 0.15, 0.16, 0.985);
-pub const BORDER: Rgba = Rgba(1.0, 1.0, 1.0, 0.10);
-pub const FG: Rgba = Rgba(0.93, 0.93, 0.93, 1.0);
-pub const DIM: Rgba = Rgba(0.93, 0.93, 0.93, 0.55);
-pub const FAINT: Rgba = Rgba(0.93, 0.93, 0.93, 0.32);
-pub const CONTROL: Rgba = Rgba(1.0, 1.0, 1.0, 0.07);
-pub const CONTROL_HOVER: Rgba = Rgba(1.0, 1.0, 1.0, 0.12);
-pub const ACCENT: Rgba = Rgba(0.35, 0.62, 1.0, 1.0);
-pub const ACCENT_FILL: Rgba = Rgba(0.35, 0.62, 1.0, 0.85);
-pub const DANGER: Rgba = Rgba(1.0, 0.45, 0.42, 1.0);
+pub use crate::palette::{
+    ACCENT, ACCENT_HOVER, ACCENT_INK, ACCENT_SOLID, BORDER, BORDER_STRONG, CONTROL, CONTROL_HOVER,
+    DANGER, DANGER_INK, DIM, FAINT, FG, FOCUS, ON_ACCENT, PANEL, SCRIM,
+};
+use crate::theme;
 
-/// Height of a segment row and of a text field (logical pixels).
-pub const CONTROL_H: f64 = 30.0;
+/// Height of a segment row, a text field and a button (logical pixels).
+pub const CONTROL_H: f64 = theme::CONTROL_MD as f64;
 /// Height of a check box row and of a list row.
 pub const CHECK_ROW: f64 = 22.0;
 /// The type scale's dialog title.
-pub const TEXT_TITLE: f64 = 18.0;
+pub const TEXT_TITLE: f64 = theme::TEXT_TITLE.size as f64;
 /// The type scale's body text: labels, controls, rows, buttons, status.
-pub const TEXT_BODY: f64 = 13.0;
+pub const TEXT_BODY: f64 = theme::TEXT_BODY_SM.size as f64;
 /// The type scale's hints.
-pub const TEXT_SMALL: f64 = 12.0;
+pub const TEXT_SMALL: f64 = theme::TEXT_CAPTION.size as f64;
+/// The corner of a control: button, field, segmented control.
+pub const RADIUS: f64 = theme::RADIUS_SM as f64;
+/// The corner of what sits inside a control (a segment in its track) and
+/// of a check box.
+pub const RADIUS_INNER: f64 = theme::RADIUS_XS as f64;
+/// The corner of a frame inside a panel (a list).
+pub const RADIUS_FRAME: f64 = theme::RADIUS_MD as f64;
+/// The corner of dialogs, panels and the popup menu.
+pub const RADIUS_PANEL: f64 = theme::RADIUS_LG as f64;
 /// Room left and right of a segment's label.
 const SEGMENT_PAD: f64 = 12.0;
 /// A segment's inset in its track.
@@ -180,16 +182,16 @@ impl<C: Canvas> Painter<'_, C> {
     ) -> Vec<Rect> {
         let rects = self.segment_rects(options, x, y, w);
         let bottom = rects.last().map_or(y, |r| r.bottom());
-        self.fill(Rect::new(x, y, w, bottom - y), 6.0, CONTROL);
+        self.fill(Rect::new(x, y, w, bottom - y), RADIUS, CONTROL);
         let i2 = self.px(SEGMENT_INSET);
         for (i, (o, r)) in options.iter().zip(&rects).enumerate() {
             let inner = Rect::new(r.x + i2, r.y + i2, r.w - 2.0 * i2, r.h - 2.0 * i2);
             let ink = if i == chosen {
-                self.fill(inner, 5.0, ACCENT);
-                PANEL
+                self.fill(inner, RADIUS_INNER, ACCENT_SOLID);
+                ON_ACCENT
             } else {
                 if hover == Some(i) {
-                    self.fill(inner, 5.0, CONTROL_HOVER);
+                    self.fill(inner, RADIUS_INNER, CONTROL_HOVER);
                 }
                 FG
             };
@@ -198,48 +200,52 @@ impl<C: Canvas> Painter<'_, C> {
         rects
     }
 
-    /// A check box with its label; returns the clickable area.
+    /// A check box with its label; returns the clickable area. A checked
+    /// box is an accent fill; a disabled one keeps its check, muted.
     pub fn checkbox(&mut self, label: &str, on: bool, enabled: bool, x: f64, y: f64) -> Rect {
         let b = self.px(16.0);
         let box_r = Rect::new(x, y + self.px(3.0), b, b);
         if on && enabled {
-            self.fill(box_r, 4.0, ACCENT_FILL);
+            self.fill(box_r, RADIUS_INNER, ACCENT_SOLID);
+        } else {
+            self.fill(box_r, RADIUS_INNER, CONTROL);
+            self.edge_outline(box_r, 1.0, RADIUS_INNER, BORDER_STRONG);
+        }
+        if on {
             let s = self.scale;
             let (cx, cy) = (box_r.x + b / 2.0, box_r.y + b / 2.0);
+            let color = if enabled { ON_ACCENT } else { FAINT };
             let line = |a: (f64, f64), z: (f64, f64)| Shape::Line {
                 a: (a.0 as f32, a.1 as f32),
                 b: (z.0 as f32, z.1 as f32),
                 thickness: (1.8 * s) as f32,
-                color: FG,
+                color,
             };
             let k = 3.6 * s;
             self.canvas.draw_shapes(&[
                 line((cx - k, cy), (cx - k / 3.0, cy + k * 0.7)),
                 line((cx - k / 3.0, cy + k * 0.7), (cx + k, cy - k * 0.8)),
             ]);
-        } else {
-            self.edge_outline(box_r, 1.2, 4.0, if enabled { DIM } else { FAINT });
         }
         let (_, lh) = self.text_size(label, TEXT_BODY);
         let row = self.px(CHECK_ROW);
         let (tx, ty) = (box_r.right() + self.px(8.0), y + (row - lh) / 2.0);
-        // A disabled label stays readable (DIM passes AA on the panel).
-        let (tw, th) = self.text(label, TEXT_BODY, tx, ty, if enabled { FG } else { DIM });
+        // A disabled label stays readable (FAINT passes AA on the panel).
+        let (tw, th) = self.text(label, TEXT_BODY, tx, ty, if enabled { FG } else { FAINT });
         Rect::new(x, y, b + self.px(8.0) + tw, row.max(th))
     }
 
     /// A one-line text field.
     pub fn field(&mut self, text: &str, focused: bool, invalid: bool, r: Rect) {
-        self.fill(r, 5.0, CONTROL);
-        // The idle outline is DIM: an input's boundary needs 3:1.
+        self.fill(r, RADIUS, CONTROL);
         let (border, thick) = if invalid {
             (DANGER, 1.5)
         } else if focused {
-            (ACCENT, 1.5)
+            (FOCUS, 1.5)
         } else {
-            (DIM, 1.0)
+            (BORDER_STRONG, 1.0)
         };
-        self.edge_outline(r, thick, 5.0, border);
+        self.edge_outline(r, thick, RADIUS, border);
         let pad = self.px(8.0);
         self.text_in(text, TEXT_BODY, &r, pad, FG);
         if focused {
@@ -261,7 +267,7 @@ impl<C: Canvas> Painter<'_, C> {
         let track = Rect::new(r.x, r.y + (r.h - t) / 2.0, r.w, t);
         self.fill(track, 2.0, CONTROL_HOVER);
         let filled = Rect::new(track.x, track.y, track.w * value.clamp(0.0, 1.0), t);
-        self.fill(filled, 2.0, ACCENT_FILL);
+        self.fill(filled, 2.0, ACCENT_SOLID);
         let k = self.px(14.0);
         let knob = Rect::new(
             track.x + track.w * value.clamp(0.0, 1.0) - k / 2.0,
@@ -272,27 +278,29 @@ impl<C: Canvas> Painter<'_, C> {
         self.fill(knob, 7.0, FG);
     }
 
-    /// A push button; `primary` is filled with the accent colour and
-    /// labelled in the panel's colour (FG on the accent fails AA). A
-    /// disabled button is an outline with a dimmed label.
+    /// A push button; `primary` is an accent fill with the ink that reads
+    /// on it, lighter under the pointer. A disabled button is a quiet
+    /// control with a muted label, primary or not.
     pub fn button(&mut self, label: &str, primary: bool, hover: bool, enabled: bool, r: Rect) {
         let ink = match (enabled, primary) {
             (false, _) => {
-                self.edge_outline(r, 1.0, 6.0, BORDER);
-                DIM
+                self.fill(r, RADIUS, CONTROL);
+                self.edge_outline(r, 1.0, RADIUS, BORDER);
+                FAINT
             }
             (true, true) => {
-                self.fill(r, 6.0, ACCENT);
-                PANEL
+                self.fill(r, RADIUS, ACCENT_SOLID);
+                if hover {
+                    self.fill(r, RADIUS, ACCENT_HOVER);
+                }
+                ON_ACCENT
             }
             (true, false) => {
-                self.fill(r, 6.0, CONTROL);
+                self.fill(r, RADIUS, if hover { CONTROL_HOVER } else { CONTROL });
+                self.edge_outline(r, 1.0, RADIUS, BORDER);
                 FG
             }
         };
-        if enabled && hover {
-            self.fill(r, 6.0, CONTROL_HOVER);
-        }
         self.text_centred(label, TEXT_BODY, &r, ink);
     }
 
@@ -358,7 +366,7 @@ impl<C: Canvas> Painter<'_, C> {
         self.fill(
             Rect::new(r.x, r.y, w, r.h),
             r.h / 2.0 / self.scale,
-            ACCENT_FILL,
+            ACCENT_SOLID,
         );
     }
 }

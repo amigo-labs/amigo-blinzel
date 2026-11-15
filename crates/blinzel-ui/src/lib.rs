@@ -16,10 +16,14 @@ pub mod files;
 pub mod gfx;
 pub mod loader;
 pub mod menu;
+pub mod palette;
 pub mod popup;
 pub mod settings_store;
 pub mod snip;
 #[cfg(test)]
 pub(crate) mod testkit;
+pub mod theme;
+#[cfg(test)]
+mod theme_tests;
 pub mod thumbs;
 pub mod widgets;

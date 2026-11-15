@@ -239,7 +239,7 @@ impl Snip {
             lx += p.px(4.0);
         }
         let tag = Rect::new(lx, ly, lw + 2.0 * pad, lh + 2.0 * pad);
-        p.fill(tag, 6.0, widgets::PANEL);
+        p.fill(tag, widgets::RADIUS, widgets::PANEL);
         p.text(&label, 12.0, lx + pad, ly + pad, widgets::FG);
 
         // Hint, centred at the top of the monitor under the pointer.
@@ -251,7 +251,7 @@ impl Snip {
             hw + 4.0 * pad,
             hh + 2.0 * pad,
         );
-        p.fill(hint_box, 8.0, widgets::PANEL);
+        p.fill(hint_box, widgets::RADIUS_FRAME, widgets::PANEL);
         p.text(
             hint,
             13.0,
@@ -288,7 +288,8 @@ impl Snip {
         // The pixel under the pointer, and the frame.
         let px = Rect::new(x + half * zoom, y + half * zoom, zoom, zoom);
         p.outline(px, 1.0, 0.0, widgets::ACCENT);
-        p.outline(loupe, 2.0, 0.0, widgets::BORDER);
+        // The loupe lies over the picture: its frame is white with alpha.
+        p.outline(loupe, 2.0, 0.0, Rgba(1.0, 1.0, 1.0, 0.10));
     }
 }
 

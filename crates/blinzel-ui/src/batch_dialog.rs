@@ -105,17 +105,17 @@ const GAP_GROUP: f64 = 16.0;
 const PAD: f64 = 24.0;
 /// The panel: width, corner, and the least room to the window's edge.
 const WIDTH: f64 = 640.0;
-const RADIUS: f64 = 12.0;
+const RADIUS: f64 = widgets::RADIUS_PANEL;
 const MARGIN: f64 = 8.0;
 /// The header row (title, count, "Remove all"); also a run's headline
 /// and the header of its error list.
-const HEAD_H: f64 = 24.0;
+const HEAD_H: f64 = crate::theme::TEXT_TITLE.line as f64;
 /// Where the baseline sits, as a share of the line height the canvas
 /// measures (cosmic-text centres a sans font's glyphs in 1.3 × size
 /// lines: baseline at 0.76), to set smaller text on the title's baseline.
 const ASCENT: f64 = 0.76;
 const HINT_H: f64 = 16.0;
-const BUTTON_H: f64 = 32.0;
+const BUTTON_H: f64 = CONTROL_H;
 const BAR_H: f64 = 8.0;
 /// A size field (six digits), the folder picker, the quality number.
 const FIELD_W: f64 = 80.0;
@@ -678,7 +678,7 @@ impl BatchDialog {
                 let color = if hover == Some(Hit::Clear) {
                     widgets::FG
                 } else {
-                    widgets::ACCENT
+                    widgets::ACCENT_INK
                 };
                 on_baseline(&mut p, clear, right - cw, color);
                 hits.push((cr, Hit::Clear));
@@ -847,7 +847,7 @@ impl BatchDialog {
                 hits.push((pf, Hit::Field(Field::Pattern)));
                 y += ctrl + tight;
                 let hint = Rect::new(cx, y, cw, p.px(HINT_H));
-                p.text_in(PLACEHOLDERS, TEXT_SMALL, &hint, 0.0, widgets::DIM);
+                p.text_in(PLACEHOLDERS, TEXT_SMALL, &hint, 0.0, widgets::FAINT);
                 y += hint.h + gap;
 
                 label(&mut p, Msg::BatchFolder, y, ctrl);
@@ -881,7 +881,7 @@ impl BatchDialog {
                     Err(m @ (Msg::BatchNeedFiles | Msg::BatchWaitReading)) => {
                         (tr(m).to_string(), widgets::DIM)
                     }
-                    Err(m) => (tr(m).to_string(), widgets::DANGER),
+                    Err(m) => (tr(m).to_string(), widgets::DANGER_INK),
                 };
                 status(&mut p, &text, color, &footer, room);
             }
@@ -923,7 +923,7 @@ impl BatchDialog {
                 for (name, error) in &run.errors {
                     let line = error_line(&mut p, name, error, line_w);
                     let r = Rect::new(x0 + inset_h, ly, line_w, row);
-                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER);
+                    p.text_in(&line, TEXT_BODY, &r, 0.0, widgets::DANGER_INK);
                     ly += row;
                 }
 
@@ -1343,7 +1343,8 @@ mod tests {
         assert_eq!(one[5].right(), 610.0);
         let two = p.segment_rects(&labels, 10.0, 20.0, 200.0);
         let rows: Vec<f64> = two.iter().map(|r| r.y).collect();
-        assert_eq!(rows, [20.0, 20.0, 20.0, 50.0, 50.0, 50.0]);
+        // The second row starts one control height (32) below the first.
+        assert_eq!(rows, [20.0, 20.0, 20.0, 52.0, 52.0, 52.0]);
         assert_eq!((two[2].right(), two[5].right()), (210.0, 210.0));
         assert_eq!((two[0].x, two[3].x), (10.0, 10.0));
         // One column grid: the second row's dividers under the first's.
@@ -1393,13 +1394,13 @@ mod tests {
             color
         };
         d.first.clear();
-        assert_eq!(blocked(&mut d, Msg::BatchNeedSize), widgets::DANGER);
+        assert_eq!(blocked(&mut d, Msg::BatchNeedSize), widgets::DANGER_INK);
         d.first = "1920".into();
         d.pattern = "{bad".into();
-        assert_eq!(blocked(&mut d, Msg::BatchNeedPattern), widgets::DANGER);
+        assert_eq!(blocked(&mut d, Msg::BatchNeedPattern), widgets::DANGER_INK);
         d.pattern = "{name}".into();
         d.folder = " ".into();
-        assert_eq!(blocked(&mut d, Msg::BatchNeedFolder), widgets::DANGER);
+        assert_eq!(blocked(&mut d, Msg::BatchNeedFolder), widgets::DANGER_INK);
         d.folder = "resized".into();
         assert!(matches!(d.key(Key::Enter), Outcome::Start(..)));
 
@@ -1412,7 +1413,7 @@ mod tests {
         tx.send(("/photos/broken.jpg".into(), Err("broken".into())))
             .unwrap();
         d.poll();
-        assert_eq!(blocked(&mut d, Msg::BatchNeedReadable), widgets::DANGER);
+        assert_eq!(blocked(&mut d, Msg::BatchNeedReadable), widgets::DANGER_INK);
     }
 
     /// A long folder is shortened in the middle; the count stays.

@@ -26,7 +26,7 @@ pub const ROW: f64 = widgets::CHECK_ROW;
 pub const INSET_V: f64 = 4.0;
 pub(crate) const INSET_H: f64 = 8.0;
 /// The corner of the list's frame (and of the batch's error list).
-pub(crate) const FRAME_RADIUS: f64 = 8.0;
+pub(crate) const FRAME_RADIUS: f64 = widgets::RADIUS_FRAME;
 /// Width of the arrow column and of the remove button.
 const ARROW_W: f64 = 24.0;
 const REMOVE_W: f64 = 24.0;
@@ -305,11 +305,15 @@ impl BatchFiles {
             } else {
                 p.elide_middle(new, TEXT_BODY, new_w)
             };
-            let color = if *bad { widgets::DANGER } else { widgets::FG };
+            let color = if *bad {
+                widgets::DANGER_INK
+            } else {
+                widgets::FG
+            };
             p.text_in(&new, TEXT_BODY, &new_r, 0.0, color);
             let x = Rect::new(row.right() - x_w, y, x_w, rh);
             if hover_remove == Some(i) {
-                p.fill(x, 4.0, widgets::CONTROL_HOVER);
+                p.fill(x, widgets::RADIUS_INNER, widgets::CONTROL_HOVER);
             }
             p.text_centred("×", 14.0, &x, widgets::DIM);
             removes.push((x, i));

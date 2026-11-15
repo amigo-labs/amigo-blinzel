@@ -7,6 +7,7 @@
 use blinzel_core::geom::Rect;
 
 use crate::gfx::{Rgba, Shape};
+use crate::palette;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Button {
@@ -87,8 +88,8 @@ impl Chrome {
             let r = self.rect(b);
             if hover == Some(b) || pressed == Some(b) {
                 let color = match (b, pressed == Some(b)) {
-                    (Button::Close, false) => Rgba(0.769, 0.169, 0.110, 1.0),
-                    (Button::Close, true) => Rgba(0.698, 0.157, 0.102, 1.0),
+                    (Button::Close, false) => palette::CLOSE_HOVER,
+                    (Button::Close, true) => palette::CLOSE_PRESSED,
                     (_, false) => Rgba(1.0, 1.0, 1.0, 0.14),
                     (_, true) => Rgba(1.0, 1.0, 1.0, 0.08),
                 };

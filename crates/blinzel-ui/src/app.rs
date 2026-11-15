@@ -34,6 +34,7 @@ use crate::color::ColorManager;
 use crate::gfx::{ImageInfo, Rgba, Shape};
 use crate::loader::{self, GpuAnimation, Job, Loaded, Loader, Stage};
 use crate::menu::{Cmd, MenuState};
+use crate::palette;
 use crate::popup::{Outcome, Popup};
 use crate::settings_store;
 
@@ -1376,7 +1377,7 @@ impl<B: Backend> App<B> {
             ((ch - size.1 as f64) / 2.0).round() as f32,
         );
         self.canvas
-            .draw_text(&message, px, max_w, pos, Rgba(0.85, 0.85, 0.85, 1.0));
+            .draw_text(&message, px, max_w, pos, palette::DIM);
     }
 
     // ---------------------------------------------------------------- input

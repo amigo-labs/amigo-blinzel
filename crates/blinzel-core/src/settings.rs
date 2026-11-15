@@ -53,7 +53,9 @@ impl Default for Settings {
             single_instance: true,
             prefetch_ahead: 4,
             prefetch_behind: 2,
-            background: [0x1E, 0x1E, 0x1E],
+            // The shared amigo theme's `bg` (`docs/specs/amigo-theme.md`
+            // AC-11; `blinzel-ui` asserts that the two agree).
+            background: [0x15, 0x16, 0x1A],
             auto_update: true,
             resident: false,
             color_management: true,
@@ -299,7 +301,7 @@ mod tests {
         assert_eq!(s.language, None, "auto");
         assert!(s.single_instance);
         assert_eq!((s.prefetch_ahead, s.prefetch_behind), (4, 2));
-        assert_eq!(s.background, [0x1E, 0x1E, 0x1E]);
+        assert_eq!(s.background, [0x15, 0x16, 0x1A]);
         assert!(s.auto_update && !s.resident && s.color_management);
         assert!(!s.filmstrip && !s.maximized);
         assert!(s.screenshot_hotkey && s.screenshot_save && s.screenshot_open);
@@ -313,7 +315,7 @@ mod tests {
             "view_mode = \"fit-image-to-window\"",
             "no_upscale = true",
             "language = \"auto\"",
-            "background = \"#1E1E1E\"",
+            "background = \"#15161A\"",
         ] {
             assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
         }
@@ -369,6 +371,18 @@ mod tests {
         assert!(text.lines().any(|l| l == "language = \"auto\""), "{text}");
     }
 
+    /// `docs/specs/amigo-theme.md` AC-11: the default is the shared
+    /// theme's `bg`; a file that names a colour (an older version wrote
+    /// `#1E1E1E`) keeps it.
+    #[test]
+    fn a_stored_background_wins_over_the_themes_default() {
+        assert_eq!(Settings::default().background, [0x15, 0x16, 0x1A]);
+        assert_eq!(Settings::parse("").background, [0x15, 0x16, 0x1A]);
+        let old = Settings::parse("background = \"#1E1E1E\"");
+        assert_eq!(old.background, [0x1E, 0x1E, 0x1E]);
+        assert!(old.to_text().contains("background = \"#1E1E1E\""));
+    }
+
     #[test]
     fn invalid_background_and_paths_keep_their_defaults() {
         for bad in [
@@ -381,7 +395,7 @@ mod tests {
             "\"\"",
         ] {
             let s = Settings::parse(&format!("background = {bad}"));
-            assert_eq!(s.background, [0x1E, 0x1E, 0x1E], "background = {bad}");
+            assert_eq!(s.background, [0x15, 0x16, 0x1A], "background = {bad}");
         }
         assert_eq!(
             Settings::parse("background = \"#1e2f3a\"").background,
