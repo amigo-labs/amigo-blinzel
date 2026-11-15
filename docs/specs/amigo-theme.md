@@ -93,8 +93,8 @@ This spec moves those colours, radii and control sizes onto the shared theme's d
 | AC-10 | `the_dark_palette_passes_wcag_aa`, `contrast_follows_the_wcag_formula` (`crates/blinzel-ui/src/theme_tests.rs`) | built |  |
 | AC-11 | `the_default_background_is_the_themes_bg` (`crates/blinzel-ui/src/theme_tests.rs`); `a_stored_background_wins_over_the_themes_default`, `a_missing_file_means_the_documented_defaults`, `invalid_background_and_paths_keep_their_defaults` (`crates/blinzel-core/src/settings.rs`) | built |  |
 | AC-12 | `the_setup_window_takes_its_colours_from_the_palette` (`crates/blinzel-ui/src/theme_tests.rs`, reads the source); type-check and clippy of the Windows shell from Linux (`cargo clippy -p blinzel-app --no-default-features --tests --target x86_64-pc-windows-msvc -- -D warnings`, AGENTS.md Gotchas): clean; CI: windows builds and runs it | built |  |
-| AC-13 |      | open   |        |
-| AC-14 |      | open   |        |
+| AC-13 | `cpuref::tests::*` (`crates/blinzel-core/src/cpuref.rs`), `tests/wgpu_golden.rs` (`crates/blinzel-app`; skips without a GPU adapter, as in the local run of 2026-11-15); no renderer source changed (`git diff 33330a7 -- crates/blinzel-core/src/cpuref.rs crates/blinzel-app/src/gfx crates/blinzel-app/src/linux/gpu.rs crates/blinzel-app/src/macos/gpu.rs` is empty); CI: linux (lavapipe), windows (WARP), macos (Metal) | built |  |
+| AC-14 | manual: open — dialogs, popup menu, filmstrip, grid and selection frame in the running viewer | open |  |
 
 ## Decisions
 
@@ -120,3 +120,4 @@ This spec moves those colours, radii and control sizes onto the shared theme's d
 - The setup window's buttons take `RADIUS_SM` too; its close button and glyph stay as they are.
 - New public API of `blinzel-ui`: the modules `theme` (generated) and `palette`; `widgets::{RADIUS, RADIUS_INNER, RADIUS_FRAME, RADIUS_PANEL, ACCENT_INK, ACCENT_SOLID, ACCENT_HOVER, ON_ACCENT, FOCUS, DANGER_INK}`. `widgets::ACCENT_FILL` is gone (now `ACCENT_SOLID`), `widgets::DANGER` is the outline colour and `DANGER_INK` the text colour.
 - AC-12 has no test that runs the setup window: it builds only on Windows. `the_setup_window_takes_its_colours_from_the_palette` reads its source on every platform; the Windows CI job compiles it.
+- The hint under the file name pattern is `text_muted` (AC-04 "hint text"); the drop zone's line and other secondary lines stay `text_secondary`.
