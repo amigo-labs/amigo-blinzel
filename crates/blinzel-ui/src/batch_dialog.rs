@@ -847,7 +847,7 @@ impl BatchDialog {
                 hits.push((pf, Hit::Field(Field::Pattern)));
                 y += ctrl + tight;
                 let hint = Rect::new(cx, y, cw, p.px(HINT_H));
-                p.text_in(PLACEHOLDERS, TEXT_SMALL, &hint, 0.0, widgets::DIM);
+                p.text_in(PLACEHOLDERS, TEXT_SMALL, &hint, 0.0, widgets::FAINT);
                 y += hint.h + gap;
 
                 label(&mut p, Msg::BatchFolder, y, ctrl);

@@ -258,7 +258,7 @@ fn the_adapter_names_the_dark_palettes_roles() {
 
 /// AC-04, AC-09: the batch dialog is a `surface` panel with a `border`
 /// outline and the large radius; its title is `text`, the file count
-/// `text_secondary`.
+/// `text_secondary`, a hint `text_muted`.
 #[test]
 fn a_dialog_is_a_surface_panel_with_a_border() {
     let mut h = Harness::with_images(&["a.png", "b.png"]);
@@ -279,6 +279,9 @@ fn a_dialog_is_a_surface_panel_with_a_border() {
     assert_eq!(color_of("2 images"), palette::DIM);
     // The link "Remove all" is accent text.
     assert_eq!(color_of("Remove all"), palette::ACCENT_INK);
+    // The hint under the file name pattern is `text_muted`.
+    let hint = f.texts.iter().position(|t| t.starts_with("{name}  {n:3}"));
+    assert_eq!(f.text_colors[hint.expect("the hint")], palette::FAINT);
 }
 
 fn menu_items() -> Vec<crate::menu::MenuItem> {
