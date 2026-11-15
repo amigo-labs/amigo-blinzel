@@ -6,8 +6,10 @@
 use blinzel_core::geom::Rect;
 
 use crate::backend::{Canvas, Key};
-use crate::gfx::{Rgba, Shape};
+use crate::gfx::Shape;
 use crate::menu::{Cmd, MenuItem};
+use crate::palette::{BORDER, CONTROL_HOVER, DIM, FAINT, FG, MENU};
+use crate::widgets;
 
 /// Logical sizes (multiplied by the DPI scale).
 const ROW: f64 = 28.0;
@@ -16,15 +18,9 @@ const PAD: f64 = 6.0;
 const CHECK: f64 = 26.0;
 const GAP: f64 = 32.0;
 const ARROW: f64 = 18.0;
-const TEXT: f64 = 13.0;
-const RADIUS: f64 = 8.0;
-
-const BG: Rgba = Rgba(0.16, 0.16, 0.17, 0.98);
-const BORDER: Rgba = Rgba(1.0, 1.0, 1.0, 0.10);
-const HOVER: Rgba = Rgba(1.0, 1.0, 1.0, 0.09);
-const FG: Rgba = Rgba(0.93, 0.93, 0.93, 1.0);
-const DIM: Rgba = Rgba(0.93, 0.93, 0.93, 0.38);
-const SHORTCUT: Rgba = Rgba(0.93, 0.93, 0.93, 0.55);
+const TEXT: f64 = widgets::TEXT_BODY;
+const RADIUS: f64 = widgets::RADIUS_PANEL;
+const RADIUS_ROW: f64 = widgets::RADIUS_INNER;
 
 /// What an input did to the menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -281,7 +277,7 @@ impl Popup {
                 Shape::Fill {
                     rect: level.rect,
                     radius: (RADIUS * s) as f32,
-                    color: BG,
+                    color: MENU,
                 },
                 Shape::Outline {
                     rect: level.rect,
@@ -304,11 +300,11 @@ impl Popup {
                 if level.hover == Some(i) {
                     canvas.draw_shapes(&[Shape::Fill {
                         rect: *row,
-                        radius: (4.0 * s) as f32,
-                        color: HOVER,
+                        radius: (RADIUS_ROW * s) as f32,
+                        color: CONTROL_HOVER,
                     }]);
                 }
-                let color = if enabled { FG } else { DIM };
+                let color = if enabled { FG } else { FAINT };
                 // Mirrored x for right-to-left: measured from the far edge.
                 let at = |dx: f64, w: f64| {
                     if self.rtl {
@@ -342,7 +338,7 @@ impl Popup {
                 {
                     let x = at(row.w - ARROW * s - size.0 as f64, size.0 as f64);
                     let y = (middle - size.1 as f64 / 2.0).round();
-                    let c = if enabled { SHORTCUT } else { DIM };
+                    let c = if enabled { DIM } else { FAINT };
                     canvas.draw_text(sc, px, 2000.0, (x.round() as f32, y as f32), c);
                 }
                 if matches!(item, MenuItem::Sub(..)) {
@@ -375,7 +371,7 @@ impl Popup {
 mod tests {
     use super::*;
     use crate::backend::Device;
-    use crate::gfx::{AtlasPages, ImageInfo, Placed};
+    use crate::gfx::{AtlasPages, ImageInfo, Placed, Rgba};
     use blinzel_core::geom::{Affine, Orientation};
 
     /// A canvas that only measures: 7 px per character, 16 px high.

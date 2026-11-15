@@ -11,6 +11,7 @@ use blinzel_core::grid::{Grid, fit_in, strip};
 
 use crate::backend::{Canvas, Services};
 use crate::gfx::{Atlas, Rgba, Shape};
+use crate::palette::{ACCENT, ACCENT_TINT, CONTROL_HOVER, ON_ACCENT, PLACEHOLDER};
 use crate::thumbs::{Request, Thumbs};
 
 /// Logical sizes (multiplied by the DPI scale).
@@ -21,11 +22,8 @@ const STRIP_GAP: f64 = 6.0;
 /// Atlas pages (16 MB each, 64 thumbnails).
 const ATLAS_PAGES: usize = 8;
 
-const PLACEHOLDER: Rgba = Rgba(1.0, 1.0, 1.0, 0.05);
-const HOVER: Rgba = Rgba(1.0, 1.0, 1.0, 0.10);
-const ACCENT: Rgba = Rgba(0.35, 0.62, 1.0, 1.0);
+/// The band behind the filmstrip: darkens the background the user chose.
 const STRIP_BG: Rgba = Rgba(0.0, 0.0, 0.0, 0.30);
-const MARKED: Rgba = Rgba(0.35, 0.62, 1.0, 0.22);
 
 #[derive(Clone, Debug)]
 pub struct GridState {
@@ -197,7 +195,7 @@ impl<S: Services> Browse<S> {
                 r.draw_shapes(&[Shape::Fill {
                     rect: grow(&cell, 4.0 * scale),
                     radius: (6.0 * scale) as f32,
-                    color: HOVER,
+                    color: CONTROL_HOVER,
                 }]);
             }
             let marked = list.get(i).is_some_and(|e| state.marked.contains(&e.name));
@@ -205,7 +203,7 @@ impl<S: Services> Browse<S> {
                 r.draw_shapes(&[Shape::Fill {
                     rect: grow(&cell, 4.0 * scale),
                     radius: (6.0 * scale) as f32,
-                    color: MARKED,
+                    color: ACCENT_TINT,
                 }]);
             }
             self.draw_item(r, list, i, &cell);
@@ -268,7 +266,7 @@ impl<S: Services> Browse<S> {
                 r.draw_shapes(&[Shape::Fill {
                     rect: grow(&cell, 3.0 * scale),
                     radius: (4.0 * scale) as f32,
-                    color: HOVER,
+                    color: CONTROL_HOVER,
                 }]);
             }
             self.draw_item(r, list, *i, &cell);
@@ -345,7 +343,7 @@ fn mark_badge(r: &mut impl Canvas, cell: &Rect, scale: f64) {
         a: (a.0 as f32, a.1 as f32),
         b: (b.0 as f32, b.1 as f32),
         thickness: (2.0 * scale) as f32,
-        color: Rgba(1.0, 1.0, 1.0, 1.0),
+        color: ON_ACCENT,
     };
     r.draw_shapes(&[
         Shape::Fill {

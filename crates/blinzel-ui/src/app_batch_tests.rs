@@ -300,7 +300,7 @@ fn unreadable_files_show_their_reason_in_red() {
         .filter(|(_, s)| *s == "→")
         .map(|(i, _)| f.text_colors[i + 1])
         .collect();
-    assert_eq!(colors, [widgets::FG, widgets::DANGER]);
+    assert_eq!(colors, [widgets::FG, widgets::DANGER_INK]);
 }
 
 /// `docs/specs/batch-resize.md` AC-27: "Open folder" opens the folder of
