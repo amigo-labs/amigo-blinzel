@@ -8,7 +8,7 @@
   "draft": true,
   "force-tag-creation": true,
   "bootstrap-sha": "5eb2dcb224bd882d286b29ef6b9ff1630d1407f1",
-  "pull-request-title-pattern": "chore: release amigo-blinzel ${version}",
+  "pull-request-title-pattern": "chore: release Blinzel ${version}",
   "pull-request-header": "Automated release proposed by release-please. Merging this PR tags the version and builds and publishes the release (Windows, macOS, Linux; signed SHA256SUMS).",
   "changelog-sections": [
     {"type": "feat", "section": "Features"},
