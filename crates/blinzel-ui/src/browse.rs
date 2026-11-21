@@ -29,9 +29,6 @@ const STRIP_BG: Rgba = Rgba(0.0, 0.0, 0.0, 0.30);
 pub struct GridState {
     pub scroll: f64,
     pub selected: usize,
-    /// Names of the marked images (Ctrl/Shift+click, Ctrl+A), e.g. for the
-    /// batch dialog.
-    pub marked: BTreeSet<String>,
 }
 
 pub struct Browse<S> {
@@ -40,6 +37,10 @@ pub struct Browse<S> {
     failed: HashSet<u64>,
     pub grid: Option<GridState>,
     pub hover: Option<usize>,
+    /// The folder's marked names (`docs/specs/picks.md`): F, Ctrl/Shift+
+    /// click, Ctrl+A; kept by [`crate::marks::Marks`]. Names of files that
+    /// are gone may be among them; only listed files show a mark.
+    pub marks: BTreeSet<String>,
 }
 
 impl<S> Default for Browse<S> {
@@ -50,6 +51,7 @@ impl<S> Default for Browse<S> {
             failed: HashSet::new(),
             grid: None,
             hover: None,
+            marks: BTreeSet::new(),
         }
     }
 }
@@ -76,8 +78,10 @@ impl<S: Services> Browse<S> {
         if let Some(t) = &thumbs {
             t.reset();
         }
+        let marks = std::mem::take(&mut self.marks);
         *self = Browse {
             thumbs,
+            marks,
             ..Browse::default()
         };
     }
@@ -89,7 +93,6 @@ impl<S: Services> Browse<S> {
         self.grid = Some(GridState {
             scroll: g.reveal(selected, 0.0, client.1),
             selected,
-            marked: BTreeSet::new(),
         });
         self.hover = None;
     }
@@ -198,7 +201,7 @@ impl<S: Services> Browse<S> {
                     color: CONTROL_HOVER,
                 }]);
             }
-            let marked = list.get(i).is_some_and(|e| state.marked.contains(&e.name));
+            let marked = list.get(i).is_some_and(|e| self.marks.contains(&e.name));
             if marked {
                 r.draw_shapes(&[Shape::Fill {
                     rect: grow(&cell, 4.0 * scale),
@@ -270,6 +273,9 @@ impl<S: Services> Browse<S> {
                 }]);
             }
             self.draw_item(r, list, *i, &cell);
+            if list.get(*i).is_some_and(|e| self.marks.contains(&e.name)) {
+                mark_badge(r, &cell, scale);
+            }
             if *i == cur {
                 r.draw_shapes(&[Shape::Outline {
                     rect: grow(&cell, 3.0 * scale),
@@ -335,7 +341,7 @@ impl<S: Services> Browse<S> {
 }
 
 /// A check mark in a circle at the top right of a marked cell.
-fn mark_badge(r: &mut impl Canvas, cell: &Rect, scale: f64) {
+pub fn mark_badge(r: &mut impl Canvas, cell: &Rect, scale: f64) {
     let d = 22.0 * scale;
     let c = Rect::new(cell.right() - d - 4.0 * scale, cell.y + 4.0 * scale, d, d);
     let (x, y, k) = (c.x + d / 2.0, c.y + d / 2.0, 4.5 * scale);

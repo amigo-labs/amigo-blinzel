@@ -33,86 +33,13 @@ const DROPPED: [u16; 15] = [
 ];
 
 /// The raw EXIF block (TIFF, starting with `II*\0`/`MM\0*`) of a source
-/// file, wherever its format keeps it.
+/// file, wherever its format keeps it. A TIFF source is not one: its own
+/// image directory is not metadata to carry over.
 pub fn read_exif(data: &[u8], format: Format) -> Option<Vec<u8>> {
-    let tiff = match format {
-        Format::Jpeg => blinzel_jpeg::Segments::new(data)
-            .filter(|s| s.marker == 0xE1)
-            .find_map(|s| {
-                data[s.payload]
-                    .strip_prefix(b"Exif\0\0")
-                    .map(<[u8]>::to_vec)
-            }),
-        Format::Png => png_chunk(data, b"eXIf").map(<[u8]>::to_vec),
-        Format::WebP => {
-            riff_chunk(data, b"EXIF").map(|d| d.strip_prefix(b"Exif\0\0").unwrap_or(d).to_vec())
-        }
-        Format::Avif | Format::Heif => crate::decode::avif::exif(data),
-        Format::Jxl => isobmff_box(data, b"Exif").and_then(|d| {
-            let skip = u32::from_be_bytes(d.get(..4)?.try_into().ok()?) as usize;
-            d.get(skip.checked_add(4)?..).map(<[u8]>::to_vec)
-        }),
-        _ => None,
-    }?;
-    Tiff::new(&tiff)?;
-    Some(tiff)
-}
-
-fn png_chunk<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
-    let mut pos = 8;
-    while let Some(head) = data.get(pos..pos + 8) {
-        let len = u32::from_be_bytes(head[..4].try_into().ok()?) as usize;
-        let body = data.get(pos + 8..(pos + 8).checked_add(len)?)?;
-        if &head[4..] == kind {
-            return Some(body);
-        }
-        if &head[4..] == b"IEND" {
-            return None;
-        }
-        pos += 12 + len;
+    if format == Format::Tiff {
+        return None;
     }
-    None
-}
-
-fn riff_chunk<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
-    let mut pos = 12;
-    while let Some(head) = data.get(pos..pos + 8) {
-        let len = u32::from_le_bytes(head[4..].try_into().ok()?) as usize;
-        let body = data.get(pos + 8..(pos + 8).checked_add(len)?)?;
-        if &head[..4] == kind {
-            return Some(body);
-        }
-        pos += 8 + len + (len & 1);
-    }
-    None
-}
-
-/// A top-level box of an ISOBMFF-style file (the JPEG XL container).
-fn isobmff_box<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
-    let mut pos = 0usize;
-    while let Some(head) = data.get(pos..pos + 8) {
-        let size = u32::from_be_bytes(head[..4].try_into().ok()?) as usize;
-        let (hdr, size) = match size {
-            0 => (8, data.len() - pos),
-            1 => (
-                16,
-                usize::try_from(u64::from_be_bytes(
-                    data.get(pos + 8..pos + 16)?.try_into().ok()?,
-                ))
-                .ok()?,
-            ),
-            s => (8, s),
-        };
-        if size < hdr {
-            return None;
-        }
-        let body = data.get(pos + hdr..pos.checked_add(size)?)?;
-        if &head[4..] == kind {
-            return Some(body);
-        }
-        pos += size;
-    }
-    None
+    crate::exif_info::exif_block(data, format).map(|b| b.into_owned())
 }
 
 /// The capture time (DateTimeOriginal, `YYYY:MM:DD hh:mm:ss`); the time

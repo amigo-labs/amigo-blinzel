@@ -299,6 +299,9 @@ pub(crate) struct FakeServices {
     pub target_queries: AtomicUsize,
     /// Held by a test, it keeps every colour-target answer back.
     pub target_gate: Mutex<()>,
+    /// Held by a test, it keeps the info overlay's file reads back
+    /// (`docs/specs/info-overlay.md` AC-12).
+    pub info_gate: Mutex<()>,
     /// The language the system prefers ([`Harness::set_system_language`]).
     pub system_language: Mutex<Lang>,
 }
@@ -318,6 +321,9 @@ impl Services for FakeServices {
     }
     fn read_file(&self, path: &Path) -> std::io::Result<PoolBuf> {
         let thread = std::thread::current().name().unwrap_or("").to_string();
+        if thread == crate::info::THREAD {
+            drop(self.info_gate.lock().unwrap());
+        }
         self.reads
             .lock()
             .unwrap()
@@ -696,6 +702,8 @@ pub(crate) struct Harness {
     pub color_answers: usize,
     /// The device's texture budget ([`FakeDevice::budget`]).
     budget: Option<usize>,
+    /// [`Harness::pump`] does not wait for the marks ([`Harness::pump_holding_marks`]).
+    ignore_marks: bool,
     // Dropped after the app (its threads may still read files).
     tmp: TempDir,
     _serial: MutexGuard<'static, ()>,
@@ -731,6 +739,7 @@ impl Harness {
             rendered_at: 0,
             color_answers: 0,
             budget,
+            ignore_marks: false,
             tmp,
             _serial: serial,
         }
@@ -768,6 +777,7 @@ impl Harness {
             targets: Mutex::new(HashMap::new()),
             target_queries: AtomicUsize::new(0),
             target_gate: Mutex::new(()),
+            info_gate: Mutex::new(()),
             system_language: Mutex::new(blinzel_i18n::FALLBACK),
         });
         let device = Arc::new(FakeDevice {
@@ -848,6 +858,12 @@ impl Harness {
     pub fn ctrl(&mut self, key: Key) -> Vec<Action> {
         self.press(key, true, false)
             .unwrap_or_else(|| panic!("Ctrl+{key:?} not handled"))
+    }
+
+    /// Ctrl+Shift+`key`, which must be handled, and pump.
+    pub fn ctrl_shift(&mut self, key: Key) -> Vec<Action> {
+        self.press(key, true, true)
+            .unwrap_or_else(|| panic!("Ctrl+Shift+{key:?} not handled"))
     }
 
     /// [`App::command`] (as from the menu) and pump.
@@ -954,7 +970,10 @@ impl Harness {
             // A result is sent, then woken, then its job leaves the
             // scheduler; the listing is woken after it is sent. So with no
             // job left and no wake waiting, nothing more can arrive.
-            if self.app.loader.pending() == 0 && !self.app.is_listing() {
+            if self.app.loader.pending() == 0
+                && !self.app.is_listing()
+                && (self.ignore_marks || !self.app.marks_busy())
+            {
                 match self.wakes.try_recv() {
                     Ok(w) => {
                         self.deliver(w);
@@ -969,6 +988,15 @@ impl Harness {
             }
         }
         self.actions[start..].iter().map(Action::clone).collect()
+    }
+
+    /// Like [`Harness::pump`], without waiting for the folder's marks to be
+    /// read or stored (a test holds them back with `marks::HOLD`).
+    pub fn pump_holding_marks(&mut self) -> Vec<Action> {
+        self.ignore_marks = true;
+        let a = self.pump();
+        self.ignore_marks = false;
+        a
     }
 
     /// Lets every queued and running loader job run to its end before the
@@ -1302,7 +1330,7 @@ impl Harness {
     /// The marked tiles' names while the grid is open.
     pub fn grid_marked(&self) -> Vec<String> {
         let g = self.app.browse.grid.as_ref();
-        g.map(|g| g.marked.iter().cloned().collect())
+        g.map(|_| self.app.browse.marks.iter().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -1326,6 +1354,20 @@ impl Harness {
     /// What the UI asked of its window.
     pub fn host(&self) -> Ref<'_, HostLog> {
         self.app.host.log.borrow()
+    }
+
+    /// The lines of the info overlay in the last frame drawn.
+    pub fn info_lines(&self) -> Vec<String> {
+        let Some(r) = self.app.info_rect else {
+            return Vec::new();
+        };
+        let f = &self.app.canvas.frame;
+        f.texts
+            .iter()
+            .zip(&f.text_positions)
+            .filter(|(_, p)| r.contains((p.0 as f64, p.1 as f64)))
+            .map(|(t, _)| t.clone())
+            .collect()
     }
 
     /// The last frame drawn.

@@ -26,6 +26,9 @@ pub struct Settings {
     pub color_management: bool,
     /// Thumbnails of the neighbours along the bottom.
     pub filmstrip: bool,
+    /// The info overlay: file name and the picture's facts
+    /// (`docs/specs/info-overlay.md`).
+    pub info: bool,
     /// The window's last normal (not maximized) rect, left, top, right,
     /// bottom in workspace coordinates (`GetWindowPlacement`).
     pub window: Option<[i32; 4]>,
@@ -60,6 +63,7 @@ impl Default for Settings {
             resident: false,
             color_management: true,
             filmstrip: false,
+            info: false,
             window: None,
             maximized: false,
             screenshot_hotkey: true,
@@ -146,6 +150,7 @@ impl Settings {
                     s.color_management = value.parse().unwrap_or(s.color_management)
                 }
                 "filmstrip" => s.filmstrip = value.parse().unwrap_or(s.filmstrip),
+                "info" => s.info = value.parse().unwrap_or(s.info),
                 "window" => s.window = parse_rect(value).or(s.window),
                 "maximized" => s.maximized = value.parse().unwrap_or(s.maximized),
                 "screenshot_hotkey" => {
@@ -206,6 +211,7 @@ impl Settings {
              resident = {}\n\
              color_management = {}\n\
              filmstrip = {}\n\
+             info = {}\n\
              screenshot_hotkey = {}\n\
              screenshot_save = {}\n\
              screenshot_open = {}\n\
@@ -221,6 +227,7 @@ impl Settings {
             self.resident,
             self.color_management,
             self.filmstrip,
+            self.info,
             self.screenshot_hotkey,
             self.screenshot_save,
             self.screenshot_open,
@@ -249,6 +256,7 @@ mod tests {
             resident: true,
             color_management: false,
             filmstrip: true,
+            info: true,
             window: Some([-1900, 30, 200, 1000]),
             maximized: true,
             screenshot_hotkey: false,
@@ -358,6 +366,23 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(s, expected);
+    }
+
+    /// `docs/specs/info-overlay.md` AC-11
+    #[test]
+    fn info_is_off_unless_the_file_says_true() {
+        assert!(!Settings::default().info);
+        assert!(Settings::parse("info = true").info);
+        assert!(!Settings::parse("info = false").info);
+        assert!(!Settings::parse("info = yes").info);
+        assert!(
+            Settings {
+                info: true,
+                ..Settings::default()
+            }
+            .to_text()
+            .contains("info = true\n")
+        );
     }
 
     #[test]

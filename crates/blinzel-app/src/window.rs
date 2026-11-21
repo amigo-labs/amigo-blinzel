@@ -826,6 +826,15 @@ fn run_action(hwnd: HWND, action: Action) -> Vec<Action> {
             }
             vec![]
         }
+        Action::CopyText(text) => {
+            let r = if clipboard::put_text(hwnd, &text) {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error().to_string())
+            };
+            with_app(|a| a.text_copied(r));
+            vec![]
+        }
         Action::OpenFolder(dir) => {
             crate::dialogs::open_folder(hwnd, &dir);
             vec![]
