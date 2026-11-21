@@ -18,7 +18,9 @@ const HEADER: &str = "# Blinzel marks: ";
 /// A change to a folder's marks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change {
+    /// These names are marked.
     Mark(Vec<String>),
+    /// These names are no longer marked.
     Unmark(Vec<String>),
     /// Every stored name of the folder goes.
     Clear,
@@ -197,19 +199,31 @@ pub fn free_names(name: &str) -> impl Iterator<Item = String> + '_ {
 
 /// Gives the finished `tmp` the first free name for `name` in `folder`.
 /// A hard link fails where the name exists, so a file made meanwhile is
-/// never replaced; where the file system has no hard links (FAT, exFAT),
-/// a rename after checking the name stands in.
+/// never replaced. Where the file system has no hard links (FAT, exFAT),
+/// the name is first claimed by creating it exclusively, and the rename
+/// then replaces only that empty claim of our own.
 fn give_free_name(tmp: &Path, folder: &Path, name: &str) -> io::Result<PathBuf> {
     for candidate in free_names(name) {
         let to = folder.join(candidate);
         match std::fs::hard_link(tmp, &to) {
             Ok(()) => return Ok(to),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(_) if !to.exists() => {
-                std::fs::rename(tmp, &to)?;
+            Err(_) => {
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&to)
+                {
+                    Ok(claim) => drop(claim),
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(e),
+                }
+                if let Err(e) = std::fs::rename(tmp, &to) {
+                    let _ = std::fs::remove_file(&to);
+                    return Err(e);
+                }
                 return Ok(to);
             }
-            Err(_) => continue,
         }
     }
     Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free name"))

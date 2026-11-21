@@ -11,14 +11,14 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | # | Spec | ACs proven | CI-only | Manual | Next |
 | - | ---- | ---------- | ------- | ------ | ---- |
 | 1 | [selection-and-export](selection-and-export.md) | 20 / 22 | 2 | 2 | the manual checks AC-04 (visual design), AC-15 (save dialog); then `/spec-check` |
-| 2 | [thumbnails](thumbnails.md) | 17 / 23 | 1 | 3 | revised 2026-11-21 with `picks` (AC-18, AC-19, AC-23: lasting marks), built with `/spec-build picks`; the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements); then `/spec-check` |
+| 2 | [thumbnails](thumbnails.md) | 20 / 23 | 1 | 3 | the manual checks AC-20 (tiles at 100 % and 200 %), AC-21, AC-22 (measurements); then `/spec-check` |
 | 3 | [startup](startup.md) | 10 / 14 | 6 | 3 | the Windows CI run of AC-11's `the_basic_render_driver_counts_as_warp` (`warp` was false on the Basic Render Driver); the manual checks AC-06 (visual), AC-08 (module-load trace; its Windows test is green in CI run 41532658575), AC-12 (measurement); then `/spec-check` |
 | 4 | [browsing](browsing.md) | 20 / 21 | 4 | 1 | the manual check AC-21 (measurement); then `/spec-check` (the Windows and macOS tests of AC-13, AC-15, AC-16, AC-18 are green in CI run 41532658575) |
 | 5 | [viewing](viewing.md) | 20 / 22 | 0 | 2 | the manual checks AC-17 (visual design), AC-22 (the "Open with" chooser); then `/spec-check` |
 | 7 | [jpeg-decoder](jpeg-decoder.md) | 16 / 17 | 0 | 1 | the manual check AC-17 (speed factor on an 8-core machine, `blinzel-bench jpeg-ab`); then `/spec-check` |
 | 8 | [animations](animations.md) | 13 / 14 | 0 | 1 | the manual check AC-14 (playback smoothness); then `/spec-check` |
 | 9 | [color-management](color-management.md) | 17 / 19 | 3 | 2 | the manual checks AC-12 (Windows monitors), AC-15 (Mac display); then `/spec-check` |
-| 10 | [batch-resize](batch-resize.md) | 25 / 28 | 1 | 2 | revised 2026-11-21 with `picks` (AC-22), built with `/spec-build picks`; the manual checks AC-21 (measurement), AC-28 (visual design); then `/spec-check` |
+| 10 | [batch-resize](batch-resize.md) | 26 / 28 | 1 | 2 | the manual checks AC-21 (measurement), AC-28 (visual design); then `/spec-check` |
 | 11 | [platform-shells](platform-shells.md) | 19 / 24 | 11 | 5 | the manual checks AC-05, AC-06, AC-13, AC-20, AC-22; then `/spec-check` |
 | 12 | [resident-mode](resident-mode.md) | 21 / 23 | 15 | 1 | the Windows CI run of AC-13's tests of the default item "Show" and the re-add after `TaskbarCreated`; the manual check AC-23 (measurement); then `/spec-check` |
 | 13 | [screenshots](screenshots.md) | 21 / 23 | 8 | 1 | the Windows CI run of AC-03's notice test (`route_hint`); the manual check AC-21; then `/spec-check` |
@@ -28,9 +28,9 @@ The specs that carry decisions of 2026-11-02 that change behavior come first. Th
 | 16 | [release](release.md) | 15 / 18 | 9 | 3 | the manual checks AC-01, AC-02 (release-please on GitHub), AC-14 (`Authority=amigo-labs`, shown in the v1.4.0 release run 41591512319); then `/spec-check` |
 | 17 | [competitive-benchmark](competitive-benchmark.md) | 15 / 20 | 3 | 5 | the manual checks AC-07, AC-08, AC-09, AC-12, AC-17 (a real desktop with the viewers installed); then `/spec-check` |
 | 18 | [amigo-theme](amigo-theme.md) | 13 / 14 | 3 | 1 | built 2026-11-15 (the shared amigo theme, dark palette; released in 1.8.0): the manual check AC-14 (look in the running viewer); then `/spec-check` |
-| 19 | [info-overlay](info-overlay.md) | 0 / 16 | 0 | 2 | new 2026-11-21 (file name and image facts on I): `/spec-build info-overlay`; then the manual checks AC-15 (measurement), AC-16 (visual design) and `/spec-check` |
-| 20 | [picks](picks.md) | 0 / 26 | 0 | 1 | new 2026-11-21 (marking with F, lasting marks per folder, handing over names or copies, "Only marked"; size L, two sessions): `/spec-build picks` after `info-overlay`, with `thumbnails` AC-18, AC-19, AC-23 and `batch-resize` AC-22; then the manual check AC-26 and `/spec-check` |
-| | **Total** | **310 / 415** | | | |
+| 19 | [info-overlay](info-overlay.md) | 14 / 16 | 0 | 2 | built 2026-11-21 (file name and image facts on I): the manual checks AC-15 (measurement on Windows with a GPU), AC-16 (visual design); then `/spec-check` |
+| 20 | [picks](picks.md) | 25 / 26 | 0 | 1 | built 2026-11-21 (marking with F, lasting marks per folder, handing over names or copies, "Only marked"): the manual check AC-26 (visual design); then `/spec-check` |
+| | **Total** | **353 / 415** | | | |
 
 Why so many ACs are open: `blinzel-ui`'s `App`, which holds the keys, commands, menus and the loader's decisions, has no headless tests yet. A small test harness for `App` (a fake `Backend`) would prove a large share of the open ACs in viewing, browsing, thumbnails, animations, localization and settings at once.
 
