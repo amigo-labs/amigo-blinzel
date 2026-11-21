@@ -95,6 +95,115 @@ pub fn apply(store: &Path, folder: &Path, change: &Change) -> io::Result<BTreeSe
     Ok(names)
 }
 
+/// The result of [`copy_files`].
+#[derive(Debug, Default)]
+pub struct Copied {
+    /// Files copied, by where they went.
+    pub done: Vec<PathBuf>,
+    /// Files that could not be copied, with the reason.
+    pub failed: Vec<(PathBuf, String)>,
+    /// Stopped by `cancel` before the end.
+    pub cancelled: bool,
+}
+
+/// Copies `files` byte for byte into `target` under their own names, or
+/// "stem (2).ext", "(3)" … where a name is taken, never replacing a file.
+/// `progress` gets the number of files finished; `cancel` stops after the
+/// file in progress is removed again.
+pub fn copy_files(
+    files: &[PathBuf],
+    target: &Path,
+    progress: impl Fn(usize),
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Copied {
+    use std::sync::atomic::Ordering;
+    let mut out = Copied::default();
+    for (i, src) in files.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            out.cancelled = true;
+            break;
+        }
+        match copy_one(src, target, cancel) {
+            Ok(Some(to)) => out.done.push(to),
+            Ok(None) => {
+                out.cancelled = true;
+                break;
+            }
+            Err(e) => out.failed.push((src.clone(), e.to_string())),
+        }
+        progress(i + 1);
+    }
+    out
+}
+
+/// One file; `None` if cancelled (nothing left behind).
+fn copy_one(
+    src: &Path,
+    target: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> io::Result<Option<PathBuf>> {
+    use std::io::{Read, Write};
+    let mut from = std::fs::File::open(src)?;
+    let name = src
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let (to, mut file) = create_free(target, &name.to_string_lossy())?;
+    let mut buf = vec![0u8; 1 << 20];
+    let r: io::Result<bool> = (|| {
+        loop {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(false);
+            }
+            let n = from.read(&mut buf)?;
+            if n == 0 {
+                file.flush()?;
+                return Ok(true);
+            }
+            file.write_all(&buf[..n])?;
+        }
+    })();
+    match r {
+        Ok(true) => Ok(Some(to)),
+        Ok(false) => {
+            drop(file);
+            let _ = std::fs::remove_file(&to);
+            Ok(None)
+        }
+        Err(e) => {
+            drop(file);
+            let _ = std::fs::remove_file(&to);
+            Err(e)
+        }
+    }
+}
+
+/// Creates `name` in `folder`, or the first free "stem (n).ext"; the
+/// creation itself checks, so a file made meanwhile is never replaced.
+pub fn create_free(folder: &Path, name: &str) -> io::Result<(PathBuf, std::fs::File)> {
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, Some(e)),
+        _ => (name, None),
+    };
+    for n in 1..10_000 {
+        let candidate = match (n, ext) {
+            (1, _) => name.to_string(),
+            (n, Some(e)) => format!("{stem} ({n}).{e}"),
+            (n, None) => format!("{stem} ({n})"),
+        };
+        let path = folder.join(&candidate);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(f) => return Ok((path, f)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free name"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +318,77 @@ mod tests {
         ] {
             assert!(!storable(bad), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn copies_keep_the_bytes_take_a_free_name_and_never_replace() {
+        let d = tmp("copy");
+        let (src, dst) = (d.join("src"), d.join("dst"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("a.jpg"), b"AAAA").unwrap();
+        std::fs::write(src.join("b"), b"BB").unwrap();
+        std::fs::write(dst.join("a.jpg"), b"old").unwrap();
+        std::fs::write(dst.join("a (2).jpg"), b"old2").unwrap();
+        let files = vec![src.join("a.jpg"), src.join("b"), src.join("gone.jpg")];
+        let seen = std::sync::Mutex::new(Vec::new());
+        let r = copy_files(
+            &files,
+            &dst,
+            |i| seen.lock().unwrap().push(i),
+            &Default::default(),
+        );
+        assert_eq!(r.done, [dst.join("a (3).jpg"), dst.join("b")]);
+        assert_eq!(std::fs::read(dst.join("a (3).jpg")).unwrap(), b"AAAA");
+        assert_eq!(
+            std::fs::read(dst.join("a.jpg")).unwrap(),
+            b"old",
+            "never replaced"
+        );
+        assert_eq!(
+            std::fs::read(src.join("a.jpg")).unwrap(),
+            b"AAAA",
+            "source unchanged"
+        );
+        assert_eq!(r.failed.len(), 1);
+        assert_eq!(r.failed[0].0, src.join("gone.jpg"));
+        assert_eq!(*seen.lock().unwrap(), [1, 2, 3]);
+        assert!(!r.cancelled);
+    }
+
+    #[test]
+    fn a_cancelled_copy_leaves_nothing_behind() {
+        let d = tmp("cancel");
+        std::fs::write(d.join("a.jpg"), vec![7u8; 3 << 20]).unwrap();
+        let out = d.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let r = copy_files(&[d.join("a.jpg")], &out, |_| {}, &cancel);
+        assert!(r.cancelled && r.done.is_empty());
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+        // Cancelled while copying: the partial file goes.
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let c = &cancel;
+        let r = std::thread::scope(|s| {
+            s.spawn(|| c.store(true, std::sync::atomic::Ordering::Relaxed));
+            copy_one(&d.join("a.jpg"), &out, c)
+        })
+        .unwrap();
+        if r.is_none() {
+            assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn a_target_that_cannot_be_written_fails_each_file() {
+        let d = tmp("nowrite");
+        std::fs::write(d.join("a.jpg"), b"A").unwrap();
+        let r = copy_files(
+            &[d.join("a.jpg")],
+            &d.join("missing"),
+            |_| {},
+            &Default::default(),
+        );
+        assert!(r.done.is_empty() && r.failed.len() == 1);
     }
 }
