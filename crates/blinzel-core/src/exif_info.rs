@@ -457,6 +457,26 @@ mod tests {
         assert_eq!(ExifInfo::from_file(&tiff, Format::Gif), ExifInfo::default());
     }
 
+    /// AVIF and HEIC keep the block in the same HEIF item.
+    #[cfg(feature = "batch")]
+    #[test]
+    fn exif_comes_from_avif_and_heic() {
+        use crate::batch::encode::{Codec, Quality, encode};
+        let px = vec![128u8; 16 * 16 * 4];
+        let avif = encode(
+            &px,
+            16,
+            16,
+            Codec::Avif,
+            &Quality::default(),
+            Some(&full()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(ExifInfo::from_file(&avif, Format::Avif).iso, Some(400));
+        assert_eq!(ExifInfo::from_file(&avif, Format::Heif).iso, Some(400));
+    }
+
     #[test]
     fn the_first_of_two_exif_segments_counts() {
         let first = block(&[(MODEL, ascii("First"))], &[]);
