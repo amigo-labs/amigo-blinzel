@@ -860,6 +860,12 @@ impl Harness {
             .unwrap_or_else(|| panic!("Ctrl+{key:?} not handled"))
     }
 
+    /// Ctrl+Shift+`key`, which must be handled, and pump.
+    pub fn ctrl_shift(&mut self, key: Key) -> Vec<Action> {
+        self.press(key, true, true)
+            .unwrap_or_else(|| panic!("Ctrl+Shift+{key:?} not handled"))
+    }
+
     /// [`App::command`] (as from the menu) and pump.
     pub fn command(&mut self, cmd: Cmd) -> Vec<Action> {
         let a = self.app.command(cmd);

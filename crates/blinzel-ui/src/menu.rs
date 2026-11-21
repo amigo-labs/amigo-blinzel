@@ -43,6 +43,12 @@ pub enum Cmd {
     ToggleGrid,
     /// Removes every mark of the folder, after asking (`docs/specs/picks.md`).
     ClearMarks,
+    /// The marked file names to the clipboard (Ctrl+Shift+C).
+    CopyMarkedNames,
+    /// Copies of the marked files in a folder the user picks.
+    CopyMarkedFiles,
+    /// Browsing, filmstrip and grid show only the marked images.
+    ToggleOnlyMarked,
     /// Tray: show the (hidden) window.
     ShowWindow,
     /// Tray: exit for good, also in resident mode.
@@ -143,6 +149,9 @@ impl Cmd {
             Cmd::ToggleScreenshotEdit => 44,
             Cmd::ToggleInfo => 45,
             Cmd::ClearMarks => 46,
+            Cmd::CopyMarkedNames => 47,
+            Cmd::CopyMarkedFiles => 48,
+            Cmd::ToggleOnlyMarked => 49,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -163,7 +172,7 @@ impl Cmd {
     }
 }
 
-pub const ALL: [Cmd; 46] = [
+pub const ALL: [Cmd; 49] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -198,6 +207,9 @@ pub const ALL: [Cmd; 46] = [
     Cmd::ToggleFilmstrip,
     Cmd::ToggleGrid,
     Cmd::ClearMarks,
+    Cmd::CopyMarkedNames,
+    Cmd::CopyMarkedFiles,
+    Cmd::ToggleOnlyMarked,
     Cmd::Notices,
     Cmd::Batch,
     Cmd::OpenWith,
@@ -235,6 +247,10 @@ pub struct MenuState {
     /// Marked images of the folder that exist (`docs/specs/picks.md`);
     /// `None` while the marks are being read.
     pub marked: Option<usize>,
+    /// "Only marked" is on.
+    pub only_marked: bool,
+    /// Marked files are being copied.
+    pub copying: bool,
     pub screenshot_hotkey: bool,
     pub screenshot_save: bool,
     pub screenshot_open: bool,
@@ -360,6 +376,27 @@ pub(crate) fn items_for(s: &MenuState, p: Platform) -> Vec<MenuItem> {
             true,
         ),
         MenuItem::Separator,
+        MenuItem::item(
+            Cmd::ToggleOnlyMarked,
+            tr(Msg::MarksOnly),
+            None,
+            s.only_marked,
+            s.marked.is_some_and(|n| n > 0),
+        ),
+        MenuItem::item(
+            Cmd::CopyMarkedNames,
+            &with_count(Msg::MarksCopyNames, Msg::MarksCopyNamesCount, s.marked),
+            Some(accel(&[ctrl, tr(Msg::KeyShift), "C"])),
+            false,
+            s.marked.is_some_and(|n| n > 0),
+        ),
+        MenuItem::item(
+            Cmd::CopyMarkedFiles,
+            &with_count(Msg::MarksCopyFiles, Msg::MarksCopyFilesCount, s.marked),
+            None,
+            false,
+            s.marked.is_some_and(|n| n > 0) && !s.copying,
+        ),
         MenuItem::item(
             Cmd::ClearMarks,
             &with_count(Msg::MarksClear, Msg::MarksClearCount, s.marked),

@@ -123,6 +123,8 @@ Hints, not requirements; the ACs decide.
 
 <!-- One bullet per open question; empty means: everything settled, spec-build may start -->
 
+- AC-16 "if the dialog cannot be shown, the viewer shows 'Could not open the folder dialog: {reason}'": the folder dialogs of the shells (rfd on Linux, `NSOpenPanel` on macOS, `IFileOpenDialog` on Windows) report a failure the same way as Cancel, so the viewer cannot tell the two apart; today both copy nothing and show nothing. Drop that clause, or accept it for Windows only (where the dialog's `HRESULT` tells)?
+
 ## Evidence
 
 | AC    | Test | Status | Commit |
@@ -140,19 +142,19 @@ Hints, not requirements; the ACs decide.
 | AC-11 | `a_missing_file_keeps_its_mark_until_unmarked_and_the_recycle_bin_drops_it` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
 | AC-12 | `a_broken_marks_file_counts_its_valid_names_and_a_failed_write_says_so_once` (`crates/blinzel-ui/src/app_picks_tests.rs`); `a_broken_file_keeps_its_valid_names`, `a_file_of_another_folder_or_without_header_counts_as_none`, `names_that_are_no_plain_file_names_are_not_stored` (`crates/blinzel-core/src/picks.rs`) | built |  |
 | AC-13 | `reading_and_storing_marks_never_hold_up_frames_or_keys` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
-| AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
-| AC-16 |      | open   |        |
-| AC-17 |      | open   |        |
-| AC-18 |      | open   |        |
-| AC-19 |      | open   |        |
+| AC-14 | `ctrl_shift_c_puts_the_marked_names_on_the_clipboard_in_folder_order` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-15 | `without_marks_the_handover_is_disabled` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-16 | `copying_marked_files_makes_byte_identical_copies_and_never_replaces` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-17 | `copying_marked_files_makes_byte_identical_copies_and_never_replaces` (`crates/blinzel-ui/src/app_picks_tests.rs`); `copies_keep_the_bytes_take_a_free_name_and_never_replace`, `a_cancelled_copy_leaves_nothing_behind` (`crates/blinzel-core/src/picks.rs`) | built |  |
+| AC-18 | `copying_marked_files_makes_byte_identical_copies_and_never_replaces` (`crates/blinzel-ui/src/app_picks_tests.rs`); `a_cancelled_copy_leaves_nothing_behind` (`crates/blinzel-core/src/picks.rs`) | built |  |
+| AC-19 | `copying_reports_failures_and_refuses_the_images_own_folder` (`crates/blinzel-ui/src/app_picks_tests.rs`); `a_target_that_cannot_be_written_fails_each_file` (`crates/blinzel-core/src/picks.rs`) | built |  |
 | AC-20 | `resize_images_outside_the_grid_takes_the_marks`, `resize_images_starts_with_the_marked_files_in_folder_order` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`) | built |  |
-| AC-21 |      | open   |        |
-| AC-22 |      | open   |        |
-| AC-23 |      | open   |        |
-| AC-24 |      | open   |        |
-| AC-25 |      | open   |        |
-| AC-26 |      | open   |        |
+| AC-21 | `only_marked_browses_the_marked_images_and_counts_them`, `only_marked_falls_back_to_the_previous_marked_image` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-22 | `only_marked_browses_the_marked_images_and_counts_them` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-23 | `unmarking_under_only_marked_keeps_the_image_until_moving_on` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-24 | `only_marked_ends_when_turned_off_or_in_another_folder` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-25 | `the_marks_entries_sit_with_filmstrip_and_grid` (`crates/blinzel-ui/src/app_picks_tests.rs`); the strings in every `i18n/*.toml` (the i18n build checks that every key is in every language) | built |  |
+| AC-26 | manual: visual design | open |  |
 
 ## Decisions
 
@@ -163,3 +165,9 @@ Hints, not requirements; the ACs decide.
 - 2026-11-21 (spec-build): menu labels and messages that name a count use the existing plural `images_count` ("12 images") in parentheses or after a colon, so no language needs new plural forms.
 - 2026-11-21 (spec-build): new public API: `blinzel_core::picks::{Change, file_of, storable, parse, to_text, load, apply}`, `blinzel_ui::marks::Marks`, `blinzel_ui::confirm::{Confirm, Answer}`, `Browse::marks` (replacing `GridState::marked`), `browse::mark_badge`, `Cmd::ClearMarks` (id 46), `MenuState::marked`.
 - 2026-11-21 (spec-build): the core tests of AC-08, AC-09, AC-12 ran red against stubs; the App-level tests of AC-01 … AC-13 were written together with the code, after the core, and were not run red first.
+- 2026-11-21 (spec-build): the shell asks for the copy folder with the batch dialog's existing `Action::PickFolder`; `App::batch_folder_picked` sends it to the copy when no dialog is open. The names go to the clipboard with a new `Action::CopyText`, answered by `App::text_copied` (Windows `CF_UNICODETEXT`, macOS `NSPasteboard`, Linux arboard); the Windows and macOS parts are checked by their CI jobs.
+- 2026-11-21 (spec-build): copies are created with "create new" and filled in place, the name taken by the creation itself, so a file made meanwhile by another program is never replaced (AC-17); a failure or a cancel removes the file again. The copy runs on its own thread and its progress wakes through `Wake::Thumbs` like the marks.
+- 2026-11-21 (spec-build): "Only marked" swaps the folder list for the marked part of it and keeps the whole list aside, so browsing, the filmstrip, the grid and the position all follow without changes of their own; unmarking the shown image uses the existing "the shown file left the folder" path (AC-23).
+- 2026-11-21 (spec-build): the App's own notices (copied, refused, no marks) go at the next key or click, because only the shells time a notice and the App's would otherwise stay.
+- 2026-11-21 (spec-build): new public API: `blinzel_core::picks::{Copied, copy_files, create_free}`, `Action::CopyText`, `App::text_copied`, `Cmd::{CopyMarkedNames, CopyMarkedFiles, ToggleOnlyMarked}` (ids 47 … 49), `MenuState::{only_marked, copying}`.
+- 2026-11-21 (spec-build): the tests of AC-14 … AC-25 were written after the code of this block; the core copy tests ran green at once against the first implementation.

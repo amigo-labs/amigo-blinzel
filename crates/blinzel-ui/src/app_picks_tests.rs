@@ -308,3 +308,247 @@ fn a_broken_marks_file_counts_its_valid_names_and_a_failed_write_says_so_once() 
     h.pump();
     assert_eq!(h.app.notice, None, "once per session");
 }
+
+// ------------------------------------------------------------ handing over
+
+fn mark_all(h: &mut Harness, names: &[&str]) {
+    for n in names {
+        h.open(n);
+        h.key(Letter('F'));
+    }
+    h.pump();
+}
+
+/// AC-14
+#[test]
+fn ctrl_shift_c_puts_the_marked_names_on_the_clipboard_in_folder_order() {
+    let mut h = folder(&["a.png", "b.png", "c.png"]);
+    mark_all(&mut h, &["c.png", "a.png"]);
+    let a = h.ctrl_shift(Letter('C'));
+    let eol = if cfg!(windows) { "\r\n" } else { "\n" };
+    assert_eq!(a, [Action::CopyText(format!("a.png{eol}c.png{eol}"))]);
+    assert_eq!(h.host().clipboard_offers, 0, "not the image");
+    h.app.text_copied(Ok(()));
+    assert_eq!(h.app.notice.as_deref(), Some("File names copied: 2 images"));
+    // The menu does the same; a clipboard that refuses says why.
+    let a = h.command(Cmd::CopyMarkedNames);
+    assert!(matches!(&a[..], [Action::CopyText(_)]));
+    h.app.text_copied(Err("busy".into()));
+    assert_eq!(
+        h.app.notice.as_deref(),
+        Some("Could not copy to the clipboard: busy")
+    );
+    // A key clears the App's own notice.
+    h.key(Right);
+    assert_eq!(h.app.notice, None);
+}
+
+/// AC-15
+#[test]
+fn without_marks_the_handover_is_disabled() {
+    let mut h = folder(&["a.png", "b.png"]);
+    assert!(!h.menu_enabled(Cmd::CopyMarkedNames));
+    assert!(!h.menu_enabled(Cmd::CopyMarkedFiles));
+    assert!(!h.menu_enabled(Cmd::ToggleOnlyMarked));
+    assert_eq!(h.ctrl_shift(Letter('C')), []);
+    assert_eq!(h.app.notice.as_deref(), Some("No images marked"));
+    h.key(Letter('F'));
+    assert!(h.menu_enabled(Cmd::CopyMarkedNames));
+    assert!(h.menu_enabled(Cmd::CopyMarkedFiles));
+}
+
+/// AC-16, AC-17, AC-18
+#[test]
+fn copying_marked_files_makes_byte_identical_copies_and_never_replaces() {
+    let mut h = folder(&["a.png", "b.png", "c.png"]);
+    mark_all(&mut h, &["a.png", "c.png"]);
+    let out = h.images.parent().unwrap().join("out");
+    std::fs::create_dir(&out).unwrap();
+    std::fs::write(out.join("a.png"), b"someone else's").unwrap();
+    assert_eq!(h.command(Cmd::CopyMarkedFiles), [Action::PickFolder]);
+    h.app.batch_folder_picked(out.clone());
+    assert_eq!(h.app.notice.as_deref(), Some("Copying 0 / 2 …"));
+    assert!(!h.menu_enabled(Cmd::CopyMarkedFiles), "one copy at a time");
+    // Browsing goes on meanwhile.
+    h.key(Right);
+    assert_eq!(h.current_name().as_deref(), Some("a.png"));
+    h.wait_for(|h| {
+        h.app
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("copied to"))
+    });
+    assert_eq!(h.app.notice.as_deref(), Some("2 images copied to “out”"));
+    let bytes = |p: PathBuf| std::fs::read(p).unwrap();
+    assert_eq!(bytes(out.join("a (2).png")), bytes(h.images.join("a.png")));
+    assert_eq!(bytes(out.join("c.png")), bytes(h.images.join("c.png")));
+    assert_eq!(bytes(out.join("a.png")), b"someone else's");
+    assert!(!out.join("b.png").exists());
+    assert!(h.menu_enabled(Cmd::CopyMarkedFiles));
+    // Cancelling the dialog: the shell calls nothing back, nothing happens.
+    h.command(Cmd::CopyMarkedFiles);
+    assert_eq!(std::fs::read_dir(&out).unwrap().count(), 3);
+}
+
+/// AC-19
+#[test]
+fn copying_reports_failures_and_refuses_the_images_own_folder() {
+    let mut h = folder(&["a.png", "b.png"]);
+    mark_all(&mut h, &["a.png", "b.png"]);
+    h.command(Cmd::CopyMarkedFiles);
+    let images = h.images.clone();
+    h.app.batch_folder_picked(images.join(".").join(""));
+    assert_eq!(
+        h.app.notice.as_deref(),
+        Some("Choose a different folder than the images' own")
+    );
+    // One source vanished after it was listed.
+    std::fs::remove_file(h.images.join("b.png")).unwrap();
+    let out = h.images.parent().unwrap().join("out");
+    std::fs::create_dir(&out).unwrap();
+    h.command(Cmd::CopyMarkedFiles);
+    h.app.batch_folder_picked(out.clone());
+    h.wait_for(|h| {
+        h.app
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("failed"))
+    });
+    let n = h.app.notice.clone().unwrap();
+    assert!(n.starts_with("1 of 2 copied; 1 failed: "), "{n}");
+    assert!(out.join("a.png").exists());
+}
+
+// ------------------------------------------------------------- only marked
+
+/// AC-21, AC-22
+#[test]
+fn only_marked_browses_the_marked_images_and_counts_them() {
+    let mut h = folder(&["a.png", "b.png", "c.png", "d.png"]);
+    mark_all(&mut h, &["b.png", "d.png"]);
+    h.open("a.png");
+    h.command(Cmd::ToggleOnlyMarked);
+    h.pump();
+    assert!(h.menu_checked(Cmd::ToggleOnlyMarked));
+    assert_eq!(
+        h.current_name().as_deref(),
+        Some("b.png"),
+        "the next marked one"
+    );
+    assert_eq!(h.names(), ["b.png", "d.png"]);
+    h.key(Right);
+    assert_eq!(h.current_name().as_deref(), Some("d.png"));
+    h.key(Right);
+    assert_eq!(
+        h.current_name().as_deref(),
+        Some("b.png"),
+        "round to the first marked"
+    );
+    h.key(Letter('I'));
+    h.wait_for(|h| h.info_lines().get(1).map(String::as_str) == Some("1 / 2"));
+    h.key(Letter('G'));
+    h.render();
+    assert!(
+        h.frame()
+            .texts
+            .iter()
+            .any(|t| t == "2 images marked · Only marked"),
+        "{:?}",
+        h.frame().texts
+    );
+}
+
+/// AC-21: no marked image after the shown one: the previous marked one.
+#[test]
+fn only_marked_falls_back_to_the_previous_marked_image() {
+    let mut h = folder(&["a.png", "b.png", "c.png"]);
+    mark_all(&mut h, &["a.png"]);
+    h.open("c.png");
+    h.command(Cmd::ToggleOnlyMarked);
+    h.pump();
+    assert_eq!(h.current_name().as_deref(), Some("a.png"));
+}
+
+/// AC-23
+#[test]
+fn unmarking_under_only_marked_keeps_the_image_until_moving_on() {
+    let mut h = folder(&["a.png", "b.png", "c.png"]);
+    mark_all(&mut h, &["a.png", "b.png", "c.png"]);
+    h.open("b.png");
+    h.command(Cmd::ToggleOnlyMarked);
+    h.pump();
+    h.key(Letter('F'));
+    assert_eq!(h.current_name().as_deref(), Some("b.png"), "stays shown");
+    assert_eq!(h.names(), ["a.png", "c.png"]);
+    h.key(Right);
+    assert_eq!(h.current_name().as_deref(), Some("c.png"));
+    h.key(Left);
+    assert_eq!(
+        h.current_name().as_deref(),
+        Some("a.png"),
+        "b is not reached"
+    );
+    // The last marks go: "Only marked" turns off by itself.
+    h.key(Letter('F'));
+    h.key(Right);
+    h.key(Letter('F'));
+    assert!(!h.menu_checked(Cmd::ToggleOnlyMarked));
+    assert_eq!(h.names().len(), 3);
+    assert_eq!(h.current_name().as_deref(), Some("c.png"));
+}
+
+/// AC-24
+#[test]
+fn only_marked_ends_when_turned_off_or_in_another_folder() {
+    let mut h = folder(&["a.png", "b.png", "c.png"]);
+    mark_all(&mut h, &["b.png"]);
+    h.command(Cmd::ToggleOnlyMarked);
+    h.pump();
+    h.command(Cmd::ToggleOnlyMarked);
+    assert!(!h.menu_checked(Cmd::ToggleOnlyMarked));
+    assert_eq!(h.names().len(), 3);
+    assert_eq!(
+        h.current_name().as_deref(),
+        Some("b.png"),
+        "from the image shown"
+    );
+    h.command(Cmd::ToggleOnlyMarked);
+    let other = h.images.join("other");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("x.png"), crate::testkit::png(8, 8)).unwrap();
+    std::fs::write(other.join("y.png"), crate::testkit::png(8, 8)).unwrap();
+    h.app.open(other.join("x.png"));
+    h.pump();
+    assert!(!h.menu_checked(Cmd::ToggleOnlyMarked));
+    assert_eq!(h.names(), ["x.png", "y.png"]);
+}
+
+/// AC-25
+#[test]
+fn the_marks_entries_sit_with_filmstrip_and_grid() {
+    let h = folder(&["a.png"]);
+    let cmd = |i: &crate::menu::MenuItem| match i {
+        crate::menu::MenuItem::Item { cmd, .. } => Some(*cmd),
+        _ => None,
+    };
+    let view = crate::menu::items(&h.menu_state())
+        .into_iter()
+        .find_map(|m| match m {
+            crate::menu::MenuItem::Sub(_, items)
+                if items.iter().any(|i| cmd(i) == Some(Cmd::ToggleGrid)) =>
+            {
+                Some(items)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let cmds: Vec<Cmd> = view.iter().filter_map(cmd).collect();
+    for c in [
+        Cmd::ToggleOnlyMarked,
+        Cmd::CopyMarkedNames,
+        Cmd::CopyMarkedFiles,
+        Cmd::ClearMarks,
+    ] {
+        assert!(cmds.contains(&c), "{c:?}");
+    }
+}

@@ -84,9 +84,12 @@ pub enum Action {
     Close,
     /// Exit for good, also in resident mode.
     Exit,
-    /// Ask for a folder for the batch dialog (then
-    /// [`App::batch_folder_picked`]).
+    /// Ask for a folder for the batch dialog or for copies of the marked
+    /// files (then [`App::batch_folder_picked`]).
     PickFolder,
+    /// Put this text on the clipboard (the marked file names), then
+    /// [`App::text_copied`].
+    CopyText(String),
     /// Show a folder in the platform's file manager.
     OpenFolder(PathBuf),
     Activate,
@@ -294,6 +297,39 @@ pub struct App<B: Backend> {
     marks: crate::marks::Marks,
     /// A question over the viewer ("Remove the marks of …?").
     pub confirm: Option<crate::confirm::Confirm>,
+    /// "Only marked": the whole folder while `list` holds only the marked
+    /// images (`docs/specs/picks.md` AC-21).
+    full_list: Option<FileList>,
+    /// The App's own notice, gone at the next key or click (the shells
+    /// time theirs).
+    own_notice: bool,
+    /// Marked files being copied into a folder.
+    copy: Option<CopyRun>,
+    /// "Copy marked files to folder…" asked the shell for a folder.
+    copy_wanted: bool,
+    /// File names put on the clipboard, until the shell says it worked.
+    names_copied: usize,
+}
+
+/// A copy of marked files under way.
+struct CopyRun {
+    rx: Receiver<CopyMsg>,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    total: usize,
+    folder: String,
+}
+
+impl Drop for CopyRun {
+    // The viewer exits during a copy: it stops, the file in progress goes.
+    fn drop(&mut self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+enum CopyMsg {
+    Progress(usize),
+    Done(blinzel_core::picks::Copied),
 }
 
 impl<B: Backend> App<B> {
@@ -365,6 +401,11 @@ impl<B: Backend> App<B> {
             info_rect: None,
             marks: crate::marks::Marks::new(settings_store::config_dir().map(|d| d.join("picks"))),
             confirm: None,
+            full_list: None,
+            own_notice: false,
+            copy: None,
+            copy_wanted: false,
+            names_copied: 0,
         }
     }
 
@@ -585,6 +626,11 @@ impl<B: Backend> App<B> {
         // The folder's marks, read in the background (`docs/specs/picks.md`).
         self.marks
             .open(dir.clone(), &mut self.browse.marks, &self.services);
+        // "Only marked" holds within a folder (AC-24).
+        if self.full_list.is_some() {
+            self.full_list = Some(self.list.clone());
+            self.refilter();
+        }
         let mut rewritten = None;
         if let Some(cur) = &mut self.current {
             let was_listed = cur.index.is_some();
@@ -1479,6 +1525,7 @@ impl<B: Backend> App<B> {
             let a = c.mouse_down(p);
             return self.confirm_answer(a);
         }
+        self.drop_own_notice();
         if !middle && !self.fullscreen && self.chrome().hit(p) == Some(Button::Menu) {
             self.pressed = None;
             return vec![self.menu_at_button()];
@@ -1543,6 +1590,7 @@ impl<B: Backend> App<B> {
                     );
                 }
                 // A plain click only selects: marks last (picks.md AC-03).
+                self.refilter();
                 self.invalidate();
             }
             return Some(vec![]);
@@ -1604,8 +1652,10 @@ impl<B: Backend> App<B> {
             self.show_notice(trf(Msg::MarksNotSaved, &[("reason", &reason)]));
         }
         if m.changed {
+            self.refilter();
             self.invalidate();
         }
+        self.poll_copy();
     }
 
     fn update_browse_hover(&mut self, p: (f64, f64)) {
@@ -1798,6 +1848,10 @@ impl<B: Backend> App<B> {
             let a = c.key(key);
             return Some(self.confirm_answer(a));
         }
+        self.drop_own_notice();
+        if ctrl && shift && key == Letter('C') {
+            return Some(self.command(Cmd::CopyMarkedNames));
+        }
         if ctrl && key == Letter('B') {
             return Some(self.command(Cmd::Batch));
         }
@@ -1873,6 +1927,7 @@ impl<B: Backend> App<B> {
             if let Some(e) = self.list.get(state.selected) {
                 let n = e.name.clone();
                 self.marks.toggle(n, &mut self.browse.marks, &self.services);
+                self.refilter();
                 self.invalidate();
             }
             return Some(vec![]);
@@ -1944,6 +1999,8 @@ impl<B: Backend> App<B> {
             filmstrip: self.settings.filmstrip,
             grid: self.browse.grid.is_some(),
             marked: self.marks.loaded().then(|| self.marked_count()),
+            only_marked: self.full_list.is_some(),
+            copying: self.copy.is_some(),
             screenshot_hotkey: self.settings.screenshot_hotkey,
             screenshot_save: self.settings.screenshot_save,
             screenshot_open: self.settings.screenshot_open,
@@ -2137,6 +2194,32 @@ impl<B: Backend> App<B> {
                         .open_grid(self.list.len(), current, client, scale);
                 }
                 self.invalidate();
+                vec![]
+            }
+            Cmd::CopyMarkedNames => {
+                let names = self.marked_names();
+                if names.is_empty() {
+                    self.own_notice(tr(Msg::MarksNone).into());
+                    return vec![];
+                }
+                let eol = if cfg!(windows) { "\r\n" } else { "\n" };
+                let text: String = names.iter().map(|n| format!("{n}{eol}")).collect();
+                self.names_copied = names.len();
+                vec![Action::CopyText(text)]
+            }
+            Cmd::CopyMarkedFiles => {
+                if self.marked_count() == 0 || self.copy.is_some() {
+                    return vec![];
+                }
+                self.copy_wanted = true;
+                vec![Action::PickFolder]
+            }
+            Cmd::ToggleOnlyMarked => {
+                if self.full_list.is_some() {
+                    self.only_marked_off();
+                } else if self.marked_count() > 0 {
+                    return self.only_marked_on();
+                }
                 vec![]
             }
             Cmd::ClearMarks => {
@@ -2449,11 +2532,28 @@ impl<B: Backend> App<B> {
         }
     }
 
+    /// The folder the shell picked for [`Action::PickFolder`]: the batch
+    /// dialog's output folder, or where marked files are copied to.
     pub fn batch_folder_picked(&mut self, folder: PathBuf) {
         if let Some(d) = &mut self.dialog {
             d.set_folder(folder);
             self.invalidate();
+        } else if std::mem::take(&mut self.copy_wanted) {
+            self.start_copy(folder);
         }
+    }
+
+    /// The shell put the marked file names on the clipboard, or could not.
+    pub fn text_copied(&mut self, result: Result<(), String>) {
+        let n = std::mem::take(&mut self.names_copied);
+        let text = match result {
+            Ok(()) => {
+                let count = blinzel_i18n::trp(blinzel_i18n::PluralMsg::ImagesCount, n as u64, &[]);
+                trf(Msg::MarksNamesCopied, &[("count", &count)])
+            }
+            Err(reason) => trf(Msg::ClipboardFailed, &[("reason", &reason)]),
+        };
+        self.own_notice(text);
     }
 
     /// Typed text (characters, not keys) for the batch dialog's fields.
@@ -2486,16 +2586,204 @@ impl<B: Backend> App<B> {
         self.marks.busy()
     }
 
+    /// The whole folder, also while "Only marked" shows part of it.
+    fn folder_list(&self) -> &FileList {
+        self.full_list.as_ref().unwrap_or(&self.list)
+    }
+
     /// Marked images of the folder that exist.
     pub(crate) fn marked_count(&self) -> usize {
         if self.browse.marks.is_empty() {
             return 0;
         }
-        self.list
+        self.folder_list()
             .entries()
             .iter()
             .filter(|e| self.browse.marks.contains(&e.name))
             .count()
+    }
+
+    /// The names of the marked images that exist, in the folder's order.
+    fn marked_names(&self) -> Vec<String> {
+        self.folder_list()
+            .entries()
+            .iter()
+            .filter(|e| self.browse.marks.contains(&e.name))
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    fn own_notice(&mut self, text: String) {
+        self.show_notice(text);
+        self.own_notice = true;
+    }
+
+    fn drop_own_notice(&mut self) {
+        if std::mem::take(&mut self.own_notice) && self.copy.is_none() {
+            self.notice = None;
+            self.invalidate();
+        }
+    }
+
+    /// "Only marked" on (AC-21): the shown image stays if it is marked,
+    /// else the next marked one in the folder's order, or else the
+    /// previous one.
+    fn only_marked_on(&mut self) -> Vec<Action> {
+        let full = self.list.clone();
+        let target = self.current.as_ref().and_then(|c| {
+            let at = full.index_of(&c.entry.name)?;
+            let marked = |i: &usize| {
+                full.get(*i)
+                    .is_some_and(|e| self.browse.marks.contains(&e.name))
+            };
+            (at..full.len())
+                .find(marked)
+                .or_else(|| (0..at).rev().find(marked))
+                .and_then(|i| full.get(i).map(|e| e.name.clone()))
+        });
+        self.full_list = Some(full);
+        self.refilter();
+        if let Some(name) = target
+            && self.current.as_ref().is_none_or(|c| c.entry.name != name)
+            && let Some(i) = self.list.index_of(&name)
+        {
+            return self.go_to_index(i);
+        }
+        self.invalidate();
+        vec![]
+    }
+
+    /// The whole folder again, from the image shown last (AC-24).
+    fn only_marked_off(&mut self) {
+        let Some(full) = self.full_list.take() else {
+            return;
+        };
+        self.list = full;
+        if let Some(cur) = &mut self.current {
+            cur.index = self.list.index_of(&cur.entry.name);
+            self.current_left = cur.index.is_none();
+        }
+        if let Some(g) = &mut self.browse.grid {
+            g.selected = g.selected.min(self.list.len().saturating_sub(1));
+        }
+        self.update_wanted();
+        self.invalidate();
+    }
+
+    /// While "Only marked" is on: the list is the marked images of the
+    /// folder; it turns off by itself when none is left (AC-23).
+    fn refilter(&mut self) {
+        let Some(full) = &self.full_list else {
+            return;
+        };
+        let entries: Vec<Entry> = full
+            .entries()
+            .iter()
+            .filter(|e| self.browse.marks.contains(&e.name))
+            .cloned()
+            .collect();
+        if entries.is_empty() {
+            self.only_marked_off();
+            return;
+        }
+        self.list = FileList::new(full.dir().to_path_buf(), entries);
+        if let Some(cur) = &mut self.current {
+            let was = cur.index.is_some();
+            cur.index = self.list.index_of(&cur.entry.name);
+            // Unmarked while shown: it stays until the user moves on.
+            self.current_left = cur.index.is_none() && (was || self.current_left);
+        }
+        if let Some(g) = &mut self.browse.grid {
+            g.selected = g.selected.min(self.list.len().saturating_sub(1));
+        }
+        self.update_wanted();
+        self.invalidate();
+    }
+
+    /// Copies the marked files into `folder` on a worker (AC-16 … AC-19).
+    fn start_copy(&mut self, folder: PathBuf) {
+        let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        };
+        if same(&folder, self.folder_list().dir()) {
+            self.own_notice(tr(Msg::MarksCopySameFolder).into());
+            return;
+        }
+        let dir = self.folder_list().dir().to_path_buf();
+        let files: Vec<PathBuf> = self.marked_names().iter().map(|n| dir.join(n)).collect();
+        if files.is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let name = folder
+            .file_name()
+            .map_or_else(|| folder.to_string_lossy(), |n| n.to_string_lossy())
+            .into_owned();
+        self.copy = Some(CopyRun {
+            rx,
+            cancel: cancel.clone(),
+            total: files.len(),
+            folder: name,
+        });
+        self.show_notice(trf(Msg::MarksCopying, &[("i", &0), ("n", &files.len())]));
+        let services = self.services.clone();
+        let _ = std::thread::Builder::new()
+            .name("blinzel-copy".into())
+            .spawn(move || {
+                services.tune_thread(false);
+                let progress = |i| {
+                    let _ = tx.send(CopyMsg::Progress(i));
+                    services.wake(Wake::Thumbs);
+                };
+                let done = blinzel_core::picks::copy_files(&files, &folder, progress, &cancel);
+                let _ = tx.send(CopyMsg::Done(done));
+                services.wake(Wake::Thumbs);
+            });
+    }
+
+    /// Progress and the end of a copy ([`Wake::Thumbs`]).
+    fn poll_copy(&mut self) {
+        let Some(run) = &self.copy else {
+            return;
+        };
+        let msgs: Vec<CopyMsg> = run.rx.try_iter().collect();
+        let (total, folder) = (run.total, run.folder.clone());
+        for m in msgs {
+            match m {
+                CopyMsg::Progress(i) => {
+                    self.show_notice(trf(Msg::MarksCopying, &[("i", &i), ("n", &total)]));
+                }
+                CopyMsg::Done(d) => {
+                    self.copy = None;
+                    let k = d.done.len();
+                    let text = match d.failed.first() {
+                        None => {
+                            let count = blinzel_i18n::trp(
+                                blinzel_i18n::PluralMsg::ImagesCount,
+                                k as u64,
+                                &[],
+                            );
+                            trf(
+                                Msg::MarksFilesCopied,
+                                &[("count", &count), ("folder", &folder)],
+                            )
+                        }
+                        Some((_, reason)) => trf(
+                            Msg::MarksCopyFailed,
+                            &[
+                                ("k", &k),
+                                ("n", &total),
+                                ("failed", &d.failed.len()),
+                                ("reason", reason),
+                            ],
+                        ),
+                    };
+                    self.own_notice(text);
+                }
+            }
+        }
     }
 
     /// The shown image's name, if it is marked.
@@ -2519,6 +2807,7 @@ impl<B: Backend> App<B> {
         let name = e.name.clone();
         self.marks
             .toggle(name, &mut self.browse.marks, &self.services);
+        self.refilter();
         self.invalidate();
         vec![]
     }
@@ -2528,11 +2817,14 @@ impl<B: Backend> App<B> {
         use crate::confirm::Answer;
         match a {
             Answer::Open => return vec![],
-            Answer::Yes => self.marks.change(
-                blinzel_core::picks::Change::Clear,
-                &mut self.browse.marks,
-                &self.services,
-            ),
+            Answer::Yes => {
+                self.marks.change(
+                    blinzel_core::picks::Change::Clear,
+                    &mut self.browse.marks,
+                    &self.services,
+                );
+                self.refilter();
+            }
             Answer::No => {}
         }
         self.confirm = None;
@@ -2554,7 +2846,10 @@ impl<B: Backend> App<B> {
             let n = self.marked_count();
             if n > 0 {
                 let count = blinzel_i18n::trp(blinzel_i18n::PluralMsg::ImagesCount, n as u64, &[]);
-                let text = trf(Msg::MarksCount, &[("count", &count)]);
+                let mut text = trf(Msg::MarksCount, &[("count", &count)]);
+                if self.full_list.is_some() {
+                    text = format!("{text} · {}", tr(Msg::MarksOnly));
+                }
                 let x = (self.chrome().rect(Button::Menu).right() + 8.0 * s).round();
                 let y = (8.0 * s).round();
                 self.canvas.draw_text(
@@ -2721,6 +3016,13 @@ impl<B: Backend> App<B> {
 
     /// After the file was moved to the recycle bin.
     pub fn removed(&mut self, path: &Path) -> Vec<Action> {
+        // Gone from the whole folder too while "Only marked" shows part.
+        if let Some(full) = &mut self.full_list
+            && let Some(name) = path.file_name().map(|n| n.to_string_lossy())
+            && let Some(i) = full.entries().iter().position(|e| e.name == name)
+        {
+            full.remove(i);
+        }
         // Thrown away on purpose: its mark goes too (picks.md AC-11).
         if path.parent() == Some(self.list.dir())
             && let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned())
