@@ -14,7 +14,7 @@ The window has no frame and no toolbars (`blinzel.md` §2, "UI"). The name of th
 
 The overlay is a box at the bottom left of the window that the user turns on and off with one key. It shows facts the viewer already knows (name, position in the folder, pixel size, format, file size) and facts from the image's EXIF block (date taken, camera, lens, exposure). The EXIF block is read today only for the orientation, the embedded previews (`exif.rs`) and, in the batch engine, for the date taken (`batch/meta.rs`).
 
-Picking images and handing them over will be a separate spec (planned as `picks.md`, not written yet).
+Picking images and handing them over is a separate spec, [`picks.md`](picks.md); where both are built, the overlay also shows whether the image is marked (`picks.md` AC-07), and while "Only marked" is on its position counts only the marked images (`picks.md` AC-22).
 
 ## Scope
 
@@ -32,7 +32,7 @@ Picking images and handing them over will be a separate spec (planned as `picks.
 - GPS position, a map, a histogram, the full EXIF tag list — because the goal is telling images apart and judging them quickly, not a metadata browser
 - Editing metadata — because the viewer never writes to an image (AGENTS.md §9)
 - Choosing which fields appear, or where the box sits — because one fixed layout is enough until someone asks; a missing field simply drops out
-- XMP and IPTC (title, rating, keywords) — because cameras write exposure data into EXIF; ratings belong to `picks.md` if anywhere
+- XMP and IPTC (title, rating, keywords) — because cameras write exposure data into EXIF; marks are `picks.md`'s
 
 ## Acceptance criteria
 

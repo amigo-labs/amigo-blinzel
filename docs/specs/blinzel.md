@@ -29,6 +29,7 @@ IrfanView and ImageGlass are too slow. amigo-blinzel is meant to be measurably f
 | Selection | rectangle; Ctrl+C copies; Ctrl+X = copy + crop view |
 | Saving | image files are never modified; **optionally save a cutout** (Ctrl+S, "Save as") |
 | Batch processing | **resize many images**, in the app only (no CLI): JPEG, PNG, WebP, AVIF or same as source; keep metadata, rename by pattern, crop to an aspect ratio, sharpen |
+| Picks | **lasting marks per folder** (2026-11-21): F marks in the single view and the grid, kept across grid, folders and restarts in the per-user config folder (`picks/<hash of the folder path>.txt`, one UTF-8 name per line, never next to the images); handed over as file names on the clipboard (Ctrl+Shift+C) or as byte-identical copies in a chosen folder (an existing name gets a number); "Only marked" filters browsing ([picks.md](picks.md)) |
 | Mouse | context-dependent: image fits → left drag selects; image larger → left drag pans, Shift+drag selects |
 | Installer | no installer framework; Windows: the exe installs itself; Linux: `blinzel --install` per user; macOS: drag the app into "Applications" |
 | Signature | **no code signing** (no Authenticode, no Apple notarization); proof of origin is our own Ed25519 signature of the checksums |

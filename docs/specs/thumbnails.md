@@ -68,15 +68,15 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 ### Grid
 
 - [ ] AC-17 (always): The grid shows square tiles in as many columns as fit the window width (at least one), centred horizontally; a click on the gap between tiles, on the margin or past the last tile hits no tile, and at a scroll offset the same point hits the tile that many rows further down.
-- [ ] AC-18 (state): While the grid is open (G or "View → All images in the folder (grid)"; it opens over the whole window with the current image selected and in view): arrows move the selection by one column or row, Page Up/Page Down by the number of full rows that fit, Home/End to the first/last image, always clamped to the images and scrolled just enough to show the selection fully; the wheel scrolls one row per notch; a click selects; a double-click, Enter or Space opens that image and closes the grid; G, or Esc with nothing marked, closes the grid.
-- [ ] AC-19 (state): While the grid is open, Ctrl+click toggles the mark of a tile, Shift+click adds every image from the selected one to the clicked one to the marks, a plain click clears all marks, Ctrl+A marks every image of the folder, and Esc with marks clears them and keeps the grid open; marked tiles carry a check mark.
+- [ ] AC-18 (state): While the grid is open (G or "View → All images in the folder (grid)"; it opens over the whole window with the current image selected and in view): arrows move the selection by one column or row, Page Up/Page Down by the number of full rows that fit, Home/End to the first/last image, always clamped to the images and scrolled just enough to show the selection fully; the wheel scrolls one row per notch; a click selects; a double-click, Enter or Space opens that image and closes the grid; G or Esc closes the grid, also while images are marked (`picks.md` AC-03).
+- [ ] AC-19 (state): While the grid is open, Ctrl+click toggles the mark of a tile, Shift+click adds every image from the selected one to the clicked one to the marks, Ctrl+A marks every image of the folder, and a plain click or Esc leaves the marks as they are; marked tiles carry a check mark. The marks are the folder's lasting marks (`picks.md`).
 - [ ] AC-20 (state, manual: visual design): While the grid or the filmstrip is shown, tiles look right on Windows, macOS and Linux at 100 % and 200 % scaling: placeholder, hover highlight, accent outline on the selected/current tile, check mark badge on marked tiles, thumbnails sharp and correctly oriented.
 
 ### Speed (M4)
 
 - [ ] AC-21 (always, manual: measurement): 200 thumbnails from the cache are on screen (open the cache, read and decode 200, load them into the atlas, draw the grid, GPU done) in at most 30 ms median, measured with `blinzel --bench <dir> --json out.json`, field `thumb_grid_200` (Windows only; the CI step "App benchmark (offscreen, WARP)" runs it on WARP and fails only on a cache miss, not on the time).
 - [ ] AC-22 (always, manual: measurement): Over 200 different 12-MP JPEGs with sensor noise, cold thumbnails (read, probe, decode, reduce; no cache) reach at least 150 per second and warm reading of all 200 from a reopened cache takes at most 30 ms, measured with `blinzel-bench thumbs <dir> [--count N] [--threads T]` on the machine named with the result (not run in CI).
-- [ ] AC-23 (event): When the user opens "Resize images…" (Ctrl+B or the menu) while tiles are marked in the grid, then the batch dialog starts with exactly the marked files, in the folder's order; marked files that no longer exist are left out. Without marks it starts empty.
+- [ ] AC-23 (event): When the user opens "Resize images…" (Ctrl+B or the menu) while images of the folder are marked (in the grid or not, `picks.md`), then the batch dialog starts with exactly the marked files, in the folder's order; marked files that no longer exist are left out. Without marks it starts empty.
 
 ## Technical notes
 
@@ -85,7 +85,7 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 - **Pool** (`blinzel-ui/src/thumbs.rs`): `Thumbs::set_wanted` replaces the queue in priority order, skipping ids in `taken`; `forget(id)` after eviction, `reset()` when resident mode hides the window. Worker count from `Services::thumb_threads()` (Windows: number of performance cores, at least 2; Linux/macOS: half the logical CPUs, at least 2), normal priority. Results go back as `Wake::Thumbs` → `App::on_thumbs`.
 - **Atlas** (`blinzel_ui::gfx::Atlas`, `AtlasPages`): `PAGE = 2048`, 8 × 8 slots of 256² per page; Y in a 2048² R8 texture, Cb/Cr in a 1024² R8G8 texture (6 MiB per page); `ATLAS_PAGES = 8`. LRU by `last_drawn` frame (`begin_frame`, `get`). Cache JPEGs (4:2:0) become `Planes` without an RGB round trip (`Planes::from_image`); everything else via `Planes::from_thumb` (alpha over the background). One draw per tile (`draws::thumb`). Shells: `blinzel-app/src/gfx/atlas.rs` (D3D11), `src/linux/gpu.rs` (wgpu), `src/macos/gpu.rs` (Metal).
 - **Layout** (`blinzel_core::grid`, `blinzel-ui/src/browse.rs`): grid cell 176, gap 12; strip cell 72, gap 6, strip height `(72 + 2·6) × scale`; all logical px × DPI scale. `Grid::{visible, reveal, page_rows, step, hit}`, `strip(count, current, width, cell, gap)`, `fit_in` (centred, never enlarged).
-- **Marks**: `GridState::marked: BTreeSet<String>` of file names; they live only while the grid is open (closing or reopening the grid starts with none).
+- **Marks**: `GridState::marked: BTreeSet<String>` of file names; they live only while the grid is open (closing or reopening the grid starts with none). `picks.md` makes them the folder's lasting marks.
 - **Strings**: `view_filmstrip`, `view_grid` in every `i18n/*.toml`.
 
 ## Edge cases
@@ -140,12 +140,12 @@ amigo-blinzel is meant to be measurably faster than other viewers at thumbnails 
 | AC-15 | `a_broken_file_keeps_its_placeholder_and_is_not_asked_for_again`, `cloud_placeholders_are_never_read_for_a_thumbnail` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 | AC-16 | `filmstrip_toggles_saves_and_lays_out_the_image_above_it`, `filmstrip_centres_the_current_tile_and_opens_clicked_ones` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
 | AC-17 | `columns_rows_and_cells`, `hit_testing` (`crates/blinzel-core/src/grid.rs`) | built | |
-| AC-18 | `grid_keys_move_the_selection_clamped_and_scrolled_just_enough`, `grid_wheel_scrolls_a_row_per_notch_and_clicks_select`, `grid_opens_with_enter_space_or_a_double_click_and_closes_with_g_or_escape`, `an_empty_grid_opens_nothing` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
-| AC-19 | `grid_marks_with_ctrl_shift_and_ctrl_a_and_escape_clears_them` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
+| AC-18 |      | open   |        |
+| AC-19 |      | open   |        |
 | AC-20 | | open | |
 | AC-21 | | open | |
 | AC-22 | | open | |
-| AC-23 | `resize_images_starts_with_the_marked_files_in_folder_order`, `resize_images_outside_the_grid_starts_empty` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`; Linux, macOS, Windows) | built | |
+| AC-23 |      | open   |        |
 
 Supporting tests: the persistence of the filmstrip setting by `roundtrip` (`crates/blinzel-core/src/settings.rs`); the layout functions behind the grid keys by `keyboard_steps_clamp`, `visibility_and_scrolling`, the strip layout by `fitting_and_strip` (`crates/blinzel-core/src/grid.rs`).
 
@@ -157,3 +157,4 @@ Supporting tests: the persistence of the filmstrip setting by `roundtrip` (`crat
 - 2026-11-02: the grid's marks fill the batch dialog (AC-23, together with `batch-resize.md` AC-22). Because marking is how a person picks files in the viewer, and on macOS it is the only way to fill the batch list until drops reach the dialog there.
 - 2026-11-02: AC-23 checks "no longer exists" with a file check per marked file when the dialog opens (on the UI thread). Because opening the dialog is not on the startup or browsing path, and the dialog's header inspection would otherwise list the missing file as unreadable instead of leaving it out.
 - 2026-11-02: the thumbnail cache key folds case on Windows only. Because the extraction found `A.jpg` and `a.jpg` sharing one entry on Linux and macOS, where they are two files; `the_key_folds_case_only_on_windows` was red with the old key. On a case-insensitive APFS volume a file opened under another spelling costs a second entry, not a wrong thumbnail. Entries written by an older Linux or macOS build miss once and are made again.
+- 2026-11-21: revised AC-18, AC-19, AC-23 with `picks.md`: marks last per folder, a plain click and Esc no longer clear them (a lasting choice must not vanish by a stray click), and Ctrl+B takes them also outside the grid. Their tests change with `/spec-build picks`.
