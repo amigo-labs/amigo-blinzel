@@ -38,8 +38,8 @@ use objc2_app_kit::{
     NSApplicationTerminateReply, NSBackingStoreType, NSControlStateValueOff, NSControlStateValueOn,
     NSCursor, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSMenu,
     NSMenuDelegate, NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard, NSPasteboardType,
-    NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSSavePanel, NSScreen, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSPasteboardTypeString, NSSavePanel, NSScreen,
+    NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSData, NSFileManager, NSNotification, NSNumber, NSObject,
@@ -525,6 +525,15 @@ impl Shell {
                 {
                     self.app.batch_folder_picked(dir);
                 }
+                vec![]
+            }
+            Action::CopyText(text) => {
+                let r = if put_string(&text) {
+                    Ok(())
+                } else {
+                    Err("the pasteboard refused the text".to_string())
+                };
+                self.app.text_copied(r);
                 vec![]
             }
             Action::OpenFolder(dir) => {
@@ -1209,6 +1218,15 @@ fn clip_png(pixels: Result<(Vec<u8>, u32, u32), String>) -> Result<Vec<u8>, Stri
         None,
         None,
     )
+}
+
+/// Puts text on the general pasteboard (the marked file names,
+/// `docs/specs/picks.md` AC-14).
+fn put_string(text: &str) -> bool {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    // SAFETY: a constant type name.
+    pb.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString })
 }
 
 /// Puts PNG data on the general pasteboard.
@@ -1930,8 +1948,12 @@ mod tests {
             auto_update: false,
             single_instance: false,
             color_management: false,
+            info: false,
             filmstrip: false,
             grid: false,
+            marked: None,
+            only_marked: false,
+            copying: false,
             screenshot_hotkey: false,
             screenshot_save: false,
             screenshot_open: false,

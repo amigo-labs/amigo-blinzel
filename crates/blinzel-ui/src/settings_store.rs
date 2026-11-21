@@ -9,8 +9,9 @@ pub fn path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("settings.toml"))
 }
 
+/// The per-user settings folder.
 #[cfg(not(test))]
-fn config_dir() -> Option<PathBuf> {
+pub(crate) fn config_dir() -> Option<PathBuf> {
     crate::dirs::config()
 }
 
@@ -18,7 +19,7 @@ fn config_dir() -> Option<PathBuf> {
 /// this thread set in [`TEST_CONFIG_DIR`] (the test harness's temp folder),
 /// or none.
 #[cfg(test)]
-fn config_dir() -> Option<PathBuf> {
+pub(crate) fn config_dir() -> Option<PathBuf> {
     TEST_CONFIG_DIR.with(|d| d.borrow().clone())
 }
 

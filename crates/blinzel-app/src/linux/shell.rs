@@ -529,6 +529,11 @@ impl Shell {
                 }
                 vec![]
             }
+            Action::CopyText(text) => {
+                let r = clipboard::put_text(&mut self.clipboard, text);
+                app.text_copied(r);
+                vec![]
+            }
             Action::OpenFolder(dir) => {
                 open_url(&dir.to_string_lossy());
                 vec![]
