@@ -302,3 +302,71 @@ fn a_broken_image_shows_name_position_and_file_size_only() {
     h.render();
     assert_eq!(h.info_lines(), ["bad.jpg", "1 / 1", "10 B"]);
 }
+
+/// Edge case "2 GB TIFF": a big file is read only up to its start.
+#[test]
+fn a_big_file_is_read_only_at_its_start() {
+    let mut h = Harness::new();
+    let mut big = canon_jpeg();
+    big.resize(crate::info::HEAD as usize * 2, 0);
+    h.write_file("big.jpg", &big);
+    h.open("big.jpg");
+    show_info(&mut h, 8);
+    assert_eq!(h.info_lines()[5], "Canon EOS R6");
+    let whole = h
+        .app
+        .services
+        .reads
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(t, p)| t == crate::info::THREAD && p.ends_with("big.jpg"));
+    assert!(!whole, "the reader did not read the whole file");
+}
+
+/// AC-09: a tile whose file cannot be read, and one whose size only a
+/// decoder could tell.
+#[test]
+fn in_the_grid_an_unreadable_tile_shows_what_is_known() {
+    let mut h = Harness::new();
+    h.write_png("a.png", 64, 48);
+    h.write_file("b.jpg", &canon_jpeg());
+    // A JPEG header without a frame: the format, no size.
+    h.write_file("c.jpg", &[0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 0, 0]);
+    h.open("a.png");
+    h.pump();
+    let b_size = kb(&h, "b.jpg");
+    std::fs::remove_file(h.images.join("b.jpg")).unwrap();
+    h.key(Letter('G'));
+    show_info(&mut h, 4);
+    h.key(Right);
+    h.wait_for(|h| h.info_lines().first().map(String::as_str) == Some("b.jpg"));
+    h.wait_for(|h| h.info_lines().len() == 3);
+    assert_eq!(h.info_lines(), ["b.jpg", "2 / 3", &b_size]);
+    h.key(Right);
+    h.wait_for(|h| h.info_lines().len() == 4);
+    assert_eq!(h.info_lines(), ["c.jpg", "3 / 3", "JPEG", "8 B"]);
+}
+
+/// AC-14: the shown file replaced (read again) or gone (no position).
+#[test]
+fn a_replaced_file_is_read_again_and_a_gone_one_loses_its_position() {
+    let mut h = Harness::new();
+    h.write_file("a.jpg", &canon_jpeg());
+    h.write_png("b.png", 64, 48);
+    h.open("a.jpg");
+    show_info(&mut h, 8);
+    let tiff = exif_block(&[(0x0110, ascii("Other Cam"))], &[]);
+    let mut other = jpeg_with_exif(&jpeg(64, 48), &tiff);
+    other.extend([0; 7]);
+    h.write_file("a.jpg", &other);
+    h.app.on_dir_changed();
+    h.wait_for(|h| h.info_lines().get(4).map(String::as_str) == Some("Other Cam"));
+    std::fs::remove_file(h.images.join("a.jpg")).unwrap();
+    h.app.on_dir_changed();
+    h.wait_for(|h| h.names().len() == 1);
+    h.render();
+    let lines = h.info_lines();
+    assert_eq!(lines[0], "a.jpg");
+    assert!(!lines.iter().any(|l| l.contains(" / ")), "{lines:?}");
+}

@@ -78,7 +78,7 @@ Hints, not requirements; the ACs decide.
 | Image opened alone from a folder that is still being listed | The position line appears once the listing is done |
 | Empty grid, or an image the folder list does not contain | No box in the empty grid; without a position the position line is left out |
 | Grid selection moves quickly over many tiles | Only the last selected tile's facts appear (AC-08); reads for tiles passed over may be dropped |
-| 2 GB TIFF with its IFDs at the end | The facts appear; only the headers and the EXIF block are read, not the pixel data |
+| 2 GB TIFF | Only the file's first 64 MB are read for the facts, never all of it; a fact that lies beyond (IFDs written after the pixel data) is left out |
 | Animated GIF | The facts of the file; the frame number is not shown, because it changes many times a second and says nothing about the file |
 | Error image ("Could not open …") | Name, position and file size; size, format and EXIF are left out because nothing was decoded |
 | Window too small for the box | Lines are shortened (AC-10); the box is cut at the window edge and never drawn over ☰, the window buttons or the filmstrip |
@@ -108,12 +108,12 @@ Hints, not requirements; the ACs decide.
 | AC-06 | `exif_comes_from_jpeg_png_webp_jxl_and_tiff`, `exif_comes_from_avif_and_heic`, `the_first_of_two_exif_segments_counts` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
 | AC-07 | `dates_and_numbers_follow_the_ui_language` (`crates/blinzel-ui/src/app_info_tests.rs`); `file_sizes_use_decimal_units` (`crates/blinzel-ui/src/info.rs`); `date_time_stands_in_for_a_missing_or_broken_date_taken` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
 | AC-08 | `going_on_never_shows_the_previous_images_facts_and_never_waits_for_them` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
-| AC-09 | `in_the_grid_the_overlay_follows_the_selected_tile` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-09 | `in_the_grid_the_overlay_follows_the_selected_tile`, `in_the_grid_an_unreadable_tile_shows_what_is_known` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
 | AC-10 | `the_box_sits_bottom_left_above_the_filmstrip_and_shortens_long_names`, `a_notice_is_drawn_after_the_box` (`crates/blinzel-ui/src/app_info_tests.rs`); `shorten_keeps_the_extension_in_the_middle_mode` (`crates/blinzel-ui/src/info.rs`) | built |  |
 | AC-11 | `i_toggles_the_overlay_the_menu_follows_and_the_choice_is_kept` (`crates/blinzel-ui/src/app_info_tests.rs`); `info_is_off_unless_the_file_says_true` (`crates/blinzel-core/src/settings.rs`) | built |  |
 | AC-12 | `the_first_frame_does_not_wait_for_the_facts`, `going_on_never_shows_the_previous_images_facts_and_never_waits_for_them` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
 | AC-13 | `a_broken_exif_block_leaves_out_its_facts_and_the_image_shows` (`crates/blinzel-ui/src/app_info_tests.rs`); `a_broken_block_gives_no_facts_and_never_panics`, `out_of_range_values_are_left_out_and_the_rest_stays` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
-| AC-14 | `the_position_follows_the_folder_list`, `a_broken_image_shows_name_position_and_file_size_only` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-14 | `the_position_follows_the_folder_list`, `a_replaced_file_is_read_again_and_a_gone_one_loses_its_position`, `a_broken_image_shows_name_position_and_file_size_only` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
 | AC-15 | manual: measurement | open |  |
 | AC-16 | manual: visual design | open |  |
 
@@ -125,3 +125,5 @@ Hints, not requirements; the ACs decide.
 - 2026-11-21 (spec-build): new public API in `blinzel-core`: `exif_info::{ExifInfo, Taken, exif_block}` and the test builders `testimg::{ExifValue, exif_block, jpeg_with_exif}`; `batch::meta::read_exif` now uses `exif_block` (a TIFF source still carries no block over). New `Cmd::ToggleInfo` (menu id 45), `MenuState::info`, `Settings::info`.
 - 2026-11-21 (spec-build): an image that failed to open shows name, position and file size only, even when the reader got a format from its first bytes (edge case "Error image").
 - 2026-11-21 (spec-build): the App-level tests were written before `Cmd::ToggleInfo`, the setting and the reader existed (red: the crate did not compile); the core tests ran red against stubs that returned no facts.
+- 2026-11-21 (spec-build, round 2 after spec-check): a file bigger than 64 MB is read only up to 64 MB for its facts (`a_big_file_is_read_only_at_its_start`). Because the reader has only whole-file reads and contiguous byte offsets, and every format whose EXIF block sits after the pixel data is rare at that size (camera raw keeps its IFDs at the start); the edge case "2 GB TIFF" says so now instead of promising facts from the end of the file.
+- 2026-11-21 (spec-build, round 2): a size that rounds to 1000.0 in a unit moves to the next unit ("1.0 MB", not "1000.0 KB").

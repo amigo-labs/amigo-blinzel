@@ -20,6 +20,14 @@ use crate::backend::{Services, Wake};
 /// The worker thread's name.
 pub const THREAD: &str = "blinzel-info";
 
+/// How much of a file is read for its facts: a bigger file is read only
+/// this far, and a fact that lies beyond is left out (pixel data never
+/// needs reading for them).
+#[cfg(not(test))]
+const HEAD: u64 = 64 << 20;
+#[cfg(test)]
+pub(crate) const HEAD: u64 = 1 << 20;
+
 /// Which file the facts are for. Size and write time are part of it, so a
 /// replaced file is read again.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,8 +149,21 @@ impl Reader {
 /// Reads the facts of `target`'s file without decoding its pixels; a file
 /// that cannot be read gives none, a broken one what its bytes tell.
 fn read<S: Services>(services: &S, target: &Target) -> Facts {
-    let Ok(data) = services.read_file(&target.path) else {
-        return Facts::default();
+    let data: Vec<u8> = if target.size <= HEAD {
+        match services.read_file(&target.path) {
+            Ok(d) => d.to_vec(),
+            Err(_) => return Facts::default(),
+        }
+    } else {
+        // A big file: its start only, where the headers and (in the
+        // formats that carry one there) the EXIF block are.
+        use std::io::Read;
+        let mut d = Vec::new();
+        let read = std::fs::File::open(&target.path).and_then(|f| f.take(HEAD).read_to_end(&mut d));
+        if read.is_err() {
+            return Facts::default();
+        }
+        d
     };
     blinzel_core::decode::guard(|| {
         let probe = services.probe(&data).ok();
@@ -280,6 +301,12 @@ fn file_size(n: u64, sep: &str) -> String {
         _ => (1e9, "GB"),
     };
     let tenths = (n as f64 / div * 10.0).round() as u64;
+    // 999 950 bytes round up to 1.0 MB, not 1000.0 KB.
+    let (tenths, unit) = match (tenths, unit) {
+        (10_000.., "KB") => (10, "MB"),
+        (10_000.., "MB") => (10, "GB"),
+        t => t,
+    };
     format!("{}{sep}{} {unit}", tenths / 10, tenths % 10)
 }
 
@@ -359,6 +386,9 @@ mod tests {
         assert_eq!(file_size(1_000, "."), "1.0 KB");
         assert_eq!(file_size(8_400_000, ","), "8,4 MB");
         assert_eq!(file_size(2_000_000_000, "."), "2.0 GB");
+        assert_eq!(file_size(999_950, "."), "1.0 MB");
+        assert_eq!(file_size(999_949, "."), "999.9 KB");
+        assert_eq!(file_size(999_960_000, "."), "1.0 GB");
     }
 
     #[test]
