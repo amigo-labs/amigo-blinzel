@@ -32,8 +32,11 @@ pub(crate) const HEAD: u64 = 1 << 20;
 /// replaced file is read again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
+    /// The file.
     pub path: PathBuf,
+    /// Its size in bytes, from the folder list.
     pub size: u64,
+    /// Its last write time, from the folder list.
     pub mtime: u64,
 }
 
@@ -42,7 +45,9 @@ pub struct Target {
 pub struct Facts {
     /// Full pixel size after the EXIF orientation, where the header tells.
     pub size: Option<(u32, u32)>,
+    /// The container, where its bytes tell.
     pub format: Option<Format>,
+    /// What its EXIF block says.
     pub exif: ExifInfo,
 }
 
@@ -179,9 +184,11 @@ fn read<S: Services>(services: &S, target: &Target) -> Facts {
 
 /// What the overlay shows of one image.
 pub struct Shown<'a> {
+    /// The file name.
     pub name: &'a str,
     /// Index (from 0) and count in the folder list.
     pub position: Option<(usize, usize)>,
+    /// The file size in bytes.
     pub file_size: Option<u64>,
     /// `None` until read, and for an image that failed to open.
     pub facts: Option<&'a Facts>,

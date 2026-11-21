@@ -22,10 +22,15 @@ const LENS_MODEL: u16 = 0xA434;
 /// A capture time to the minute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Taken {
+    /// 1900 … 2200.
     pub year: u16,
+    /// 1 … 12.
     pub month: u8,
+    /// 1 … 31.
     pub day: u8,
+    /// 0 … 23.
     pub hour: u8,
+    /// 0 … 59.
     pub minute: u8,
 }
 
@@ -33,14 +38,19 @@ pub struct Taken {
 /// missing, unreadable or out of range.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExifInfo {
+    /// The camera's maker (Make).
     pub make: Option<String>,
+    /// The camera (Model).
     pub model: Option<String>,
+    /// The lens (LensModel).
     pub lens: Option<String>,
     /// DateTimeOriginal, or else DateTime.
     pub taken: Option<Taken>,
     /// Exposure time in seconds as numerator and denominator.
     pub exposure: Option<(u32, u32)>,
+    /// The aperture as an f-number (2.8 for f/2.8).
     pub f_number: Option<f64>,
+    /// The ISO speed.
     pub iso: Option<u32>,
     /// The real focal length in millimetres (not the 35 mm equivalent).
     pub focal_mm: Option<f64>,

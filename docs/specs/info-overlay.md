@@ -81,7 +81,7 @@ Hints, not requirements; the ACs decide.
 | 2 GB TIFF | Only the file's first 64 MB are read for the facts, never all of it; a fact that lies beyond (IFDs written after the pixel data) is left out |
 | Animated GIF | The facts of the file; the frame number is not shown, because it changes many times a second and says nothing about the file |
 | Error image ("Could not open …") | Name, position and file size; size, format and EXIF are left out because nothing was decoded |
-| Window too small for the box | Lines are shortened (AC-10); the box is cut at the window edge and never drawn over ☰, the window buttons or the filmstrip |
+| Window too small for the box | Lines are shortened (AC-10); lines that do not fit between the window buttons and the bottom are left out from the end, so the box is never drawn over ☰, the window buttons or the filmstrip |
 
 ## Assumptions
 
