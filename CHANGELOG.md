@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.9.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.8.0...v1.9.0) (2026-11-21)
+
+
+### Features
+
+* **app:** put the marked file names on the clipboard in every shell (picks AC-14) ([16ac6cd](https://github.com/amigo-labs/amigo-blinzel/commit/16ac6cdbced78de41e1f9b821df8c929f7d802a5))
+* **core:** an info setting for the info overlay (AC-06, AC-11) ([21b7393](https://github.com/amigo-labs/amigo-blinzel/commit/21b73939a0b7a172dbe2508ce10b34fe567b49ba))
+* **core:** copy files into a folder without replacing any (picks AC-17, AC-18) ([786b21c](https://github.com/amigo-labs/amigo-blinzel/commit/786b21c39f3eed90782e34c841b5ef5ecaa8de1c))
+* **core:** keep a folder's marks in the config folder (picks AC-08, AC-09, AC-12) ([7afee95](https://github.com/amigo-labs/amigo-blinzel/commit/7afee954fac0d93430a85725817ae407ac691cc7))
+* **core:** read date, camera, lens and exposure from EXIF (AC-04, AC-06, AC-13) ([a1a7f2d](https://github.com/amigo-labs/amigo-blinzel/commit/a1a7f2dd3b1372c43e4181ab53047fe3fd099a4b))
+* info overlay and picking images for the photographer ([9832903](https://github.com/amigo-labs/amigo-blinzel/commit/98329032e09405ccefbc9006ce2eb7bc95054da5))
+* **ui:** an info overlay with the file name and the picture's facts on I (AC-01 … AC-14) ([50c21c8](https://github.com/amigo-labs/amigo-blinzel/commit/50c21c80963a4880fbc41564ada7df273448762c))
+* **ui:** hand the marked images over and browse only them (picks AC-14 … AC-25) ([9b19dc7](https://github.com/amigo-labs/amigo-blinzel/commit/9b19dc7ebf4f083c32ec3116647062c54bb4fbc7))
+* **ui:** mark images with F and keep the marks per folder (picks AC-01 … AC-13, AC-20) ([591be43](https://github.com/amigo-labs/amigo-blinzel/commit/591be43f9ede60ae9fdc25a4e35f28f90011c9d3))
+
+
+### Bug Fixes
+
+* **core:** claim a copy's name before renaming onto it (picks AC-17) ([1c3088a](https://github.com/amigo-labs/amigo-blinzel/commit/1c3088aac4342e183f8df7117d609dcca72ddc73))
+* **core:** copies get their name only when whole (picks AC-17) ([f715c1a](https://github.com/amigo-labs/amigo-blinzel/commit/f715c1a0c68f0819c2c13d6c65470c2ceed8c34f))
+* **macos:** name the new menu state fields in the menu test ([ad0272e](https://github.com/amigo-labs/amigo-blinzel/commit/ad0272ee1c55374e40ff9dcac44506fce1acc0f6))
+* **ui:** marks wait for their read and F marks again under "Only marked" (picks AC-01, AC-02, AC-10, AC-18) ([97f96a4](https://github.com/amigo-labs/amigo-blinzel/commit/97f96a45c50ef713ad4a465609923f60a8421367))
+* **ui:** read only a big file's start for the info overlay (info-overlay AC-09, AC-14) ([4e418e1](https://github.com/amigo-labs/amigo-blinzel/commit/4e418e1c65b5307645b788447c31831b348a9916))
+
 ## [1.8.0](https://github.com/amigo-labs/amigo-blinzel/compare/v1.7.1...v1.8.0) (2026-11-15)
 
 
