@@ -78,3 +78,86 @@ pub fn rgba(w: u32, h: u32) -> Vec<u8> {
     }
     out
 }
+
+/// A value of an EXIF entry for [`exif_block`].
+#[derive(Clone, Debug)]
+pub enum ExifValue {
+    /// ASCII (type 2): the bytes as given, NUL-terminated by the builder.
+    Ascii(Vec<u8>),
+    /// SHORT (type 3).
+    Short(u16),
+    /// RATIONAL (type 5): numerator and denominator.
+    Rational(u32, u32),
+}
+
+/// A little-endian EXIF block (TIFF) with `ifd0` entries and, if any,
+/// `exif` entries in an Exif IFD, for tests of metadata readers.
+pub fn exif_block(ifd0: &[(u16, ExifValue)], exif: &[(u16, ExifValue)]) -> Vec<u8> {
+    let mut ifd0: Vec<(u16, ExifValue)> = ifd0.to_vec();
+    // The Exif IFD pointer is patched in once its offset is known.
+    let with_exif = !exif.is_empty();
+    if with_exif {
+        ifd0.push((0x8769, ExifValue::Short(0)));
+    }
+    ifd0.sort_by_key(|e| e.0);
+    let ifd_len = |n: usize| 2 + 12 * n + 4;
+    let ifd0_at = 8usize;
+    let exif_at = ifd0_at + ifd_len(ifd0.len());
+    let data_at = exif_at + if with_exif { ifd_len(exif.len()) } else { 0 };
+    let mut out = b"II*\0".to_vec();
+    out.extend((ifd0_at as u32).to_le_bytes());
+    let mut data: Vec<u8> = Vec::new();
+    let mut write_ifd = |out: &mut Vec<u8>, entries: &[(u16, ExifValue)]| {
+        out.extend((entries.len() as u16).to_le_bytes());
+        for (tag, v) in entries {
+            out.extend(tag.to_le_bytes());
+            let (typ, count, bytes): (u16, usize, Vec<u8>) = match v {
+                ExifValue::Ascii(s) => {
+                    let mut b = s.clone();
+                    b.push(0);
+                    (2, b.len(), b)
+                }
+                ExifValue::Short(_) if *tag == 0x8769 => {
+                    (4, 1, (exif_at as u32).to_le_bytes().to_vec())
+                }
+                ExifValue::Short(n) => (3, 1, n.to_le_bytes().to_vec()),
+                ExifValue::Rational(n, d) => {
+                    let mut b = n.to_le_bytes().to_vec();
+                    b.extend(d.to_le_bytes());
+                    (5, 1, b)
+                }
+            };
+            out.extend(typ.to_le_bytes());
+            out.extend((count as u32).to_le_bytes());
+            if bytes.len() <= 4 {
+                let mut v = bytes.clone();
+                v.resize(4, 0);
+                out.extend(v);
+            } else {
+                out.extend(((data_at + data.len()) as u32).to_le_bytes());
+                data.extend(&bytes);
+            }
+        }
+        out.extend(0u32.to_le_bytes());
+    };
+    write_ifd(&mut out, &ifd0);
+    if with_exif {
+        let mut exif = exif.to_vec();
+        exif.sort_by_key(|e| e.0);
+        write_ifd(&mut out, &exif);
+    }
+    out.extend(data);
+    out
+}
+
+/// `jpeg` with `tiff` as its EXIF segment (APP1) right after SOI.
+pub fn jpeg_with_exif(jpeg: &[u8], tiff: &[u8]) -> Vec<u8> {
+    let len = (2 + 6 + tiff.len()) as u16;
+    let mut out = jpeg[..2].to_vec();
+    out.extend([0xFF, 0xE1]);
+    out.extend(len.to_be_bytes());
+    out.extend(b"Exif\0\0");
+    out.extend(tiff);
+    out.extend(&jpeg[2..]);
+    out
+}
