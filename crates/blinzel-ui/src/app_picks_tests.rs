@@ -415,7 +415,7 @@ fn copying_reports_failures_and_refuses_the_images_own_folder() {
             .is_some_and(|n| n.contains("failed"))
     });
     let n = h.app.notice.clone().unwrap();
-    assert!(n.starts_with("1 of 2 copied; 1 failed: "), "{n}");
+    assert!(n.starts_with("1 of 2 files copied; 1 failed: "), "{n}");
     assert!(out.join("a.png").exists());
 }
 
@@ -550,5 +550,126 @@ fn the_marks_entries_sit_with_filmstrip_and_grid() {
         Cmd::ClearMarks,
     ] {
         assert!(cmds.contains(&c), "{c:?}");
+    }
+}
+
+// ------------------------------------------------- round 2 (spec-check)
+
+/// AC-10: Ctrl+Shift+C and Ctrl+B wait for the marks; the other entries
+/// are disabled until they are read.
+#[test]
+fn copy_names_and_resize_wait_for_the_marks_to_be_read() {
+    let mut h = Harness::new();
+    h.write_png("a.png", 64, 48);
+    h.write_png("b.png", 64, 48);
+    picks::apply(
+        &store(&h),
+        &h.images,
+        &picks::Change::Mark(vec!["b.png".into()]),
+    )
+    .unwrap();
+    let held = crate::marks::HOLD.lock().unwrap();
+    let _ = h.app.open(h.images.join("a.png"));
+    h.pump_holding_marks();
+    for c in [
+        Cmd::CopyMarkedNames,
+        Cmd::CopyMarkedFiles,
+        Cmd::ToggleOnlyMarked,
+        Cmd::ClearMarks,
+    ] {
+        assert!(!h.menu_enabled(c), "{c:?} before the marks are read");
+    }
+    let eol = if cfg!(windows) { "\r\n" } else { "\n" };
+    let a = h.app.key(Letter('C'), true, true).unwrap();
+    assert_eq!(a, [Action::CopyText(format!("b.png{eol}"))]);
+    let _ = h.app.key(Letter('B'), true, false);
+    assert_eq!(h.batch_files(), Some(vec![h.images.join("b.png")]));
+    drop(held);
+    let _ = h.app.key(Escape, false, false);
+    h.pump();
+    assert_eq!(marked(&h), ["b.png"], "the late read changes nothing");
+}
+
+/// AC-01 with AC-23: F marks again the image just unmarked under "Only
+/// marked"; an image that is not in the folder cannot be marked.
+#[test]
+fn f_marks_again_under_only_marked_and_not_outside_a_folder() {
+    let mut h = folder(&["a.png", "b.png"]);
+    mark_all(&mut h, &["a.png", "b.png"]);
+    h.command(Cmd::ToggleOnlyMarked);
+    h.pump();
+    let shown = h.current_name().unwrap();
+    h.key(Letter('F'));
+    assert!(!marked(&h).contains(&shown));
+    h.key(Letter('F'));
+    assert!(marked(&h).contains(&shown), "marked again");
+    assert_eq!(h.names().len(), 2);
+    h.command(Cmd::ToggleOnlyMarked);
+    // Gone from the folder: no longer markable.
+    std::fs::remove_file(h.images.join(&shown)).unwrap();
+    h.app.on_dir_changed();
+    h.wait_for(|h| h.names().len() == 1);
+    h.key(Letter('F'));
+    assert_eq!(
+        h.app.notice.as_deref(),
+        Some("Only images in a folder can be marked")
+    );
+}
+
+/// AC-02: Ctrl+A under "Only marked" marks the whole folder.
+#[test]
+fn ctrl_a_under_only_marked_marks_every_image_of_the_folder() {
+    let mut h = folder(&["a.png", "b.png", "c.png"]);
+    mark_all(&mut h, &["b.png"]);
+    h.command(Cmd::ToggleOnlyMarked);
+    h.pump();
+    h.key(Letter('G'));
+    h.ctrl(Letter('A'));
+    assert_eq!(marked(&h), ["a.png", "b.png", "c.png"]);
+    assert_eq!(h.names().len(), 3);
+}
+
+/// AC-18: the copy takes the marks as they were when the folder was
+/// picked, and quitting during a copy leaves only whole files.
+#[test]
+fn a_copy_keeps_its_marks_and_quitting_leaves_only_whole_files() {
+    let mut h = folder(&["a.png", "b.png"]);
+    mark_all(&mut h, &["a.png", "b.png"]);
+    let out = h.images.parent().unwrap().join("out");
+    std::fs::create_dir(&out).unwrap();
+    h.command(Cmd::CopyMarkedFiles);
+    h.app.batch_folder_picked(out.clone());
+    h.key(Letter('F'));
+    h.wait_for(|h| {
+        h.app
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("copied to"))
+    });
+    assert!(out.join("a.png").exists() && out.join("b.png").exists());
+
+    // Big files, and the viewer exits at once.
+    for n in ["c.raw.png", "d.raw.png", "e.raw.png"] {
+        std::fs::write(h.images.join(n), vec![9u8; 6 << 20]).unwrap();
+    }
+    h.app.on_dir_changed();
+    h.wait_for(|h| h.names().len() == 5);
+    h.key(Letter('G'));
+    h.ctrl(Letter('A'));
+    h.pump();
+    let big = h.images.parent().unwrap().join("big");
+    std::fs::create_dir(&big).unwrap();
+    h.command(Cmd::CopyMarkedFiles);
+    h.app.batch_folder_picked(big.clone());
+    h.restart();
+    for e in std::fs::read_dir(&big).unwrap() {
+        let p = e.unwrap().path();
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(!name.starts_with('.'), "no temporary file: {name}");
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            std::fs::read(h.images.join(&name)).unwrap(),
+            "{name} is whole"
+        );
     }
 }

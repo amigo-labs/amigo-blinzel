@@ -315,6 +315,7 @@ pub struct App<B: Backend> {
 struct CopyRun {
     rx: Receiver<CopyMsg>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
     total: usize,
     folder: String,
 }
@@ -324,6 +325,10 @@ impl Drop for CopyRun {
     fn drop(&mut self) {
         self.cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        // It stops within a chunk and removes its temporary file.
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -1914,12 +1919,19 @@ impl<B: Backend> App<B> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         let state = self.browse.grid.as_mut()?;
         if ctrl && key == Letter('A') {
-            let names = self.list.entries().iter().map(|e| e.name.clone()).collect();
+            // Every image of the folder, also under "Only marked".
+            let names = self
+                .folder_list()
+                .entries()
+                .iter()
+                .map(|e| e.name.clone())
+                .collect();
             self.marks.change(
                 blinzel_core::picks::Change::Mark(names),
                 &mut self.browse.marks,
                 &self.services,
             );
+            self.refilter();
             self.invalidate();
             return Some(vec![]);
         }
@@ -2197,6 +2209,9 @@ impl<B: Backend> App<B> {
                 vec![]
             }
             Cmd::CopyMarkedNames => {
+                // Waits for the marks (AC-10).
+                self.marks.load_now(&mut self.browse.marks, &self.services);
+                self.refilter();
                 let names = self.marked_names();
                 if names.is_empty() {
                     self.own_notice(tr(Msg::MarksNone).into());
@@ -2344,6 +2359,9 @@ impl<B: Backend> App<B> {
     /// marked in the grid (in folder order, those still there), else an
     /// empty list (files are dropped onto it).
     fn open_batch(&mut self) {
+        // Waits for the marks (`docs/specs/picks.md` AC-10).
+        self.marks.load_now(&mut self.browse.marks, &self.services);
+        self.refilter();
         // The folder's marks, in the grid or not (`docs/specs/picks.md`
         // AC-20).
         let marked: Vec<PathBuf> = self
@@ -2721,15 +2739,10 @@ impl<B: Backend> App<B> {
             .file_name()
             .map_or_else(|| folder.to_string_lossy(), |n| n.to_string_lossy())
             .into_owned();
-        self.copy = Some(CopyRun {
-            rx,
-            cancel: cancel.clone(),
-            total: files.len(),
-            folder: name,
-        });
-        self.show_notice(trf(Msg::MarksCopying, &[("i", &0), ("n", &files.len())]));
+        let total = files.len();
         let services = self.services.clone();
-        let _ = std::thread::Builder::new()
+        let flag = cancel.clone();
+        let thread = std::thread::Builder::new()
             .name("blinzel-copy".into())
             .spawn(move || {
                 services.tune_thread(false);
@@ -2737,10 +2750,19 @@ impl<B: Backend> App<B> {
                     let _ = tx.send(CopyMsg::Progress(i));
                     services.wake(Wake::Thumbs);
                 };
-                let done = blinzel_core::picks::copy_files(&files, &folder, progress, &cancel);
+                let done = blinzel_core::picks::copy_files(&files, &folder, progress, &flag);
                 let _ = tx.send(CopyMsg::Done(done));
                 services.wake(Wake::Thumbs);
-            });
+            })
+            .ok();
+        self.copy = Some(CopyRun {
+            rx,
+            cancel,
+            thread,
+            total,
+            folder: name,
+        });
+        self.show_notice(trf(Msg::MarksCopying, &[("i", &0), ("n", &total)]));
     }
 
     /// Progress and the end of a copy ([`Wake::Thumbs`]).
@@ -2800,11 +2822,12 @@ impl<B: Backend> App<B> {
         let Some(cur) = &self.current else {
             return vec![];
         };
-        let Some(e) = cur.index.and_then(|i| self.list.get(i)) else {
-            self.show_notice(tr(Msg::MarksOnlyFolder).into());
+        // In the folder, also when "Only marked" hides it after an unmark.
+        let name = cur.entry.name.clone();
+        if !self.folder_list().entries().iter().any(|e| e.name == name) {
+            self.own_notice(tr(Msg::MarksOnlyFolder).into());
             return vec![];
-        };
-        let name = e.name.clone();
+        }
         self.marks
             .toggle(name, &mut self.browse.marks, &self.services);
         self.refilter();

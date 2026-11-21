@@ -50,6 +50,8 @@ enum Pending {
     Toggle(String),
 }
 
+/// Which folder the marks in `Browse::marks` belong to, whether they are
+/// read yet, and storing changes to them.
 #[derive(Default)]
 pub struct Marks {
     /// The per-user config folder the files go to; `None`: kept in memory.
@@ -65,6 +67,8 @@ pub struct Marks {
 }
 
 impl Marks {
+    /// Marks kept in `store` (`<config>/picks`); `None` keeps them in
+    /// memory only.
     pub fn new(store: Option<PathBuf>) -> Marks {
         Marks {
             store,
@@ -80,6 +84,28 @@ impl Marks {
     /// The folder's marks are read (or there is nothing to read).
     pub fn loaded(&self) -> bool {
         self.loaded
+    }
+
+    /// Reads the folder's marks right now if they are not read yet, for a
+    /// command that needs them (Ctrl+B, Ctrl+Shift+C: `docs/specs/picks.md`
+    /// AC-10); the changes made meanwhile apply after.
+    pub fn load_now<S: Services>(&mut self, names: &mut BTreeSet<String>, services: &Arc<S>) {
+        let (Some(store), Some(folder)) = (&self.store, &self.folder) else {
+            return;
+        };
+        if self.loaded {
+            return;
+        }
+        *names = picks::load(store, folder).unwrap_or_default();
+        self.loaded = true;
+        for p in std::mem::take(&mut self.queued) {
+            let c = match p {
+                Pending::Change(c) => c,
+                Pending::Toggle(n) => toggled(n, names),
+            };
+            apply(&c, names);
+            self.store_change(c, services);
+        }
     }
 
     /// Reading or storing is under way.
@@ -162,6 +188,8 @@ impl Marks {
         };
         for d in done {
             match d {
+                // Read already (`load_now`): this answer is older.
+                Done::Loaded(_, _) if self.loaded => {}
                 Done::Loaded(folder, r) if Some(&folder) == self.folder.as_ref() => {
                     *names = r.unwrap_or_default();
                     self.loaded = true;

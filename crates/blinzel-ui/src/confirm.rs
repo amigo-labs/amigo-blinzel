@@ -12,19 +12,26 @@ use crate::widgets::{self, Painter};
 pub enum Answer {
     /// Nothing yet: the question stays.
     Open,
+    /// The first button, or Enter.
     Yes,
+    /// The second button, or Esc.
     No,
 }
 
+/// The question and its two buttons.
 pub struct Confirm {
+    /// The question.
     pub text: String,
+    /// The first button's label (the one that acts).
     pub yes: String,
+    /// The second button's label (the one that cancels).
     pub no: String,
     /// The buttons where they were drawn last.
     rects: Option<(Rect, Rect)>,
 }
 
 impl Confirm {
+    /// `text` with the buttons `yes` and `no`.
     pub fn new(text: String, yes: String, no: String) -> Confirm {
         Confirm {
             text,
@@ -34,6 +41,7 @@ impl Confirm {
         }
     }
 
+    /// What `key` answers: Enter yes, Esc no, everything else nothing.
     pub fn key(&self, key: Key) -> Answer {
         match key {
             Key::Enter => Answer::Yes,
@@ -42,6 +50,7 @@ impl Confirm {
         }
     }
 
+    /// What a click at `p` answers (the buttons as drawn last).
     pub fn mouse_down(&self, p: (f64, f64)) -> Answer {
         match self.rects {
             Some((yes, _)) if yes.contains(p) => Answer::Yes,
@@ -55,6 +64,7 @@ impl Confirm {
         self.rects.map(|r| r.0)
     }
 
+    /// Dims the viewer and draws the panel in the middle of `client`.
     pub fn draw(&mut self, canvas: &mut impl Canvas, client: (f64, f64), scale: f64) {
         let mut p = Painter { canvas, scale };
         p.fill(Rect::new(0.0, 0.0, client.0, client.1), 0.0, widgets::SCRIM);
