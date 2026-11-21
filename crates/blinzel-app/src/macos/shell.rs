@@ -1952,6 +1952,8 @@ mod tests {
             filmstrip: false,
             grid: false,
             marked: None,
+            only_marked: false,
+            copying: false,
             screenshot_hotkey: false,
             screenshot_save: false,
             screenshot_open: false,
