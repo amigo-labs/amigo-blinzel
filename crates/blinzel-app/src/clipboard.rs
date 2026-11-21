@@ -11,7 +11,7 @@ use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
-use windows::Win32::System::Ole::CF_DIBV5;
+use windows::Win32::System::Ole::{CF_DIBV5, CF_UNICODETEXT};
 use windows::Win32::UI::WindowsAndMessaging::{
     WM_DESTROYCLIPBOARD, WM_RENDERALLFORMATS, WM_RENDERFORMAT,
 };
@@ -136,6 +136,30 @@ pub fn put_shot(hwnd: HWND, bgra: &[u8], w: u32, h: u32, png: &[u8]) -> bool {
             && shot_formats(bgra, w, h, png)
                 .iter()
                 .all(|(format, bytes)| set(*format, bytes));
+        let _ = CloseClipboard();
+        ok
+    }
+}
+
+/// Puts `text` on the clipboard as Unicode text (the marked file names,
+/// `docs/specs/picks.md` AC-14). Retries briefly like [`put_shot`].
+pub fn put_text(hwnd: HWND, text: &str) -> bool {
+    let opened = (0..10).any(|i| {
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        unsafe { OpenClipboard(Some(hwnd)).is_ok() }
+    });
+    if !opened {
+        return false;
+    }
+    let bytes: Vec<u8> = text
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    unsafe {
+        let ok = EmptyClipboard().is_ok() && set(CF_UNICODETEXT.0 as u32, &bytes);
         let _ = CloseClipboard();
         ok
     }

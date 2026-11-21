@@ -32,6 +32,16 @@ pub fn put_image(
     .map_err(|e| e.to_string())
 }
 
+/// Puts `text` on the clipboard (the marked file names,
+/// `docs/specs/picks.md` AC-14).
+pub fn put_text(clipboard: &mut Option<arboard::Clipboard>, text: String) -> Result<(), String> {
+    let cb = match clipboard {
+        Some(c) => c,
+        None => clipboard.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
+    };
+    cb.set_text(text).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
