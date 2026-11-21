@@ -285,6 +285,10 @@ pub struct App<B: Backend> {
     pub dialog: Option<BatchDialog>,
     /// Its settings from the last time it was open.
     last_dialog: Option<BatchDialog>,
+    /// The facts of the file the info overlay shows.
+    info: crate::info::Reader,
+    /// Where the info overlay was drawn last (`None`: not drawn).
+    pub(crate) info_rect: Option<Rect>,
 }
 
 impl<B: Backend> App<B> {
@@ -352,6 +356,8 @@ impl<B: Backend> App<B> {
             popup: None,
             dialog: None,
             last_dialog: None,
+            info: crate::info::Reader::default(),
+            info_rect: None,
         }
     }
 
@@ -1198,6 +1204,7 @@ impl<B: Backend> App<B> {
                 self.settings.background,
             );
         }
+        self.draw_info();
         self.draw_notice();
         if !self.fullscreen {
             let chrome = self
@@ -1566,6 +1573,10 @@ impl<B: Backend> App<B> {
         if self.browse.on_thumbs(&mut self.canvas) {
             self.invalidate();
         }
+        // The info overlay's facts wake through the same message.
+        if self.info.poll() {
+            self.invalidate();
+        }
     }
 
     fn update_browse_hover(&mut self, p: (f64, f64)) {
@@ -1763,6 +1774,7 @@ impl<B: Backend> App<B> {
         match key {
             Letter('G') if !ctrl => return Some(self.command(Cmd::ToggleGrid)),
             Letter('T') if !ctrl => return Some(self.command(Cmd::ToggleFilmstrip)),
+            Letter('I') if !ctrl => return Some(self.command(Cmd::ToggleInfo)),
             Letter('E') if !ctrl => return Some(self.command(Cmd::EditWith)),
             _ => {}
         }
@@ -1888,6 +1900,7 @@ impl<B: Backend> App<B> {
             auto_update: self.settings.auto_update,
             single_instance: self.settings.single_instance,
             color_management: self.settings.color_management,
+            info: self.settings.info,
             filmstrip: self.settings.filmstrip,
             grid: self.browse.grid.is_some(),
             screenshot_hotkey: self.settings.screenshot_hotkey,
@@ -2082,6 +2095,12 @@ impl<B: Backend> App<B> {
                     self.browse
                         .open_grid(self.list.len(), current, client, scale);
                 }
+                self.invalidate();
+                vec![]
+            }
+            Cmd::ToggleInfo => {
+                self.settings.info = !self.settings.info;
+                settings_store::save(&self.settings);
                 self.invalidate();
                 vec![]
             }
@@ -2407,6 +2426,116 @@ impl<B: Backend> App<B> {
         None
     }
 
+    /// The image the info overlay is about: the grid's selected tile or
+    /// the image shown, with its place in the folder list.
+    fn info_subject(&self) -> Option<(PathBuf, Entry, Option<usize>, Option<u64>)> {
+        if let Some(g) = &self.browse.grid {
+            let e = self.list.get(g.selected)?;
+            return Some((
+                self.list.dir().join(&e.name),
+                e.clone(),
+                Some(g.selected),
+                None,
+            ));
+        }
+        let c = self.current.as_ref()?;
+        Some((c.path.clone(), c.entry.clone(), c.index, Some(c.cache_id)))
+    }
+
+    /// The info overlay (`docs/specs/info-overlay.md`): a box at the bottom
+    /// left, above the filmstrip and below the window buttons.
+    fn draw_info(&mut self) {
+        self.info_rect = None;
+        if !self.settings.info {
+            return;
+        }
+        let Some((path, entry, index, cache_id)) = self.info_subject() else {
+            return;
+        };
+        let target = crate::info::Target {
+            path,
+            size: entry.size,
+            mtime: entry.mtime,
+        };
+        let failed = cache_id.is_some_and(|id| self.failed.contains_key(&id));
+        let facts = self
+            .info
+            .facts(&target, &self.services)
+            .filter(|_| !failed)
+            .cloned();
+        let shown = crate::info::Shown {
+            name: &entry.name,
+            position: index.map(|i| (i, self.list.len())),
+            file_size: Some(entry.size),
+            facts: facts.as_ref(),
+        };
+        let lines = crate::info::lines(&shown);
+        let s = self.scale();
+        let (cw, ch) = (self.client.0 as f64, self.client.1 as f64);
+        let px = (13.0 * s) as f32;
+        let (pad, gap, margin) = (8.0 * s, 2.0 * s, 12.0 * s);
+        let max_w = (cw * 0.4).max(240.0 * s);
+        let canvas = &mut self.canvas;
+        let mut width = |t: &str| {
+            canvas
+                .text_size(t, px, f32::MAX)
+                .map_or(0.0, |(w, _)| w as f64)
+        };
+        let lines: Vec<String> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| crate::info::shorten(l, max_w, i == 0, &mut width))
+            .collect();
+        let line_h = self
+            .canvas
+            .text_size("Ag", px, f32::MAX)
+            .map_or(16.0, |(_, h)| h as f64);
+        let bottom = ch
+            - margin
+            - if self.filmstrip_shown() {
+                strip_height(s)
+            } else {
+                0.0
+            };
+        let top = self.chrome().caption_height() + margin;
+        // Lines that do not fit between the buttons and the bottom go.
+        let room = ((bottom - top - 2.0 * pad + gap) / (line_h + gap))
+            .floor()
+            .max(0.0) as usize;
+        let lines = &lines[..lines.len().min(room)];
+        if lines.is_empty() {
+            return;
+        }
+        let text_w = lines
+            .iter()
+            .map(|l| {
+                self.canvas
+                    .text_size(l, px, f32::MAX)
+                    .map_or(0.0, |(w, _)| w as f64)
+            })
+            .fold(0.0, f64::max);
+        let h = lines.len() as f64 * (line_h + gap) - gap + 2.0 * pad;
+        let w = (text_w + 2.0 * pad).min(cw - 2.0 * margin);
+        let r = Rect::new(margin, (bottom - h).round(), w.round(), h.round());
+        self.canvas.draw_shapes(&[Shape::Fill {
+            rect: r,
+            radius: (crate::theme::RADIUS_MD as f64 * s) as f32,
+            color: Rgba(palette::PANEL.0, palette::PANEL.1, palette::PANEL.2, 0.86),
+        }]);
+        for (i, l) in lines.iter().enumerate() {
+            let y = r.y + pad + i as f64 * (line_h + gap);
+            let color = if i == 0 { palette::FG } else { palette::DIM };
+            self.canvas.draw_text(
+                l,
+                px,
+                (w - 2.0 * pad) as f32,
+                ((r.x + pad) as f32, y as f32),
+                color,
+            );
+        }
+        self.info_rect = Some(r);
+    }
+
     fn draw_notice(&mut self) {
         let Some(text) = self.notice.clone() else {
             return;
@@ -2641,6 +2770,10 @@ mod language_tests;
 #[cfg(test)]
 #[path = "app_screenshot_tests.rs"]
 mod screenshot_tests;
+
+#[cfg(test)]
+#[path = "app_info_tests.rs"]
+mod info_tests;
 
 /// The command a navigation key gives in the single-image view;
 /// right-to-left languages page leftwards.

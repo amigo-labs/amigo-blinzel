@@ -100,23 +100,28 @@ Hints, not requirements; the ACs decide.
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 |      | open   |        |
-| AC-02 |      | open   |        |
-| AC-03 |      | open   |        |
-| AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
-| AC-06 |      | open   |        |
-| AC-07 |      | open   |        |
-| AC-08 |      | open   |        |
-| AC-09 |      | open   |        |
-| AC-10 |      | open   |        |
-| AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
-| AC-13 |      | open   |        |
-| AC-14 |      | open   |        |
-| AC-15 |      | open   |        |
-| AC-16 |      | open   |        |
+| AC-01 | `i_toggles_the_overlay_the_menu_follows_and_the_choice_is_kept`, `show_info_is_in_the_view_menu_next_to_filmstrip_and_grid` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-02 | `the_overlay_shows_every_fact_in_order`, `a_portrait_shot_shows_its_size_as_displayed` (`crates/blinzel-ui/src/app_info_tests.rs`); `raw_files_show_their_extension_and_others_their_format` (`crates/blinzel-ui/src/info.rs`) | built |  |
+| AC-03 | `an_image_without_exif_shows_name_position_size_and_file_size` (`crates/blinzel-ui/src/app_info_tests.rs`); `out_of_range_values_are_left_out_and_the_rest_stays` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
+| AC-04 | `camera_drops_a_make_the_model_repeats`, `strings_lose_spaces_and_nuls_and_non_utf8_reads_as_latin1` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
+| AC-05 | `exposure_times_read_as_fractions_below_half_a_second`, `f_numbers_drop_a_zero_decimal_after_rounding` (`crates/blinzel-ui/src/info.rs`); `the_overlay_shows_every_fact_in_order` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-06 | `exif_comes_from_jpeg_png_webp_jxl_and_tiff`, `exif_comes_from_avif_and_heic`, `the_first_of_two_exif_segments_counts` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
+| AC-07 | `dates_and_numbers_follow_the_ui_language` (`crates/blinzel-ui/src/app_info_tests.rs`); `file_sizes_use_decimal_units` (`crates/blinzel-ui/src/info.rs`); `date_time_stands_in_for_a_missing_or_broken_date_taken` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
+| AC-08 | `going_on_never_shows_the_previous_images_facts_and_never_waits_for_them` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-09 | `in_the_grid_the_overlay_follows_the_selected_tile` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-10 | `the_box_sits_bottom_left_above_the_filmstrip_and_shortens_long_names`, `a_notice_is_drawn_after_the_box` (`crates/blinzel-ui/src/app_info_tests.rs`); `shorten_keeps_the_extension_in_the_middle_mode` (`crates/blinzel-ui/src/info.rs`) | built |  |
+| AC-11 | `i_toggles_the_overlay_the_menu_follows_and_the_choice_is_kept` (`crates/blinzel-ui/src/app_info_tests.rs`); `info_is_off_unless_the_file_says_true` (`crates/blinzel-core/src/settings.rs`) | built |  |
+| AC-12 | `the_first_frame_does_not_wait_for_the_facts`, `going_on_never_shows_the_previous_images_facts_and_never_waits_for_them` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-13 | `a_broken_exif_block_leaves_out_its_facts_and_the_image_shows` (`crates/blinzel-ui/src/app_info_tests.rs`); `a_broken_block_gives_no_facts_and_never_panics`, `out_of_range_values_are_left_out_and_the_rest_stays` (`crates/blinzel-core/src/exif_info.rs`) | built |  |
+| AC-14 | `the_position_follows_the_folder_list`, `a_broken_image_shows_name_position_and_file_size_only` (`crates/blinzel-ui/src/app_info_tests.rs`) | built |  |
+| AC-15 | manual: measurement | open |  |
+| AC-16 | manual: visual design | open |  |
 
 ## Decisions
 
 - 2026-11-21: Bottom left, the grid shows the selected tile, EXIF for every container plus TIFF-based RAW, formats per UI language — the user's answers in the spec dialogue. Clarification pass the same day: grid tiles read their facts from the file (they are not opened), ORF and RW2 are not TIFF for the viewer and get no EXIF facts, value ranges and number formats fixed.
+- 2026-11-21 (spec-build): the facts come from one background reader in `blinzel-ui` (`info.rs`) that reads the file of the shown image or the selected tile, latest wins, rather than from the loader. Because the grid needs it for tiles that were never opened, and one path for both keeps AC-08 simple; the second read of the shown file comes from the OS cache and only happens while the overlay is on.
+- 2026-11-21 (spec-build): the reader wakes the UI thread with the existing `Wake::Thumbs`, whose handler also polls it. Because a new `Wake` variant would change all three shells for one more poll.
+- 2026-11-21 (spec-build): new public API in `blinzel-core`: `exif_info::{ExifInfo, Taken, exif_block}` and the test builders `testimg::{ExifValue, exif_block, jpeg_with_exif}`; `batch::meta::read_exif` now uses `exif_block` (a TIFF source still carries no block over). New `Cmd::ToggleInfo` (menu id 45), `MenuState::info`, `Settings::info`.
+- 2026-11-21 (spec-build): an image that failed to open shows name, position and file size only, even when the reader got a format from its first bytes (edge case "Error image").
+- 2026-11-21 (spec-build): the App-level tests were written before `Cmd::ToggleInfo`, the setting and the reader existed (red: the crate did not compile); the core tests ran red against stubs that returned no facts.

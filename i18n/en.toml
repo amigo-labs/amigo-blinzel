@@ -18,8 +18,13 @@ view_fit_window_to_image = "Fit window to image (original size)"
 view_fit_image_to_window = "Fit image to window"
 view_actual_size = "100 % (actual pixels)"
 view_no_upscale = "Don't enlarge small images"
+view_info = "Show info"
 view_filmstrip = "Filmstrip"
 view_grid = "All images in the folder (grid)"
+# The info overlay (docs/specs/info-overlay.md): the date taken, to the
+# minute, and the decimal separator of its numbers (f/2.8, 8.4 MB).
+info_date = "{year}-{month}-{day} {hour}:{minute}"
+decimal_separator = "."
 menu_zoom = "Zoom"
 zoom_in = "Zoom in"
 zoom_out = "Zoom out"

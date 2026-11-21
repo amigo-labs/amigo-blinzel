@@ -299,6 +299,9 @@ pub(crate) struct FakeServices {
     pub target_queries: AtomicUsize,
     /// Held by a test, it keeps every colour-target answer back.
     pub target_gate: Mutex<()>,
+    /// Held by a test, it keeps the info overlay's file reads back
+    /// (`docs/specs/info-overlay.md` AC-12).
+    pub info_gate: Mutex<()>,
     /// The language the system prefers ([`Harness::set_system_language`]).
     pub system_language: Mutex<Lang>,
 }
@@ -318,6 +321,9 @@ impl Services for FakeServices {
     }
     fn read_file(&self, path: &Path) -> std::io::Result<PoolBuf> {
         let thread = std::thread::current().name().unwrap_or("").to_string();
+        if thread == crate::info::THREAD {
+            drop(self.info_gate.lock().unwrap());
+        }
         self.reads
             .lock()
             .unwrap()
@@ -768,6 +774,7 @@ impl Harness {
             targets: Mutex::new(HashMap::new()),
             target_queries: AtomicUsize::new(0),
             target_gate: Mutex::new(()),
+            info_gate: Mutex::new(()),
             system_language: Mutex::new(blinzel_i18n::FALLBACK),
         });
         let device = Arc::new(FakeDevice {
@@ -1326,6 +1333,20 @@ impl Harness {
     /// What the UI asked of its window.
     pub fn host(&self) -> Ref<'_, HostLog> {
         self.app.host.log.borrow()
+    }
+
+    /// The lines of the info overlay in the last frame drawn.
+    pub fn info_lines(&self) -> Vec<String> {
+        let Some(r) = self.app.info_rect else {
+            return Vec::new();
+        };
+        let f = &self.app.canvas.frame;
+        f.texts
+            .iter()
+            .zip(&f.text_positions)
+            .filter(|(_, p)| r.contains((p.0 as f64, p.1 as f64)))
+            .map(|(t, _)| t.clone())
+            .collect()
     }
 
     /// The last frame drawn.

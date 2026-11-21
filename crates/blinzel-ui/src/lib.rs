@@ -14,6 +14,7 @@ pub mod dirs;
 pub mod draws;
 pub mod files;
 pub mod gfx;
+pub mod info;
 pub mod loader;
 pub mod menu;
 pub mod palette;

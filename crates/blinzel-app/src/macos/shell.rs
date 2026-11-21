@@ -1930,6 +1930,7 @@ mod tests {
             auto_update: false,
             single_instance: false,
             color_management: false,
+            info: false,
             filmstrip: false,
             grid: false,
             screenshot_hotkey: false,

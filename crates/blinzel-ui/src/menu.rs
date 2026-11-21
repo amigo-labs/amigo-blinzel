@@ -37,6 +37,8 @@ pub enum Cmd {
     ToggleAutoUpdate,
     ToggleSingleInstance,
     ToggleColorManagement,
+    /// The info overlay (`docs/specs/info-overlay.md`).
+    ToggleInfo,
     ToggleFilmstrip,
     ToggleGrid,
     /// Tray: show the (hidden) window.
@@ -137,6 +139,7 @@ impl Cmd {
             Cmd::ScreenshotFolder => 42,
             Cmd::ToggleScreenshotOpen => 43,
             Cmd::ToggleScreenshotEdit => 44,
+            Cmd::ToggleInfo => 45,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -157,7 +160,7 @@ impl Cmd {
     }
 }
 
-pub const ALL: [Cmd; 44] = [
+pub const ALL: [Cmd; 45] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -188,6 +191,7 @@ pub const ALL: [Cmd; 44] = [
     Cmd::ShowWindow,
     Cmd::Quit,
     Cmd::ToggleColorManagement,
+    Cmd::ToggleInfo,
     Cmd::ToggleFilmstrip,
     Cmd::ToggleGrid,
     Cmd::Notices,
@@ -221,6 +225,7 @@ pub struct MenuState {
     pub auto_update: bool,
     pub single_instance: bool,
     pub color_management: bool,
+    pub info: bool,
     pub filmstrip: bool,
     pub grid: bool,
     pub screenshot_hotkey: bool,
@@ -315,6 +320,13 @@ pub(crate) fn items_for(s: &MenuState, p: Platform) -> Vec<MenuItem> {
             s.mode == ViewMode::FitImageToWindow,
         ),
         MenuItem::Separator,
+        MenuItem::item(
+            Cmd::ToggleInfo,
+            tr(Msg::ViewInfo),
+            Some("I".into()),
+            s.info,
+            true,
+        ),
         MenuItem::item(
             Cmd::ToggleFilmstrip,
             tr(Msg::ViewFilmstrip),
