@@ -136,7 +136,10 @@ pub fn copy_files(
     out
 }
 
-/// One file; `None` if cancelled (nothing left behind).
+/// One file; `None` if cancelled. It is written to a hidden temporary
+/// file in `target` first and only then given its name, so no partial
+/// file ever carries the name; a failure or a cancel removes the
+/// temporary file again.
 fn copy_one(
     src: &Path,
     target: &Path,
@@ -146,8 +149,14 @@ fn copy_one(
     let mut from = std::fs::File::open(src)?;
     let name = src
         .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
-    let (to, mut file) = create_free(target, &name.to_string_lossy())?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?
+        .to_string_lossy()
+        .into_owned();
+    let tmp = target.join(format!(".{name}.blinzel-part-{}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)?;
     let mut buf = vec![0u8; 1 << 20];
     let r: io::Result<bool> = (|| {
         loop {
@@ -162,43 +171,45 @@ fn copy_one(
             file.write_all(&buf[..n])?;
         }
     })();
-    match r {
-        Ok(true) => Ok(Some(to)),
-        Ok(false) => {
-            drop(file);
-            let _ = std::fs::remove_file(&to);
-            Ok(None)
-        }
-        Err(e) => {
-            drop(file);
-            let _ = std::fs::remove_file(&to);
-            Err(e)
-        }
-    }
+    drop(file);
+    let r = match r {
+        Ok(true) => give_free_name(&tmp, target, &name).map(Some),
+        Ok(false) => Ok(None),
+        Err(e) => Err(e),
+    };
+    let _ = std::fs::remove_file(&tmp);
+    r
 }
 
-/// Creates `name` in `folder`, or the first free "stem (n).ext"; the
-/// creation itself checks, so a file made meanwhile is never replaced.
-pub fn create_free(folder: &Path, name: &str) -> io::Result<(PathBuf, std::fs::File)> {
+/// The names a copy of `name` may take in order: `name`, then
+/// "stem (2).ext", "(3)" …
+pub fn free_names(name: &str) -> impl Iterator<Item = String> + '_ {
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s, Some(e)),
         _ => (name, None),
     };
-    for n in 1..10_000 {
-        let candidate = match (n, ext) {
-            (1, _) => name.to_string(),
-            (n, Some(e)) => format!("{stem} ({n}).{e}"),
-            (n, None) => format!("{stem} ({n})"),
-        };
-        let path = folder.join(&candidate);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(f) => return Ok((path, f)),
+    (1..10_000).map(move |n| match (n, ext) {
+        (1, _) => name.to_string(),
+        (n, Some(e)) => format!("{stem} ({n}).{e}"),
+        (n, None) => format!("{stem} ({n})"),
+    })
+}
+
+/// Gives the finished `tmp` the first free name for `name` in `folder`.
+/// A hard link fails where the name exists, so a file made meanwhile is
+/// never replaced; where the file system has no hard links (FAT, exFAT),
+/// a rename after checking the name stands in.
+fn give_free_name(tmp: &Path, folder: &Path, name: &str) -> io::Result<PathBuf> {
+    for candidate in free_names(name) {
+        let to = folder.join(candidate);
+        match std::fs::hard_link(tmp, &to) {
+            Ok(()) => return Ok(to),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
+            Err(_) if !to.exists() => {
+                std::fs::rename(tmp, &to)?;
+                return Ok(to);
+            }
+            Err(_) => continue,
         }
     }
     Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free name"))
@@ -362,21 +373,37 @@ mod tests {
         std::fs::write(d.join("a.jpg"), vec![7u8; 3 << 20]).unwrap();
         let out = d.join("out");
         std::fs::create_dir_all(&out).unwrap();
+        // Cancelled before it starts.
         let cancel = std::sync::atomic::AtomicBool::new(true);
         let r = copy_files(&[d.join("a.jpg")], &out, |_| {}, &cancel);
         assert!(r.cancelled && r.done.is_empty());
         assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
-        // Cancelled while copying: the partial file goes.
+        // Cancelled while copying: neither the name nor a temporary file
+        // stays.
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let c = &cancel;
-        let r = std::thread::scope(|s| {
-            s.spawn(|| c.store(true, std::sync::atomic::Ordering::Relaxed));
-            copy_one(&d.join("a.jpg"), &out, c)
-        })
-        .unwrap();
-        if r.is_none() {
-            assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
-        }
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(copy_one(&d.join("a.jpg"), &out, &cancel).unwrap().is_none());
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_no_temporary_file() {
+        let d = tmp("failed");
+        let out = d.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        // A folder where a file is expected: reading fails after opening.
+        std::fs::create_dir_all(d.join("dir.jpg")).unwrap();
+        let r = copy_files(&[d.join("dir.jpg")], &out, |_| {}, &Default::default());
+        assert_eq!(r.failed.len(), 1);
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn free_names_count_up_and_keep_the_extension() {
+        let n: Vec<String> = free_names("a.b.jpg").take(3).collect();
+        assert_eq!(n, ["a.b.jpg", "a.b (2).jpg", "a.b (3).jpg"]);
+        let n: Vec<String> = free_names(".hidden").take(2).collect();
+        assert_eq!(n, [".hidden", ".hidden (2)"]);
     }
 
     #[test]
