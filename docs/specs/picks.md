@@ -127,26 +127,26 @@ Hints, not requirements; the ACs decide.
 
 | AC    | Test | Status | Commit |
 | ----- | ---- | ------ | ------ |
-| AC-01 |      | open   |        |
-| AC-02 |      | open   |        |
-| AC-03 |      | open   |        |
-| AC-04 |      | open   |        |
-| AC-05 |      | open   |        |
-| AC-06 |      | open   |        |
-| AC-07 |      | open   |        |
-| AC-08 |      | open   |        |
-| AC-09 |      | open   |        |
-| AC-10 |      | open   |        |
-| AC-11 |      | open   |        |
-| AC-12 |      | open   |        |
-| AC-13 |      | open   |        |
+| AC-01 | `f_marks_the_shown_image_and_a_badge_shows_it`, `f_in_the_grid_marks_the_selected_tile` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-02 | `grid_marks_with_ctrl_shift_and_ctrl_a_and_a_click_or_escape_keeps_them` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`) | built |  |
+| AC-03 | `grid_marks_with_ctrl_shift_and_ctrl_a_and_a_click_or_escape_keeps_them` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`) | built |  |
+| AC-04 | `remove_all_marks_asks_first_and_only_remove_clears` (`crates/blinzel-ui/src/app_picks_tests.rs`); `resize_images_starts_with_the_marked_files_in_folder_order` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`) | built |  |
+| AC-05 | `f_marks_the_shown_image_and_a_badge_shows_it` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-06 | `the_grid_and_the_menu_name_the_count` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-07 | `the_info_overlay_shows_the_mark_and_the_count` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-08 | `marks_last_across_the_grid_folders_and_a_restart_and_never_touch_the_folder`, `a_change_keeps_what_another_window_marked` (`crates/blinzel-ui/src/app_picks_tests.rs`); `a_change_keeps_what_another_window_stored_meanwhile`, `each_folder_has_its_own_marks` (`crates/blinzel-core/src/picks.rs`) | built |  |
+| AC-09 | `marks_last_across_the_grid_folders_and_a_restart_and_never_touch_the_folder` (`crates/blinzel-ui/src/app_picks_tests.rs`); `marks_survive_a_round_trip_through_the_file` (`crates/blinzel-core/src/picks.rs`) | built |  |
+| AC-10 | `reading_and_storing_marks_never_hold_up_frames_or_keys` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-11 | `a_missing_file_keeps_its_mark_until_unmarked_and_the_recycle_bin_drops_it` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
+| AC-12 | `a_broken_marks_file_counts_its_valid_names_and_a_failed_write_says_so_once` (`crates/blinzel-ui/src/app_picks_tests.rs`); `a_broken_file_keeps_its_valid_names`, `a_file_of_another_folder_or_without_header_counts_as_none`, `names_that_are_no_plain_file_names_are_not_stored` (`crates/blinzel-core/src/picks.rs`) | built |  |
+| AC-13 | `reading_and_storing_marks_never_hold_up_frames_or_keys` (`crates/blinzel-ui/src/app_picks_tests.rs`) | built |  |
 | AC-14 |      | open   |        |
 | AC-15 |      | open   |        |
 | AC-16 |      | open   |        |
 | AC-17 |      | open   |        |
 | AC-18 |      | open   |        |
 | AC-19 |      | open   |        |
-| AC-20 |      | open   |        |
+| AC-20 | `resize_images_outside_the_grid_takes_the_marks`, `resize_images_starts_with_the_marked_files_in_folder_order` (`crates/blinzel-ui/src/app_thumbnail_tests.rs`) | built |  |
 | AC-21 |      | open   |        |
 | AC-22 |      | open   |        |
 | AC-23 |      | open   |        |
@@ -157,3 +157,9 @@ Hints, not requirements; the ACs decide.
 ## Decisions
 
 - 2026-11-21 (user, in the spec dialogue): F marks ("favourite"; Space already goes to the next image); exactly the marked file is handed over, no same-named partners; "Only marked" as a filter; a plain click and Esc in the grid no longer clear the marks, only "Remove all marks" with a confirmation does, because a lasting choice must not vanish by a stray click; Ctrl+B takes the marks also outside the grid; marks are kept per folder outside the image folder. Clarification pass the same day: two windows merge their changes, missing files keep their stored mark until unmarked, the folder copy refuses the image folder itself, Ctrl+Shift+C stops copying the image.
+- 2026-11-21 (spec-build): the marked names live in `Browse::marks` (they are drawn there); `marks.rs` keeps which folder they belong to and reads and stores them on one worker thread in order, so a read finishes before the changes made meanwhile are stored (AC-10). Results wake the UI thread through `Wake::Thumbs`, like the info overlay's, so the shells stay unchanged.
+- 2026-11-21 (spec-build): the marks are read once the folder is listed (`App::on_list`), not when an image opens: the first image never waits, and the listing is what tells which names exist.
+- 2026-11-21 (spec-build): "Remove all marks" asks with a small drawn question (`confirm.rs`, Enter: Remove, Esc: Cancel), in the look of the batch dialog. Because no shell has a native yes/no question, and a drawn one behaves the same on every platform.
+- 2026-11-21 (spec-build): menu labels and messages that name a count use the existing plural `images_count` ("12 images") in parentheses or after a colon, so no language needs new plural forms.
+- 2026-11-21 (spec-build): new public API: `blinzel_core::picks::{Change, file_of, storable, parse, to_text, load, apply}`, `blinzel_ui::marks::Marks`, `blinzel_ui::confirm::{Confirm, Answer}`, `Browse::marks` (replacing `GridState::marked`), `browse::mark_badge`, `Cmd::ClearMarks` (id 46), `MenuState::marked`.
+- 2026-11-21 (spec-build): the core tests of AC-08, AC-09, AC-12 ran red against stubs; the App-level tests of AC-01 … AC-13 were written together with the code, after the core, and were not run red first.

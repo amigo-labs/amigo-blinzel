@@ -41,6 +41,8 @@ pub enum Cmd {
     ToggleInfo,
     ToggleFilmstrip,
     ToggleGrid,
+    /// Removes every mark of the folder, after asking (`docs/specs/picks.md`).
+    ClearMarks,
     /// Tray: show the (hidden) window.
     ShowWindow,
     /// Tray: exit for good, also in resident mode.
@@ -140,6 +142,7 @@ impl Cmd {
             Cmd::ToggleScreenshotOpen => 43,
             Cmd::ToggleScreenshotEdit => 44,
             Cmd::ToggleInfo => 45,
+            Cmd::ClearMarks => 46,
             Cmd::Language(None) => LANG_BASE,
             Cmd::Language(Some(l)) => LANG_BASE + 1 + l as u32,
         }
@@ -160,7 +163,7 @@ impl Cmd {
     }
 }
 
-pub const ALL: [Cmd; 45] = [
+pub const ALL: [Cmd; 46] = [
     Cmd::Open,
     Cmd::View(ViewMode::FitWindowToImage),
     Cmd::View(ViewMode::FitImageToWindow),
@@ -194,6 +197,7 @@ pub const ALL: [Cmd; 45] = [
     Cmd::ToggleInfo,
     Cmd::ToggleFilmstrip,
     Cmd::ToggleGrid,
+    Cmd::ClearMarks,
     Cmd::Notices,
     Cmd::Batch,
     Cmd::OpenWith,
@@ -228,6 +232,9 @@ pub struct MenuState {
     pub info: bool,
     pub filmstrip: bool,
     pub grid: bool,
+    /// Marked images of the folder that exist (`docs/specs/picks.md`);
+    /// `None` while the marks are being read.
+    pub marked: Option<usize>,
     pub screenshot_hotkey: bool,
     pub screenshot_save: bool,
     pub screenshot_open: bool,
@@ -264,6 +271,17 @@ impl MenuItem {
             checked,
             enabled,
         }
+    }
+}
+
+/// `plain`, or `counted` with "12 images" while some are marked.
+fn with_count(plain: Msg, counted: Msg, n: Option<usize>) -> String {
+    match n {
+        Some(n) if n > 0 => {
+            let count = blinzel_i18n::trp(blinzel_i18n::PluralMsg::ImagesCount, n as u64, &[]);
+            blinzel_i18n::trf(counted, &[("count", &count)])
+        }
+        _ => tr(plain).to_string(),
     }
 }
 
@@ -340,6 +358,14 @@ pub(crate) fn items_for(s: &MenuState, p: Platform) -> Vec<MenuItem> {
             Some("G".into()),
             s.grid,
             true,
+        ),
+        MenuItem::Separator,
+        MenuItem::item(
+            Cmd::ClearMarks,
+            &with_count(Msg::MarksClear, Msg::MarksClearCount, s.marked),
+            None,
+            false,
+            s.marked.is_some_and(|n| n > 0),
         ),
     ];
     m.push(MenuItem::Sub(tr(Msg::MenuView).into(), view));

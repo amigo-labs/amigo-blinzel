@@ -289,6 +289,11 @@ pub struct App<B: Backend> {
     info: crate::info::Reader,
     /// Where the info overlay was drawn last (`None`: not drawn).
     pub(crate) info_rect: Option<Rect>,
+    /// Which folder the marks in `browse.marks` belong to, and storing them
+    /// (`docs/specs/picks.md`).
+    marks: crate::marks::Marks,
+    /// A question over the viewer ("Remove the marks of …?").
+    pub confirm: Option<crate::confirm::Confirm>,
 }
 
 impl<B: Backend> App<B> {
@@ -358,6 +363,8 @@ impl<B: Backend> App<B> {
             last_dialog: None,
             info: crate::info::Reader::default(),
             info_rect: None,
+            marks: crate::marks::Marks::new(settings_store::config_dir().map(|d| d.join("picks"))),
+            confirm: None,
         }
     }
 
@@ -575,6 +582,9 @@ impl<B: Backend> App<B> {
         self.list_rx = None;
         let entries = result.unwrap_or_default();
         self.list = FileList::new(dir.clone(), entries);
+        // The folder's marks, read in the background (`docs/specs/picks.md`).
+        self.marks
+            .open(dir.clone(), &mut self.browse.marks, &self.services);
         let mut rewritten = None;
         if let Some(cur) = &mut self.current {
             let was_listed = cur.index.is_some();
@@ -1204,6 +1214,7 @@ impl<B: Backend> App<B> {
                 self.settings.background,
             );
         }
+        self.draw_marks();
         self.draw_info();
         self.draw_notice();
         if !self.fullscreen {
@@ -1215,6 +1226,9 @@ impl<B: Backend> App<B> {
         let (client, scale) = (self.client_f(), self.scale());
         if let Some(d) = &mut self.dialog {
             d.draw(&mut self.canvas, client, scale);
+        }
+        if let Some(c) = &mut self.confirm {
+            c.draw(&mut self.canvas, client, scale);
         }
         if let Some(p) = &self.popup {
             p.draw(&mut self.canvas);
@@ -1461,6 +1475,10 @@ impl<B: Backend> App<B> {
             let o = d.mouse_down(p);
             return self.dialog_outcome(o);
         }
+        if let Some(c) = &self.confirm {
+            let a = c.mouse_down(p);
+            return self.confirm_answer(a);
+        }
         if !middle && !self.fullscreen && self.chrome().hit(p) == Some(Button::Menu) {
             self.pressed = None;
             return vec![self.menu_at_button()];
@@ -1507,21 +1525,24 @@ impl<B: Backend> App<B> {
         if let Some(state) = &mut self.browse.grid {
             if let Some(i) = grid_layout(count, client, scale).hit(p, state.scroll) {
                 let name = |i: usize| self.list.get(i).map(|e| e.name.clone());
+                let from = state.selected;
+                state.selected = i;
                 if ctrl {
                     // Toggle one.
-                    if let Some(n) = name(i)
-                        && !state.marked.remove(&n)
-                    {
-                        state.marked.insert(n);
+                    if let Some(n) = name(i) {
+                        self.marks.toggle(n, &mut self.browse.marks, &self.services);
                     }
                 } else if shift {
                     // Everything from the selected item to this one.
-                    let (a, b) = (state.selected.min(i), state.selected.max(i));
-                    state.marked.extend((a..=b).filter_map(name));
-                } else {
-                    state.marked.clear();
+                    let (a, b) = (from.min(i), from.max(i));
+                    let names = (a..=b).filter_map(name).collect();
+                    self.marks.change(
+                        blinzel_core::picks::Change::Mark(names),
+                        &mut self.browse.marks,
+                        &self.services,
+                    );
                 }
-                state.selected = i;
+                // A plain click only selects: marks last (picks.md AC-03).
                 self.invalidate();
             }
             return Some(vec![]);
@@ -1573,8 +1594,16 @@ impl<B: Backend> App<B> {
         if self.browse.on_thumbs(&mut self.canvas) {
             self.invalidate();
         }
-        // The info overlay's facts wake through the same message.
+        // The info overlay's facts and the marks wake through the same
+        // message.
         if self.info.poll() {
+            self.invalidate();
+        }
+        let m = self.marks.poll(&mut self.browse.marks, &self.services);
+        if let Some(reason) = m.error {
+            self.show_notice(trf(Msg::MarksNotSaved, &[("reason", &reason)]));
+        }
+        if m.changed {
             self.invalidate();
         }
     }
@@ -1765,6 +1794,10 @@ impl<B: Backend> App<B> {
             // The dialog is modal: every key stays with it.
             return Some(self.dialog_outcome(o));
         }
+        if let Some(c) = &self.confirm {
+            let a = c.key(key);
+            return Some(self.confirm_answer(a));
+        }
         if ctrl && key == Letter('B') {
             return Some(self.command(Cmd::Batch));
         }
@@ -1775,6 +1808,7 @@ impl<B: Backend> App<B> {
             Letter('G') if !ctrl => return Some(self.command(Cmd::ToggleGrid)),
             Letter('T') if !ctrl => return Some(self.command(Cmd::ToggleFilmstrip)),
             Letter('I') if !ctrl => return Some(self.command(Cmd::ToggleInfo)),
+            Letter('F') if !ctrl => return Some(self.toggle_current_mark()),
             Letter('E') if !ctrl => return Some(self.command(Cmd::EditWith)),
             _ => {}
         }
@@ -1826,15 +1860,21 @@ impl<B: Backend> App<B> {
         let (client, scale, count) = (self.client_f(), self.scale(), self.list.len());
         let state = self.browse.grid.as_mut()?;
         if ctrl && key == Letter('A') {
-            state
-                .marked
-                .extend((0..count).filter_map(|i| self.list.get(i).map(|e| e.name.clone())));
+            let names = self.list.entries().iter().map(|e| e.name.clone()).collect();
+            self.marks.change(
+                blinzel_core::picks::Change::Mark(names),
+                &mut self.browse.marks,
+                &self.services,
+            );
             self.invalidate();
             return Some(vec![]);
         }
-        if key == Escape && !state.marked.is_empty() {
-            state.marked.clear();
-            self.invalidate();
+        if key == Letter('F') && !ctrl {
+            if let Some(e) = self.list.get(state.selected) {
+                let n = e.name.clone();
+                self.marks.toggle(n, &mut self.browse.marks, &self.services);
+                self.invalidate();
+            }
             return Some(vec![]);
         }
         let g = grid_layout(count, client, scale);
@@ -1903,6 +1943,7 @@ impl<B: Backend> App<B> {
             info: self.settings.info,
             filmstrip: self.settings.filmstrip,
             grid: self.browse.grid.is_some(),
+            marked: self.marks.loaded().then(|| self.marked_count()),
             screenshot_hotkey: self.settings.screenshot_hotkey,
             screenshot_save: self.settings.screenshot_save,
             screenshot_open: self.settings.screenshot_open,
@@ -2098,6 +2139,20 @@ impl<B: Backend> App<B> {
                 self.invalidate();
                 vec![]
             }
+            Cmd::ClearMarks => {
+                let n = self.marked_count();
+                if n > 0 && self.marks.loaded() {
+                    let count =
+                        blinzel_i18n::trp(blinzel_i18n::PluralMsg::ImagesCount, n as u64, &[]);
+                    self.confirm = Some(crate::confirm::Confirm::new(
+                        trf(Msg::MarksClearQuestion, &[("count", &count)]),
+                        tr(Msg::MarksRemove).into(),
+                        tr(Msg::BatchCancel).into(),
+                    ));
+                    self.invalidate();
+                }
+                vec![]
+            }
             Cmd::ToggleInfo => {
                 self.settings.info = !self.settings.info;
                 settings_store::save(&self.settings);
@@ -2206,17 +2261,16 @@ impl<B: Backend> App<B> {
     /// marked in the grid (in folder order, those still there), else an
     /// empty list (files are dropped onto it).
     fn open_batch(&mut self) {
-        let marked: Vec<PathBuf> = match &self.browse.grid {
-            Some(g) if !g.marked.is_empty() => self
-                .list
-                .entries()
-                .iter()
-                .filter(|e| g.marked.contains(&e.name))
-                .map(|e| self.list.dir().join(&e.name))
-                .filter(|p| p.is_file())
-                .collect(),
-            _ => Vec::new(),
-        };
+        // The folder's marks, in the grid or not (`docs/specs/picks.md`
+        // AC-20).
+        let marked: Vec<PathBuf> = self
+            .list
+            .entries()
+            .iter()
+            .filter(|e| self.browse.marks.contains(&e.name))
+            .map(|e| self.list.dir().join(&e.name))
+            .filter(|p| p.is_file())
+            .collect();
         let mut d = match self.last_dialog.take() {
             Some(d) => d.reopen(),
             None => BatchDialog::new(),
@@ -2426,6 +2480,97 @@ impl<B: Backend> App<B> {
         None
     }
 
+    /// The folder's marks are being read or stored (tests wait for it).
+    #[cfg(test)]
+    pub(crate) fn marks_busy(&self) -> bool {
+        self.marks.busy()
+    }
+
+    /// Marked images of the folder that exist.
+    pub(crate) fn marked_count(&self) -> usize {
+        if self.browse.marks.is_empty() {
+            return 0;
+        }
+        self.list
+            .entries()
+            .iter()
+            .filter(|e| self.browse.marks.contains(&e.name))
+            .count()
+    }
+
+    /// The shown image's name, if it is marked.
+    fn current_marked(&self) -> bool {
+        self.current
+            .as_ref()
+            .and_then(|c| c.index)
+            .and_then(|i| self.list.get(i))
+            .is_some_and(|e| self.browse.marks.contains(&e.name))
+    }
+
+    /// F in the single view: the shown image's mark on or off.
+    fn toggle_current_mark(&mut self) -> Vec<Action> {
+        let Some(cur) = &self.current else {
+            return vec![];
+        };
+        let Some(e) = cur.index.and_then(|i| self.list.get(i)) else {
+            self.show_notice(tr(Msg::MarksOnlyFolder).into());
+            return vec![];
+        };
+        let name = e.name.clone();
+        self.marks
+            .toggle(name, &mut self.browse.marks, &self.services);
+        self.invalidate();
+        vec![]
+    }
+
+    /// The answer to the open question.
+    fn confirm_answer(&mut self, a: crate::confirm::Answer) -> Vec<Action> {
+        use crate::confirm::Answer;
+        match a {
+            Answer::Open => return vec![],
+            Answer::Yes => self.marks.change(
+                blinzel_core::picks::Change::Clear,
+                &mut self.browse.marks,
+                &self.services,
+            ),
+            Answer::No => {}
+        }
+        self.confirm = None;
+        self.invalidate();
+        vec![]
+    }
+
+    /// The mark of the shown image (top right, below the window buttons)
+    /// and the grid's count of marked images (`docs/specs/picks.md`).
+    fn draw_marks(&mut self) {
+        let s = self.scale();
+        let cw = self.client.0 as f64;
+        let top = if self.fullscreen {
+            0.0
+        } else {
+            self.chrome().caption_height()
+        };
+        if self.browse.grid.is_some() {
+            let n = self.marked_count();
+            if n > 0 {
+                let count = blinzel_i18n::trp(blinzel_i18n::PluralMsg::ImagesCount, n as u64, &[]);
+                let text = trf(Msg::MarksCount, &[("count", &count)]);
+                let x = (self.chrome().rect(Button::Menu).right() + 8.0 * s).round();
+                let y = (8.0 * s).round();
+                self.canvas.draw_text(
+                    &text,
+                    (13.0 * s) as f32,
+                    (cw * 0.5) as f32,
+                    (x as f32, y as f32),
+                    palette::FG,
+                );
+            }
+        } else if self.current_marked() {
+            let cell = Rect::new(0.0, top + 4.0 * s, cw - 8.0 * s, 0.0);
+            crate::browse::mark_badge(&mut self.canvas, &cell, s);
+        }
+    }
+
     /// The image the info overlay is about: the grid's selected tile or
     /// the image shown, with its place in the folder list.
     fn info_subject(&self) -> Option<(PathBuf, Entry, Option<usize>, Option<u64>)> {
@@ -2469,7 +2614,17 @@ impl<B: Backend> App<B> {
             file_size: Some(entry.size),
             facts: facts.as_ref(),
         };
-        let lines = crate::info::lines(&shown);
+        let mut lines = crate::info::lines(&shown);
+        // Marks (`docs/specs/picks.md` AC-07): under the position, and the
+        // folder's count last.
+        if self.browse.marks.contains(&entry.name) && index.is_some() {
+            lines.insert(2, tr(Msg::InfoMarked).to_string());
+        }
+        let m = self.marked_count();
+        if m > 0 {
+            let count = blinzel_i18n::trp(blinzel_i18n::PluralMsg::ImagesCount, m as u64, &[]);
+            lines.push(trf(Msg::InfoMarkedCount, &[("count", &count)]));
+        }
         let s = self.scale();
         let (cw, ch) = (self.client.0 as f64, self.client.1 as f64);
         let px = (13.0 * s) as f32;
@@ -2566,6 +2721,17 @@ impl<B: Backend> App<B> {
 
     /// After the file was moved to the recycle bin.
     pub fn removed(&mut self, path: &Path) -> Vec<Action> {
+        // Thrown away on purpose: its mark goes too (picks.md AC-11).
+        if path.parent() == Some(self.list.dir())
+            && let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned())
+            && self.browse.marks.contains(&name)
+        {
+            self.marks.change(
+                blinzel_core::picks::Change::Unmark(vec![name]),
+                &mut self.browse.marks,
+                &self.services,
+            );
+        }
         let other = self.current.as_ref().is_none_or(|c| c.path != path);
         if other {
             // A grid tile other than the current image.
@@ -2619,9 +2785,6 @@ impl<B: Backend> App<B> {
         let Some(g) = &mut self.browse.grid else {
             return;
         };
-        if let Some(e) = self.list.get(i) {
-            g.marked.remove(&e.name);
-        }
         if g.selected > i || g.selected >= left {
             g.selected = g.selected.saturating_sub(1).min(left.saturating_sub(1));
         }
@@ -2774,6 +2937,10 @@ mod screenshot_tests;
 #[cfg(test)]
 #[path = "app_info_tests.rs"]
 mod info_tests;
+
+#[cfg(test)]
+#[path = "app_picks_tests.rs"]
+mod picks_tests;
 
 /// The command a navigation key gives in the single-image view;
 /// right-to-left languages page leftwards.

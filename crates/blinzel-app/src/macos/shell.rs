@@ -1933,6 +1933,7 @@ mod tests {
             info: false,
             filmstrip: false,
             grid: false,
+            marked: None,
             screenshot_hotkey: false,
             screenshot_save: false,
             screenshot_open: false,

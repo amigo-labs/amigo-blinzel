@@ -12,6 +12,8 @@ fn centre(r: Rect) -> (f64, f64) {
 /// `names` in a folder, the first open, the grid open on it.
 fn grid_on(names: &[&str]) -> Harness {
     let mut h = Harness::with_images(names);
+    // The folder's marks are read.
+    h.pump();
     h.key(Letter('G'));
     assert_eq!(h.grid_selected(), Some(0));
     h
@@ -46,16 +48,8 @@ fn deleting_a_marked_tile_drops_its_mark() {
     h.key(Right);
     let a = h.key(Delete);
     h.shell(a);
-    let marked: Vec<&str> = h
-        .app
-        .browse
-        .grid
-        .as_ref()
-        .unwrap()
-        .marked
-        .iter()
-        .map(String::as_str)
-        .collect();
+    h.pump();
+    let marked: Vec<&str> = h.app.browse.marks.iter().map(String::as_str).collect();
     assert_eq!(marked, ["a.png", "c.png"]);
 }
 
@@ -124,22 +118,25 @@ fn resize_images_starts_with_the_marked_files_in_folder_order() {
     h.command(Cmd::Batch);
     assert_eq!(h.batch_files(), Some(want));
     h.key(Escape);
-    // Without marks the list starts empty.
-    h.key(Escape);
+    // Without marks the list starts empty (`docs/specs/picks.md` AC-04).
+    h.command(Cmd::ClearMarks);
+    h.key(Enter);
     assert!(h.grid_marked().is_empty());
     assert_eq!(h.grid_selected(), Some(2), "the grid stays open");
     h.ctrl(Letter('B'));
     assert_eq!(h.batch_files(), Some(vec![]));
 }
 
+/// `docs/specs/picks.md` AC-20: the marks last outside the grid.
 #[test]
-fn resize_images_outside_the_grid_starts_empty() {
+fn resize_images_outside_the_grid_takes_the_marks() {
     let mut h = grid_on(&["a.png", "b.png"]);
     h.ctrl(Letter('A'));
-    // Closing the grid drops its marks.
     h.key(Letter('G'));
+    assert_eq!(h.grid_selected(), None);
     h.ctrl(Letter('B'));
-    assert_eq!(h.batch_files(), Some(vec![]));
+    let want = vec![h.images.join("a.png"), h.images.join("b.png")];
+    assert_eq!(h.batch_files(), Some(want));
 }
 
 /// `docs/specs/batch-resize.md` AC-22: Ctrl+B or the menu opens the modal
@@ -332,8 +329,9 @@ fn lines(h: &Harness) -> usize {
 }
 
 #[test]
-fn grid_marks_with_ctrl_shift_and_ctrl_a_and_escape_clears_them() {
+fn grid_marks_with_ctrl_shift_and_ctrl_a_and_a_click_or_escape_keeps_them() {
     let mut h = folder_of(6);
+    h.pump();
     h.key(Letter('G'));
     let at = |h: &Harness, i: usize| centre(h.grid_cell(i).unwrap());
     let base = lines(&h);
@@ -353,16 +351,17 @@ fn grid_marks_with_ctrl_shift_and_ctrl_a_and_escape_clears_them() {
     assert_eq!(check_marks(&h), 4);
     let p = at(&h, 0);
     h.click(p);
-    assert!(h.grid_marked().is_empty(), "a plain click clears the marks");
-    assert_eq!(check_marks(&h), 0);
+    assert_eq!(h.grid_selected(), Some(0), "a plain click selects");
+    assert_eq!(h.grid_marked().len(), 4, "and keeps the marks");
+    assert_eq!(check_marks(&h), 4);
     h.ctrl(Letter('A'));
     assert_eq!(h.grid_marked().len(), 6);
     assert_eq!(check_marks(&h), 6);
-    assert_eq!(h.key(Escape), []);
-    assert!(h.grid_marked().is_empty());
-    assert_eq!(h.grid_selected(), Some(0), "still open");
+    // Esc closes the grid, marks or not; they last.
     h.key(Escape);
     assert_eq!(h.grid_selected(), None);
+    h.key(Letter('G'));
+    assert_eq!(h.grid_marked().len(), 6);
 }
 
 // ------------------------------------------------------------- filmstrip

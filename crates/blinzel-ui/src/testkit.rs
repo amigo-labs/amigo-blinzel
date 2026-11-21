@@ -702,6 +702,8 @@ pub(crate) struct Harness {
     pub color_answers: usize,
     /// The device's texture budget ([`FakeDevice::budget`]).
     budget: Option<usize>,
+    /// [`Harness::pump`] does not wait for the marks ([`Harness::pump_holding_marks`]).
+    ignore_marks: bool,
     // Dropped after the app (its threads may still read files).
     tmp: TempDir,
     _serial: MutexGuard<'static, ()>,
@@ -737,6 +739,7 @@ impl Harness {
             rendered_at: 0,
             color_answers: 0,
             budget,
+            ignore_marks: false,
             tmp,
             _serial: serial,
         }
@@ -961,7 +964,10 @@ impl Harness {
             // A result is sent, then woken, then its job leaves the
             // scheduler; the listing is woken after it is sent. So with no
             // job left and no wake waiting, nothing more can arrive.
-            if self.app.loader.pending() == 0 && !self.app.is_listing() {
+            if self.app.loader.pending() == 0
+                && !self.app.is_listing()
+                && (self.ignore_marks || !self.app.marks_busy())
+            {
                 match self.wakes.try_recv() {
                     Ok(w) => {
                         self.deliver(w);
@@ -976,6 +982,15 @@ impl Harness {
             }
         }
         self.actions[start..].iter().map(Action::clone).collect()
+    }
+
+    /// Like [`Harness::pump`], without waiting for the folder's marks to be
+    /// read or stored (a test holds them back with `marks::HOLD`).
+    pub fn pump_holding_marks(&mut self) -> Vec<Action> {
+        self.ignore_marks = true;
+        let a = self.pump();
+        self.ignore_marks = false;
+        a
     }
 
     /// Lets every queued and running loader job run to its end before the
@@ -1309,7 +1324,7 @@ impl Harness {
     /// The marked tiles' names while the grid is open.
     pub fn grid_marked(&self) -> Vec<String> {
         let g = self.app.browse.grid.as_ref();
-        g.map(|g| g.marked.iter().cloned().collect())
+        g.map(|_| self.app.browse.marks.iter().cloned().collect())
             .unwrap_or_default()
     }
 
