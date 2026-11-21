@@ -22,6 +22,7 @@ pub mod kernels;
 pub mod layout;
 pub mod lut;
 pub mod natsort;
+pub mod picks;
 pub mod pixel;
 pub mod preview;
 pub mod raw;
